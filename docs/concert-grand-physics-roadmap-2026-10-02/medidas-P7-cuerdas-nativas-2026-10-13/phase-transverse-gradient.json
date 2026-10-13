@@ -1,0 +1,474 @@
+{
+  "stage": "transverse sample gradient without redundant axial transform",
+  "source_sha256": {
+    "measure-concert-grand-native-strings.py": "cf5da1c3225751639e1fc7985a4892662edf18e4e777b4e175879e2e58b2a5a2",
+    "concert-grand-native-strings.rs": "52a26480a3943a6721c561f13b9a8b59ec1bd8946be2d28d3ba5ba5783366d79",
+    "concert_grand_native_strings.py": "4c0cae8d1155dab1a97c3ddbfa2afa6f6f08afb1e90167edbdfe7d14f78be450",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "concert-grand-phase-forces.rs": "bc0b26414bf85003642575a64062901779a7f25cb3884cea196e313a1d05be8c",
+    "concert-grand-phase-trajectory.rs": "2b8e81fa2418ab5fedbb1dbb626a4c05a98e10bfbff3d7523a4d0c3672b697d9",
+    "measure-concert-grand-phase-trajectory.py": "22b26a4b6b57e1baf530c77153ba742e1ef1e27d220cfaf6fad697529d587324",
+    "concert_grand_phase_forces.py": "02854406da8aa6516c311fac97445be44dcf2d23fcebc3eb8dff82b5c4d902c8",
+    "tests/test_concert_phase_trajectory.py": "f81af8d0030cde5780b3b32fc1d129a1a6a3b41d47daeb69df4211a6295b0d8a",
+    "measure-concert-grand-phase-wire-roots.py": "bd33932a33f428ba9fae756286c8c397cef93bce6f84c24505ffb47a94c977f2",
+    "audit-concert-grand-phase-wire-energy.py": "1af89c60a2addb47f1f112bdc2247c39b4f77104a5679d803240a099e18608ac",
+    "measure-concert-grand-axial-waveform.py": "a18c063e45fa1eed0735c64a12a3a4f63ea486cc15ac43cd7c4ee8a715029d60"
+  },
+  "control_flag": "--full-sample-gradient",
+  "reference_report_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-13\\phase-axial-waveform.json",
+  "reference_report_sha256": "66184fb26143de9eb96c6ccea8d3489ceeaa4d0ffa6fa60d8a5fca978655cf3d",
+  "reference_ref": "cb68341f",
+  "reference_sources_authenticated_from_git": true,
+  "reference_reintegrated": false,
+  "baseline_case": {
+    "label": "grouped-waveform",
+    "command": [
+      "local\\concert-grand-physics\\P7-axial-waveform-2026-10-13\\trajectory.exe",
+      "local\\concert-grand-physics\\P7-axial-waveform-2026-10-13\\coast-input.bin",
+      "verify",
+      "1",
+      "8"
+    ],
+    "elapsed_s": 29.94858419999946,
+    "executable_sha256": "297e1b81a16ad825e2390ab9fc3caa9844618229fe14feae140646a3f8929ae9",
+    "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-axial-waveform-2026-10-13\\coast-input.bin",
+    "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+    "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-axial-waveform-2026-10-13\\grouped-waveform.json",
+    "result_sha256": "4ea4b533d680815a8751fb4e65144ed6230705a2dfbf2e3562c1b0ee4e5c68f3",
+    "completed": true,
+    "failure": null,
+    "work_relative_max": 1.1024233188834219e-10,
+    "raw_local_work_relative_max": 1.1669637860576816e-06,
+    "numerical_lambda_abs_max": 8.582022290078065e-07,
+    "midpoint_residual_relative_max": 2.7581560118347462e-12,
+    "maximum_iterations": 4,
+    "allocations": 0,
+    "known_prepared_bytes": 16321032,
+    "per_wire_energy_constraint": true,
+    "initial_wire_energy_j": [
+      0.1311418515209339,
+      0.1725064981878933,
+      0.15842084830444134
+    ],
+    "final_wire_energy_j": [
+      0.1311418514965685,
+      0.17250649818081554,
+      0.1584208482849451
+    ],
+    "wire_energy_relative": [
+      1.8579422438415195e-10,
+      4.1028918464295536e-11,
+      1.2306611261112137e-10
+    ],
+    "maximum_wire_energy_relative": 1.8579422438415195e-10,
+    "per_wire_1e9_gate_passed": true,
+    "total_work_1e9_gate_passed": true,
+    "state_relative": 0.006387405822234104,
+    "baseline_state_relative": 3.777792139709837e-13,
+    "baseline_1e11_gate_passed": true,
+    "frozen_baseline_arrays_and_work_equal": false,
+    "scoped_coast_state_and_energy_passed": true
+  },
+  "baseline_executable_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-axial-waveform-2026-10-13\\trajectory.exe",
+  "baseline_executable_sha256": "297e1b81a16ad825e2390ab9fc3caa9844618229fe14feae140646a3f8929ae9",
+  "executable_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\trajectory.exe",
+  "executable_sha256": "064710cb77b09ae34fc83ba2701556beecddd30e037a12e3b46b4c9ea4782487",
+  "teacher_cases": [
+    {
+      "label": "teacher-8192000",
+      "command": [
+        "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-checked16-final-2026-10-13\\native-strings.exe",
+        "local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-8192000.bin",
+        "verify"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-8192000.bin",
+      "coefficient_sha256": "dd1314547e5a7b6d57b6a35e42ac20275277a6df56588ea062eec5b517e205e0",
+      "elapsed_s": 8.20455010002479,
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\teacher-8192000.json",
+      "result_sha256": "35d9449baefb17314f0999c59e632afe52d5321ec5ccefeb410b00eb49f8c1a7",
+      "completed": true,
+      "work_relative_max": 1.0463846742071121e-13,
+      "maximum_iterations": 4,
+      "work_1e9_gate_passed": true,
+      "rate_hz": 8192000,
+      "force_peak_n": 0,
+      "checked_reference": true,
+      "reference_local_work_max": 9.97128908831154e-15
+    },
+    {
+      "label": "teacher-16384000",
+      "command": [
+        "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-checked16-final-2026-10-13\\native-strings.exe",
+        "local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-16384000.bin",
+        "verify"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-16384000.bin",
+      "coefficient_sha256": "4407cc5595458584bc44573145799349419978bf9b65ece6bfe849de4bfef868",
+      "elapsed_s": 13.388942599995062,
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\teacher-16384000.json",
+      "result_sha256": "339df4414ea6f2258f5e4b4bf1fbb88a50b38f424fd2553138abb84ea4b086e2",
+      "completed": true,
+      "work_relative_max": 8.972958819348933e-13,
+      "maximum_iterations": 3,
+      "work_1e9_gate_passed": true,
+      "rate_hz": 16384000,
+      "force_peak_n": 0,
+      "checked_reference": true,
+      "reference_local_work_max": 3.7242164064748625e-15
+    }
+  ],
+  "reference_pair_passed": true,
+  "reference_state_refinement_relative": 0.0011846656607777905,
+  "transverse": 96,
+  "axial": 192,
+  "note": 60,
+  "seed": 83,
+  "rate_hz": 2048000,
+  "frames": 1,
+  "order": 8,
+  "duration_s": 0.006,
+  "contact_included": false,
+  "pressure_included": false,
+  "pedals_included": false,
+  "factory_updated": false,
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "numerical_energy_constraint": true,
+  "physical_dissipation": false,
+  "heat_j": 0.0,
+  "cases": [
+    {
+      "label": "optimized-trajectory",
+      "command": [
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+        "verify",
+        "1",
+        "8"
+      ],
+      "elapsed_s": 28.996189899975434,
+      "executable_sha256": "064710cb77b09ae34fc83ba2701556beecddd30e037a12e3b46b4c9ea4782487",
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\optimized-trajectory.json",
+      "result_sha256": "53e642a2dde12846f31f86891514dd7391cd794048e44bddd9f4bca251467695",
+      "completed": true,
+      "failure": null,
+      "work_relative_max": 1.1024233188834219e-10,
+      "raw_local_work_relative_max": 1.1669637860576816e-06,
+      "numerical_lambda_abs_max": 8.582022290078065e-07,
+      "midpoint_residual_relative_max": 2.7581560118347462e-12,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16321032,
+      "per_wire_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418514965685,
+        0.17250649818081554,
+        0.1584208482849451
+      ],
+      "wire_energy_relative": [
+        1.8579422438415195e-10,
+        4.1028918464295536e-11,
+        1.2306611261112137e-10
+      ],
+      "maximum_wire_energy_relative": 1.8579422438415195e-10,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.006387405822234104,
+      "baseline_state_relative": 0.0,
+      "baseline_1e11_gate_passed": true,
+      "frozen_baseline_arrays_and_work_equal": true,
+      "scoped_coast_state_and_energy_passed": true
+    },
+    {
+      "label": "unoptimized-control",
+      "command": [
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+        "verify",
+        "1",
+        "8",
+        "--full-sample-gradient"
+      ],
+      "elapsed_s": 31.925129699986428,
+      "executable_sha256": "064710cb77b09ae34fc83ba2701556beecddd30e037a12e3b46b4c9ea4782487",
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\unoptimized-control.json",
+      "result_sha256": "2e9be045df8f0932674ab3492144d5c12b6897812a3117981207f19a2857d0a3",
+      "completed": true,
+      "failure": null,
+      "work_relative_max": 1.1024233188834219e-10,
+      "raw_local_work_relative_max": 1.1669637860576816e-06,
+      "numerical_lambda_abs_max": 8.582022290078065e-07,
+      "midpoint_residual_relative_max": 2.7581560118347462e-12,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16321032,
+      "per_wire_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418514965685,
+        0.17250649818081554,
+        0.1584208482849451
+      ],
+      "wire_energy_relative": [
+        1.8579422438415195e-10,
+        4.1028918464295536e-11,
+        1.2306611261112137e-10
+      ],
+      "maximum_wire_energy_relative": 1.8579422438415195e-10,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.006387405822234104,
+      "baseline_state_relative": 0.0,
+      "baseline_1e11_gate_passed": true,
+      "frozen_baseline_arrays_and_work_equal": true,
+      "scoped_coast_state_and_energy_passed": true
+    }
+  ],
+  "benchmarks": [
+    {
+      "label": "frozen-baseline-benchmark",
+      "command": [
+        "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-axial-waveform-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+        "bench",
+        "1",
+        "8",
+        "8"
+      ],
+      "elapsed_s": 5.074420199962333,
+      "executable_sha256": "297e1b81a16ad825e2390ab9fc3caa9844618229fe14feae140646a3f8929ae9",
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\frozen-baseline-benchmark.json",
+      "result_sha256": "fec2aa2cd86c3c1f514210277118986e7b09167cbf8356c5cdff123e143b26c4",
+      "completed": true,
+      "failure": null,
+      "work_relative_max": 1.7530006761303503e-11,
+      "raw_local_work_relative_max": 1.1669637860576816e-06,
+      "numerical_lambda_abs_max": 8.582022290078065e-07,
+      "midpoint_residual_relative_max": 2.7581560118347462e-12,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16321032,
+      "per_wire_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418515167017,
+        0.1725064981868405,
+        0.15842084830162595
+      ],
+      "wire_energy_relative": [
+        3.227190920643007e-11,
+        6.102939597844708e-12,
+        1.77715675853529e-11
+      ],
+      "maximum_wire_energy_relative": 3.227190920643007e-11,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "benchmark": {
+        "buffers": 8,
+        "mean_ms": 623.2366625000001,
+        "p99_ms": 669.3341,
+        "max_ms": 669.3341,
+        "allocations": 0,
+        "deadline_ms": 0.125,
+        "physical_duration_s": 0.001,
+        "microframes_per_buffer": 256,
+        "isolated_component_budget_passed": false
+      }
+    },
+    {
+      "label": "unoptimized-benchmark",
+      "command": [
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+        "bench",
+        "1",
+        "8",
+        "8",
+        "--full-sample-gradient"
+      ],
+      "elapsed_s": 5.227251800009981,
+      "executable_sha256": "064710cb77b09ae34fc83ba2701556beecddd30e037a12e3b46b4c9ea4782487",
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\unoptimized-benchmark.json",
+      "result_sha256": "9f58b516f2d2e8a1323521582e846dbe9d2bf110f21005c08f37d43ca9e3e768",
+      "completed": true,
+      "failure": null,
+      "work_relative_max": 1.7530006761303503e-11,
+      "raw_local_work_relative_max": 1.1669637860576816e-06,
+      "numerical_lambda_abs_max": 8.582022290078065e-07,
+      "midpoint_residual_relative_max": 2.7581560118347462e-12,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16321032,
+      "per_wire_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418515167017,
+        0.1725064981868405,
+        0.15842084830162595
+      ],
+      "wire_energy_relative": [
+        3.227190920643007e-11,
+        6.102939597844708e-12,
+        1.77715675853529e-11
+      ],
+      "maximum_wire_energy_relative": 3.227190920643007e-11,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "benchmark": {
+        "buffers": 8,
+        "mean_ms": 642.4937,
+        "p99_ms": 662.9000000000001,
+        "max_ms": 662.9000000000001,
+        "allocations": 0,
+        "deadline_ms": 0.125,
+        "physical_duration_s": 0.001,
+        "microframes_per_buffer": 256,
+        "isolated_component_budget_passed": false
+      }
+    },
+    {
+      "label": "optimized-benchmark",
+      "command": [
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+        "bench",
+        "1",
+        "8",
+        "8"
+      ],
+      "elapsed_s": 4.766979500069283,
+      "executable_sha256": "064710cb77b09ae34fc83ba2701556beecddd30e037a12e3b46b4c9ea4782487",
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\optimized-benchmark.json",
+      "result_sha256": "95ee8d418c77ea2ef6243642edaf8f65d2d1b8bcc1e23ab2923ef221359215dc",
+      "completed": true,
+      "failure": null,
+      "work_relative_max": 1.7530006761303503e-11,
+      "raw_local_work_relative_max": 1.1669637860576816e-06,
+      "numerical_lambda_abs_max": 8.582022290078065e-07,
+      "midpoint_residual_relative_max": 2.7581560118347462e-12,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16321032,
+      "per_wire_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418515167017,
+        0.1725064981868405,
+        0.15842084830162595
+      ],
+      "wire_energy_relative": [
+        3.227190920643007e-11,
+        6.102939597844708e-12,
+        1.77715675853529e-11
+      ],
+      "maximum_wire_energy_relative": 3.227190920643007e-11,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "benchmark": {
+        "buffers": 8,
+        "mean_ms": 584.9648749999999,
+        "p99_ms": 617.5087,
+        "max_ms": 617.5087,
+        "allocations": 0,
+        "deadline_ms": 0.125,
+        "physical_duration_s": 0.001,
+        "microframes_per_buffer": 256,
+        "isolated_component_budget_passed": false
+      }
+    },
+    {
+      "label": "optimized-repeat-benchmark",
+      "command": [
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+        "bench",
+        "1",
+        "8",
+        "8"
+      ],
+      "elapsed_s": 4.990148899960332,
+      "executable_sha256": "064710cb77b09ae34fc83ba2701556beecddd30e037a12e3b46b4c9ea4782487",
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\optimized-repeat-benchmark.json",
+      "result_sha256": "a632d3a5e76da0aaa5ee168d8f4a8fea36316434dd943982085ce1f6ccf3e1bf",
+      "completed": true,
+      "failure": null,
+      "work_relative_max": 1.7530006761303503e-11,
+      "raw_local_work_relative_max": 1.1669637860576816e-06,
+      "numerical_lambda_abs_max": 8.582022290078065e-07,
+      "midpoint_residual_relative_max": 2.7581560118347462e-12,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16321032,
+      "per_wire_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418515167017,
+        0.1725064981868405,
+        0.15842084830162595
+      ],
+      "wire_energy_relative": [
+        3.227190920643007e-11,
+        6.102939597844708e-12,
+        1.77715675853529e-11
+      ],
+      "maximum_wire_energy_relative": 3.227190920643007e-11,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "benchmark": {
+        "buffers": 8,
+        "mean_ms": 613.29015,
+        "p99_ms": 674.3401,
+        "max_ms": 674.3401,
+        "allocations": 0,
+        "deadline_ms": 0.125,
+        "physical_duration_s": 0.001,
+        "microframes_per_buffer": 256,
+        "isolated_component_budget_passed": false
+      }
+    }
+  ],
+  "seconds": 81.30538609996438,
+  "sources_unchanged": true,
+  "reference_report_unchanged": true
+}

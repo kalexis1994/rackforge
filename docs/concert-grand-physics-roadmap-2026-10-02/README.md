@@ -188,6 +188,18 @@ la regresión SIMD/escalar. CPU sigue fallando el presupuesto **0,125 ms**:
 este progreso corresponde sólo al sostenido experimental de 6 ms.
 Ver [medición autenticada](medidas-P7-cuerdas-nativas-2026-10-13/phase-axial-waveform.json).
 
+El gradiente en las muestras temporales calcula ahora sólo sus salidas
+transversales: la fuerza axial ya se integra analíticamente. Esto evita una
+transformada redundante por muestra y reproduce **exactamente** la trayectoria,
+ledger y lambda de cb68341f en los 6 ms. Las 42 pruebas de fase, trayectoria,
+núcleo nativo y presión pasan. CPU muestra un ahorro pequeño y variable:
+medias **584,965/613,290 ms** frente a **623,237 ms** del control; máximos
+**617,509/674,340 ms**, por lo que no mejora consistentemente la cola.
+Presupuesto **0,125 ms** sigue rechazado. La
+[medición](medidas-P7-cuerdas-nativas-2026-10-13/phase-transverse-gradient.json)
+conserva los dos ensayos; sigue reducir el reloj con una representación
+transversal interna antes de integración en el instrumento.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

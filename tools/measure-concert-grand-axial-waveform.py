@@ -1,4 +1,4 @@
-"""Measure grouped axial contractions against authenticated scalar trajectories."""
+"""Measure phase-trajectory optimizations against authenticated controls."""
 import argparse
 import hashlib
 import importlib.util
@@ -17,6 +17,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference-report', type=Path, required=True)
     parser.add_argument('--reference-ref', required=True)
+    parser.add_argument('--baseline-label', default='independent-wire-roots')
+    parser.add_argument('--stage', default='cached amplitudes and grouped axial waveform contraction')
+    parser.add_argument('--control-flag', default='--scalar-axial-waveform')
     parser.add_argument('--local', type=Path, required=True)
     parser.add_argument('--report', type=Path, required=True)
     args = parser.parse_args()
@@ -32,7 +35,7 @@ def main():
         source = subprocess.check_output(['git', 'show', args.reference_ref+':tools/'+name], cwd=root)
         if hashlib.sha256(source).hexdigest() != sha:
             raise ValueError('frozen source mismatch: '+name)
-    baseline = next(c for c in old['cases'] if c['label'] == 'independent-wire-roots')
+    baseline = next(c for c in old['cases'] if c['label'] == args.baseline_label)
     for entry in [baseline, *old['teacher_cases']]:
         for prefix in ['result', 'coefficient']:
             if digest(Path(entry[prefix+'_path'])) != entry[prefix+'_sha256']:
@@ -49,7 +52,7 @@ def main():
     exe = args.local/'trajectory.exe'
     subprocess.run(['rustc', '--edition=2021', '-O', '-C', 'target-cpu=native', '--cfg',
                     'concert_phase_library', str(root/'tools/concert-grand-phase-trajectory.rs'), '-o', str(exe)], check=True)
-    record = dict(stage='cached amplitudes and grouped axial waveform contraction', source_sha256=source,
+    record = dict(stage=args.stage, source_sha256=source, control_flag=args.control_flag,
                   reference_report_path=str(args.reference_report.resolve()), reference_report_sha256=digest(args.reference_report),
                   reference_ref=args.reference_ref, reference_sources_authenticated_from_git=True,
                   reference_reintegrated=False, baseline_case=baseline,
@@ -123,14 +126,15 @@ def main():
             save()
 
         save()
-        run('grouped-waveform', exe, ['verify', 1, 8])
-        run('cached-scalar-control', exe, ['verify', 1, 8], ['--scalar-axial-waveform'])
+        run('optimized-trajectory', exe, ['verify', 1, 8])
+        run('unoptimized-control', exe, ['verify', 1, 8], [args.control_flag])
         # Sequential advancing runs on identical state/input; no tests or other
-        # benchmarks run concurrently. The scalar flag changes only the waveform.
+        # benchmarks run concurrently. The selected flag disables this stage's
+        # optimization while retaining the rest of the current implementation.
         run('frozen-baseline-benchmark', old['executable_path'], ['bench', 1, 8, 8])
-        run('cached-scalar-benchmark', exe, ['bench', 1, 8, 8], ['--scalar-axial-waveform'])
-        run('grouped-benchmark', exe, ['bench', 1, 8, 8])
-        run('grouped-repeat-benchmark', exe, ['bench', 1, 8, 8])
+        run('unoptimized-benchmark', exe, ['bench', 1, 8, 8], [args.control_flag])
+        run('optimized-benchmark', exe, ['bench', 1, 8, 8])
+        run('optimized-repeat-benchmark', exe, ['bench', 1, 8, 8])
     record['sources_unchanged'] = all(digest(root/'tools'/name) == sha for name, sha in source.items())
     record['reference_report_unchanged'] = digest(args.reference_report) == record['reference_report_sha256']
     save()

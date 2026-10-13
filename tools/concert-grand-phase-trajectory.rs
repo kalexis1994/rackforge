@@ -103,6 +103,7 @@ struct Trajectory {
     plans: Vec<PhaseQuadratic>,
     waves: Vec<AxialWaveform>,
     forced_axial: bool,
+    transverse_sample_gradient: bool,
     omega2: Vec<f64>,
     q: Vec<f64>,
     v: Vec<f64>,
@@ -184,6 +185,7 @@ impl Trajectory {
             plans,
             waves,
             forced_axial,
+            transverse_sample_gradient: true,
             omega2,
             q,
             v,
@@ -382,10 +384,17 @@ impl Trajectory {
                     if self.forced_axial {
                         // gu is already integrated analytically; add only the
                         // transverse gradient of forced u and the quartic term.
-                        wire.point_nonlinearity(
-                            &self.sample_q[range.clone()],
-                            &mut self.gradient[range],
-                        );
+                        if self.transverse_sample_gradient {
+                            wire.point_transverse_nonlinearity(
+                                &self.sample_q[range.clone()],
+                                &mut self.gradient[range],
+                            );
+                        } else {
+                            wire.point_nonlinearity(
+                                &self.sample_q[range.clone()],
+                                &mut self.gradient[range],
+                            );
+                        }
                     } else {
                         wire.point_cubic(&self.sample_q[range.clone()], &mut self.gradient[range]);
                     }
@@ -483,6 +492,22 @@ fn main() {
         .iter()
         .map(|t| Wire::new(nt, nl, nodes, p[0], p[1], *t, ea, ei))
         .collect::<Vec<_>>();
+    if args.get(2).is_some_and(|x| x == "transverse-gradient") {
+        let mut full = vec![0.; 3 * width];
+        let mut partial = full.clone();
+        let mut full_after = full.clone();
+        for (i, wire) in wires.iter_mut().enumerate() {
+            let range = i * width..(i + 1) * width;
+            wire.point_nonlinearity(&q[range.clone()], &mut full[range.clone()]);
+            wire.point_transverse_nonlinearity(&q[range.clone()], &mut partial[range.clone()]);
+            wire.point_nonlinearity(&q[range.clone()], &mut full_after[range]);
+        }
+        println!(
+            "{{\"gradient\":{:?},\"full_gradient\":{:?},\"full_gradient_after\":{:?}}}",
+            partial, full, full_after
+        );
+        return;
+    }
     if args.get(2).is_some_and(|x| x == "cubic") {
         let mut gradient = vec![0.; 3 * width];
         for (i, wire) in wires.iter_mut().enumerate() {
@@ -575,6 +600,7 @@ fn main() {
         !args.iter().any(|x| x == "--no-axial-waveform"),
     );
     model.constrained = !args.iter().any(|x| x == "--unconstrained");
+    model.transverse_sample_gradient = !args.iter().any(|x| x == "--full-sample-gradient");
     model.per_wire_constraint = !args.iter().any(|x| x == "--shared-energy-root");
     if let Some(limit) = args
         .iter()

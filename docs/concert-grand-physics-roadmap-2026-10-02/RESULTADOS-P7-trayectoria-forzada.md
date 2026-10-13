@@ -254,3 +254,58 @@ factorizar la dependencia temporal y representar la respuesta transversal
 interna para reducir también el reloj necesario, con estado y energía como
 controles. No extiende la validación de duración, contacto, cuerpo, presión,
 pedales o polifonía. No se modifica la fábrica ni se instala el prototipo.
+
+### Gradiente específico para las muestras temporales
+
+La [medición de las salidas transversales](medidas-P7-cuerdas-nativas-2026-10-13/phase-transverse-gradient.json)
+usa **cb68341f** como control congelado y autentica sus fuentes, ejecutable,
+entrada y resultado. Se mantienen C4 mixto, tres cuerdas 96/192, los mismos
+6 ms, reloj 2,048 MHz/N1/orden8 y las referencias finas autenticadas.
+
+Cada muestra temporal sólo consume `gv` y `gw`. `gu` se integra con el kernel
+cuadrático analítico; calcularlo otra vez mediante FFT en esa muestra no
+participa en el paso. La nueva función `point_transverse_nonlinearity`,
+disponible sólo al compilar la biblioteca experimental de fases, sintetiza
+los tres campos completos y calcula `(u+eta)*v` y `(u+eta)*w` con idéntica
+cuadratura y normalización. Omite el análisis axial y la suma de potencial
+que tampoco se consumía. Reduce esas transformadas de **seis a cinco** por
+muestra. No elimina modos ni modifica la evolución axial. Las evaluaciones
+de energía, dirección canónica y raíces siguen usando el gradiente completo.
+
+`--full-sample-gradient` conserva la ruta anterior. Tanto ésta como la ruta
+específica reproducen **exactamente q/v, ledger total y lambda de cb68341f**
+en los 6 ms. El error de estado frente al maestro sigue en **0,638741 %**,
+ledger total máximo **1,102e−10** y error final por cuerda máximo
+**1,858e−10**, ambos dentro de 1e−9. Memoria contabilizada permanece en
+**16.321.032 bytes** y máximo de cuatro iteraciones.
+
+Benchmarks secuenciales, ocho buffers de 256 microframes y 1 ms físico por
+ejecución, sin pruebas simultáneas:
+
+| Ruta | Media por buffer | P99/máximo | Asignaciones |
+|---|---:|---:|---:|
+| Ejecutable congelado cb68341f | 623,237 ms | 669,334 ms | 0 |
+| Ejecutable actual, gradiente completo | 642,494 ms | 662,900 ms | 0 |
+| Gradiente transversal específico | **584,965 ms** | **617,509 ms** | **0** |
+| Repetición específica | **613,290 ms** | **674,340 ms** | **0** |
+
+Frente al control congelado, la media baja **6,14 %** en el primer ensayo y
+**1,60 %** en la repetición. La variación impide asignar un ahorro estable;
+el máximo de la repetición supera al del control. Se conserva la eliminación
+de trabajo redundante, **sin afirmar mejora de la cola ni reserva de CPU**.
+Las cuatro ejecuciones producen la misma energía final por cuerda y ledger,
+con máximo individual **3,227e−11**. CPU sigue rechazado frente a **0,125 ms**.
+
+Pasan **42 pruebas**: diez de trayectoria, seis de fases, 22 del núcleo de
+cuerdas y cuatro de presión. Las dos nuevas regresiones comprueban el
+gradiente transversal contra integración espacial Gauss independiente en
+cuatro/96 modos, su igualdad exacta con las salidas completas y que no
+contamina la siguiente evaluación completa; también comparan el paso vivo
+con la ruta anterior a ambos relojes. Los algoritmos del núcleo normal no
+cambian. El productor de mediciones permite elegir etiqueta de control y
+flag de ablación, para mantener atribución en posteriores optimizaciones.
+
+El beneficio pequeño refuerza la necesidad de un cambio temporal más amplio:
+representar la respuesta transversal dentro del bloque y reducir el reloj
+necesario. La validación sigue limitada a este sostenido de 6 ms, sin contacto,
+cuerpo, presión, pedales o polifonía. No se integra ni instala en fábrica.

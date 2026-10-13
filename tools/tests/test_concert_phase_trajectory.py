@@ -122,6 +122,37 @@ class PhaseTrajectoryTests(unittest.TestCase):
             b=self.run_native(f,'waveform',frames,order,'--scalar-axial-waveform')
             self.assertLess(relative(np.asarray(a['driven_axial_q']),np.asarray(b['driven_axial_q'])),1e-12)
 
+    def test_transverse_gradient_matches_full_and_independent_spatial_integral(self):
+        for nt in [4,96]:
+            f=self.coast(nt);data=self.run_native(f,'transverse-gradient')
+            width=4*nt;nl=2*nt
+            length,mu,young,density=f['parameters'][:4];ea=young*mu/density
+            root=np.sqrt(mu*length/2);points,weights=roots_legendre(16);cells=2*nt
+            x=((np.arange(cells)[:,None]+(points[None]+1)/2)*length/cells).ravel()
+            wt=np.tile(weights*length/(2*cells),cells)
+            du=np.cos(x[:,None]*np.pi*np.arange(1,nl+1)/length)*(np.pi*np.arange(1,nl+1)/length/root)
+            dt=np.cos(x[:,None]*np.pi*np.arange(1,nt+1)/length)*(np.pi*np.arange(1,nt+1)/length/root)
+            expected=[];indices=[];axial=[]
+            for i in range(3):
+                q=f['q'][i*width:(i+1)*width];u=du @ q[:nl];v=dt @ q[nl:nl+nt];w=dt @ q[nl+nt:]
+                eta=.5*(v*v+w*w)
+                expected.extend(np.r_[np.zeros(nl),ea*dt.T @ (wt*(u+eta)*v),ea*dt.T @ (wt*(u+eta)*w)])
+                indices.extend(range(i*width+nl,(i+1)*width));axial.extend(range(i*width,i*width+nl))
+            np.testing.assert_allclose(data['gradient'],expected,rtol=2e-10,atol=1e-15)
+            np.testing.assert_array_equal(np.asarray(data['gradient'])[indices],np.asarray(data['full_gradient'])[indices])
+            np.testing.assert_array_equal(np.asarray(data['gradient'])[axial],np.zeros(len(axial)))
+            np.testing.assert_array_equal(data['full_gradient_after'],data['full_gradient'])
+
+    def test_transverse_sample_gradient_preserves_complete_trajectory(self):
+        for nt,rate,frames,order in [(4,128000,16,64),(96,128000,16,96),(96,2048000,1,8)]:
+            f=fixture(transverse=nt,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.
+            fast=self.run_native(f,'verify',frames,order)
+            full=self.run_native(f,'verify',frames,order,'--full-sample-gradient')
+            self.assertTrue(fast['completed'] and full['completed'])
+            for key in ['q','v','work_relative_max','numerical_lambda_abs_max','maximum_iterations']:
+                self.assertEqual(fast[key],full[key],key)
+            self.assertEqual(fast['allocations'],0)
+
     def test_coupled_trajectory_refines_against_continuous_ode(self):
         f=self.coast(4,.0005);ns=len(f['q'])-1;core=f['system'].string
         def derivative(_t,y):

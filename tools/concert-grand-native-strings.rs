@@ -467,6 +467,37 @@ impl Wire {
         self.fields(q, 0., 0);
         self.point_from_fields(out, false)
     }
+    /// Transverse part of the full nonlinear gradient. The phase solver
+    /// integrates gu analytically and does not consume energy at time samples.
+    /// Retain all fields, both transverse axes and the original quadrature.
+    #[cfg(concert_phase_library)]
+    pub(crate) fn point_transverse_nonlinearity(&mut self, q: &[f64], out: &mut [f64]) {
+        assert!(q.len() == self.size() && out.len() == self.size());
+        self.fields(q, 0., 0);
+        let n = self.nodes;
+        for j in 0..n {
+            let u = self.fields[j];
+            let v = self.fields[n + j];
+            let w = self.fields[2 * n + j];
+            let eta = 0.5 * (v * v + w * w);
+            self.products[n + j] = (u + eta) * v;
+            self.products[2 * n + j] = (u + eta) * w;
+        }
+        out[..self.nl].fill(0.);
+        let factor = self.ea * self.length / (2 * n) as f64;
+        self.plan.analyze(
+            &self.products[n..2 * n],
+            &self.kv,
+            factor,
+            &mut out[self.nl..self.nl + self.nt],
+        );
+        self.plan.analyze(
+            &self.products[2 * n..],
+            &self.kv,
+            factor,
+            &mut out[self.nl + self.nt..],
+        );
+    }
     /// Quartic-potential gradient only; experimental phase-trajectory caller.
     /// Keep the same spatial quadrature and normalization as point_from_fields.
     #[cfg(concert_phase_library)]

@@ -1,0 +1,151 @@
+diff --git a/tools/concert-grand-native-strings.rs b/tools/concert-grand-native-strings.rs
+index af8fe78d..56e0f311 100644
+--- a/tools/concert-grand-native-strings.rs
++++ b/tools/concert-grand-native-strings.rs
+@@ -294,6 +294,29 @@ impl CosinePlan {
+     }
+ }
+ 
++// Coefficient-major prepared carriers keep each modal coefficient contiguous.
++// Preparation preserves the original recurrence and floating-point order.
++struct RampPlan {
++    columns: [Vec<f64>; 10],
++    size: usize,
++}
++impl RampPlan {
++    fn new(size: usize) -> Self {
++        Self {
++            columns: std::array::from_fn(|_| vec![0.; 65 * size]),
++            size,
++        }
++    }
++    fn coefficients(&self, frames: usize, j: usize) -> [f64; 10] {
++        std::array::from_fn(|k| self.columns[k][frames * self.size + j])
++    }
++    fn span(&self, frames: usize, start: usize, end: usize) -> [&[f64]; 10] {
++        std::array::from_fn(|k| {
++            &self.columns[k][frames * self.size + start..frames * self.size + end]
++        })
++    }
++}
++
+ // Data for the axial endpoint elimination. The dynamic modal carriers
+ // remain live: only their nonlinear endpoint forces are solved directly.
+ struct AxialEndpoint<'a> {
+@@ -309,7 +332,7 @@ struct AxialEndpoint<'a> {
+     scalar_correction: Option<f64>,
+     weighted_displacement: &'a mut [f64],
+     coordinate_work: &'a mut [f64],
+-    transfer: &'a [[f64; 10]],
++    transfer: [&'a [f64]; 10],
+     c: &'a [f64],
+     s: &'a [f64],
+     gain: &'a [f64],
+@@ -507,7 +530,7 @@ impl Wire {
+             let slope = (force - endpoint.start_force[j]) / endpoint.frames as f64;
+             let base_first = endpoint.start_force[j] + 0.5 * slope;
+             if let Some(lambda) = endpoint.scalar_correction {
+-                let t = endpoint.transfer[j];
++                let t: [f64; 10] = std::array::from_fn(|k| endpoint.transfer[k][j]);
+                 let free = t[0] * endpoint.q0[j]
+                     + t[1] * endpoint.v0[j]
+                     + t[2] * base_first
+@@ -537,7 +560,7 @@ impl Wire {
+                 }
+                 (q, v, work, weighted)
+             } else {
+-                let t = endpoint.transfer[j];
++                let t: [f64; 10] = std::array::from_fn(|k| endpoint.transfer[k][j]);
+                 let q = t[0] * q0 + t[1] * v0 + t[2] * first + t[3] * slope;
+                 let v = -self.omega2[j] * t[1] * q0 + t[0] * v0 + t[4] * first + t[5] * slope;
+                 let sum = t[6] * q0 + t[7] * v0 + t[8] * first + t[9] * slope;
+@@ -893,7 +916,7 @@ pub struct Choir {
+     anderson_x: Vec<f64>,
+     anderson_r: Vec<f64>,
+     free_indices: Vec<usize>,
+-    ramp_transfer: Vec<[f64; 10]>,
++    ramp_transfer: RampPlan,
+     flight_bounds: Vec<[f64; 4]>,
+     ramp_micro_reference: bool,
+     last_certified_flight: bool,
+@@ -997,7 +1020,7 @@ impl Choir {
+         // modal resonance or sin(theta): near-aliasing modes remain defined.
+         // Entries: C,S,qa,qb,va,vb, sumC,sumS,sumQa,sumQb. Sums exclude
+         // the endpoint, as required by discrete summation by parts.
+-        let mut ramp_transfer = vec![[0.; 10]; 65 * size];
++        let mut ramp_transfer = RampPlan::new(size);
+         let nt = wires[0].nt;
+         let mut flight_bounds = vec![[0.; 4]; 65 * 3 * nt];
+         for j in 0..size - 1 {
+@@ -1014,7 +1037,13 @@ impl Choir {
+                 let nc = c[j] * cj - omega2[j] * s[j] * sj;
+                 sj = s[j] * cj + c[j] * sj;
+                 cj = nc;
+-                ramp_transfer[(frame + 1) * size + j] = [cj, sj, qa, qb, va, vb, sc, ss, sa, sb];
++                for (column, value) in ramp_transfer
++                    .columns
++                    .iter_mut()
++                    .zip([cj, sj, qa, qb, va, vb, sc, ss, sa, sb])
++                {
++                    column[(frame + 1) * size + j] = value;
++                }
+                 let mode = j % width;
+                 if mode >= wires[0].nl && mode < wires[0].nl + nt {
+                     for (maximum, value) in bound.iter_mut().zip([cj, sj, qa, qb]) {
+@@ -1551,7 +1580,7 @@ impl Choir {
+         }
+         let mut displacement_scale2 = 0.;
+         for j in 0..head {
+-            let t = self.ramp_transfer[frames * self.size + j];
++            let t = self.ramp_transfer.coefficients(frames, j);
+             let q = t[0] * self.block_start_q[j]
+                 + t[1] * self.block_start_v[j]
+                 + t[2] * self.ramp_start_force[j];
+@@ -1570,7 +1599,8 @@ impl Choir {
+                 return None;
+             }
+             for j in 0..head {
+-                let denominator = 1. - self.ramp_transfer[frames * self.size + j][2] * lambda;
++                let denominator =
++                    1. - self.ramp_transfer.columns[2][frames * self.size + j] * lambda;
+                 if !denominator.is_finite() || denominator <= 1e-6 {
+                     return None;
+                 }
+@@ -1585,7 +1615,7 @@ impl Choir {
+             for (row, &j) in self.transverse_indices.iter().enumerate() {
+                 let force = self.solver_x[row];
+                 self.ramp_end_force[j] = force;
+-                let t = self.ramp_transfer[frames * self.size + j];
++                let t = self.ramp_transfer.coefficients(frames, j);
+                 let q0 = self.block_start_q[j];
+                 let v0 = self.block_start_v[j];
+                 let slope = (force - self.ramp_start_force[j]) / frames as f64;
+@@ -1629,8 +1659,7 @@ impl Choir {
+                     scalar_correction: Some(lambda),
+                     weighted_displacement: &mut self.ramp_weighted_displacement[start..end],
+                     coordinate_work: &mut self.ramp_coordinate_work[start..end],
+-                    transfer: &self.ramp_transfer
+-                        [frames * self.size + start..frames * self.size + end],
++                    transfer: self.ramp_transfer.span(frames, start, end),
+                     c: &self.c[start..end],
+                     s: &self.s[start..end],
+                     gain: &self.gain[start..end],
+@@ -1857,7 +1886,7 @@ impl Choir {
+                 }
+                 let slope = (self.ramp_end_force[j] - self.ramp_start_force[j]) / frames as f64;
+                 let first = self.ramp_start_force[j] + 0.5 * slope + self.ramp_correction[j];
+-                let t = self.ramp_transfer[frames * self.size + j];
++                let t = self.ramp_transfer.coefficients(frames, j);
+                 let q0 = self.block_start_q[j];
+                 let v0 = self.block_start_v[j];
+                 let q1 = t[0] * q0 + t[1] * v0 + t[2] * first + t[3] * slope;
+@@ -1892,8 +1921,7 @@ impl Choir {
+                         scalar_correction: None,
+                         weighted_displacement: &mut self.ramp_weighted_displacement[start..end],
+                         coordinate_work: &mut self.ramp_coordinate_work[start..end],
+-                        transfer: &self.ramp_transfer
+-                            [frames * self.size + start..frames * self.size + end],
++                        transfer: self.ramp_transfer.span(frames, start, end),
+                         c: &self.c[start..end],
+                         s: &self.s[start..end],
+                         gain: &self.gain[start..end],

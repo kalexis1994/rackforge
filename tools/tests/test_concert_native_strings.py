@@ -248,6 +248,8 @@ class NativeStringsTests(unittest.TestCase):
         native=self.run_native(f,'verify-ramp',16)
         vector=self.run_native(f,'verify-ramp',16,'--vector-flight')
         self.assertGreater(native['scalar_flight_blocks'],0)
+        self.assertEqual(native['scalar_unknowns_min'],6*96+1)
+        self.assertEqual(native['scalar_unknowns_max'],6*96+1)
         self.assertEqual(vector['scalar_flight_blocks'],0)
         omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
         target=np.r_[omega*np.asarray(vector['q'])[:-1],vector['v']]
@@ -276,5 +278,51 @@ class NativeStringsTests(unittest.TestCase):
             self.assertLess(cold['work_relative_max'],1e-9)
 
 
+
+    def test_fused_fft_preserves_kernel_and_mixed_live_state(self):
+        for nt in [4,96]:
+            f=fixture(transverse=nt,rate=128000,seed=83,duration=.002)
+            for flags in [[],['--portable']]:
+                for mode,extra,fields in [('kernel',[],['gradient','boundary_gradient','potential0','potential1']),
+                                          ('verify-ramp',[16],['q','v','force_trace','heat_j'])]:
+                    fused=self.run_native(f,mode,*extra,*flags)
+                    split=self.run_native(f,mode,*extra,*flags,'--split-fft-passes')
+                    for field in fields:np.testing.assert_array_equal(fused[field],split[field])
+
+    def test_zero_axis_invariant_matches_all_unknowns_with_live_restrike(self):
+        for nt in [4,96]:
+            f=fixture(transverse=nt,rate=128000,second_speed=.1,second_time=1417/128000,duration=.016)
+            reduced=self.run_native(f,'verify-ramp',16)
+            full=self.run_native(f,'verify-ramp',16,'--full-transverse-solve')
+            self.assertGreater(reduced['scalar_flight_blocks'],0)
+            self.assertEqual(reduced['scalar_unknowns_min'],3*nt+1)
+            self.assertEqual(reduced['scalar_unknowns_max'],3*nt+1)
+            self.assertEqual(full['scalar_unknowns_min'],6*nt+1)
+            omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+            target=np.r_[omega*np.asarray(full['q'])[:-1],full['v']]
+            actual=np.r_[omega*np.asarray(reduced['q'])[:-1],reduced['v']]
+            self.assertLess(np.linalg.norm(actual-target)/np.linalg.norm(target),1e-8)
+            np.testing.assert_allclose(reduced['force_trace'],full['force_trace'],rtol=1e-8,atol=2e-8)
+            for wire in range(3):
+                horizontal=slice(wire*4*nt+3*nt,(wire+1)*4*nt)
+                np.testing.assert_array_equal(np.asarray(reduced['q'])[horizontal],0.)
+                np.testing.assert_array_equal(np.asarray(reduced['v'])[horizontal],0.)
+            self.assertLess(reduced['work_relative_max'],1e-9)
+            self.assertLess(full['work_relative_max'],1e-9)
+
+    def test_arbitrarily_small_horizontal_motion_keeps_its_unknowns(self):
+        nt=4;f=fixture(transverse=nt,rate=128000,duration=.002)
+        f['launch_speeds'][:]=0.
+        f['v'][-1]=-np.sqrt(f['parameters'][5])
+        index=3*nt;f['v'][index]=1e-50
+        reduced=self.run_native(f,'verify-ramp',16)
+        full=self.run_native(f,'verify-ramp',16,'--full-transverse-solve')
+        # Only the two exactly zero wires can omit horizontal unknowns.
+        self.assertGreater(reduced['scalar_flight_blocks'],0)
+        self.assertEqual(reduced['scalar_unknowns_min'],4*nt+1)
+        self.assertEqual(reduced['scalar_unknowns_max'],4*nt+1)
+        self.assertNotEqual(reduced['v'][index],0.)
+        np.testing.assert_allclose(reduced['q'][index],full['q'][index],rtol=1e-10,atol=0.)
+        np.testing.assert_allclose(reduced['v'][index],full['v'][index],rtol=1e-10,atol=0.)
 
 if __name__=='__main__':unittest.main()

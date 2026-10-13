@@ -131,6 +131,7 @@ struct CosinePlan {
     simd_fft: bool,
     real_roots: Vec<Complex>,
     zero_transforms: usize,
+    fused_passes: bool,
 }
 impl CosinePlan {
     fn new(nodes: usize) -> Self {
@@ -152,6 +153,7 @@ impl CosinePlan {
                 })
                 .collect(),
             zero_transforms: 0,
+            fused_passes: true,
             fft: vec![Complex::default(); n],
             roots: (1..=bits)
                 .flat_map(|stage| {
@@ -182,13 +184,15 @@ impl CosinePlan {
     }
     fn transform(&mut self, inverse: bool) {
         let n = self.fft.len();
-        for k in 0..n {
-            if self.reverse[k] > k {
-                self.fft.swap(k, self.reverse[k]);
+        if !self.fused_passes {
+            for k in 0..n {
+                if self.reverse[k] > k {
+                    self.fft.swap(k, self.reverse[k]);
+                }
             }
         }
         (self.kernel)(&mut self.fft, &self.roots, inverse);
-        if inverse {
+        if inverse && !self.fused_passes {
             for x in &mut self.fft {
                 x.r /= n as f64;
                 x.i /= n as f64;
@@ -230,7 +234,13 @@ impl CosinePlan {
             let w = self.real_roots[k];
             let dr = x.r - y.r;
             let di = x.i - y.i;
-            self.fft[k] = Complex {
+            // Pack directly into the radix-2 kernel's required permutation.
+            let target = if self.fused_passes {
+                self.reverse[k]
+            } else {
+                k
+            };
+            self.fft[target] = Complex {
                 r: 0.5 * (x.r + y.r + w.i * dr - w.r * di),
                 i: 0.5 * (x.i + y.i + w.r * dr + w.i * di),
             };
@@ -249,8 +259,11 @@ impl CosinePlan {
             } else {
                 2 * (self.nodes - 1 - b) + 1
             };
-            out[ia] = self.fft[j].r;
-            out[ib] = self.fft[j].i;
+            // The inverse FFT normalization is a power of two. Apply the
+            // original division while unpacking, avoiding a separate pass.
+            let divisor = if self.fused_passes { m as f64 } else { 1. };
+            out[ia] = self.fft[j].r / divisor;
+            out[ib] = self.fft[j].i / divisor;
         }
     }
     fn analyze(&mut self, values: &[f64], scales: &[f64], factor: f64, out: &mut [f64]) {
@@ -275,7 +288,12 @@ impl CosinePlan {
             } else {
                 2 * (self.nodes - 1 - b) + 1
             };
-            self.fft[j] = Complex {
+            let target = if self.fused_passes {
+                self.reverse[j]
+            } else {
+                j
+            };
+            self.fft[target] = Complex {
                 r: values[ia],
                 i: values[ib],
             };
@@ -910,7 +928,10 @@ pub struct Choir {
     canonical_correction: bool,
     solver_x: Vec<f64>,
     solver_next: Vec<f64>,
-    transverse_indices: Vec<usize>,
+    active_transverse_indices: Vec<usize>,
+    use_zero_axis_invariant: bool,
+    scalar_unknowns_min: usize,
+    scalar_unknowns_max: usize,
     use_scalar_flight: bool,
     scalar_flight_blocks: usize,
     scalar_flight_fallbacks: usize,
@@ -1029,9 +1050,6 @@ impl Choir {
                 sb += qb;
             }
         }
-        let transverse_indices = (0..3)
-            .flat_map(|i| (0..2 * nt).map(move |j| i * width + (width - 2 * nt) + j))
-            .collect();
         Self {
             wires,
             width,
@@ -1087,7 +1105,10 @@ impl Choir {
             canonical_correction: true,
             solver_x: vec![0.; 2 * size],
             solver_next: vec![0.; 2 * size],
-            transverse_indices,
+            active_transverse_indices: vec![0; 6 * nt],
+            use_zero_axis_invariant: true,
+            scalar_unknowns_min: usize::MAX,
+            scalar_unknowns_max: 0,
             use_scalar_flight: true,
             scalar_flight_blocks: 0,
             scalar_flight_fallbacks: 0,
@@ -1558,8 +1579,33 @@ impl Choir {
             displacement_scale2 += (q - self.block_start_q[j]).powi(2);
         }
         let scale = displacement_scale2.sqrt().max(1e-12);
-        let n = self.transverse_indices.len() + 1;
-        for (row, &j) in self.transverse_indices.iter().enumerate() {
+        // The fixed-bridge potential is even in the horizontal field and
+        // felt acts only vertically. An exactly zero horizontal q/v/force
+        // therefore stays zero, including c=lambda*dq. This is an invariant
+        // subspace, not a threshold or modal truncation. Recheck every block.
+        let mut active = 0;
+        for i in 0..3 {
+            let first = i * self.width + self.wires[i].nl;
+            let horizontal = first + self.wires[i].nt;
+            let last = (i + 1) * self.width;
+            let zero_horizontal = self.use_zero_axis_invariant
+                && self.block_start_q[horizontal..last]
+                    .iter()
+                    .all(|x| *x == 0.)
+                && self.block_start_v[horizontal..last]
+                    .iter()
+                    .all(|x| *x == 0.)
+                && self.ramp_start_force[horizontal..last]
+                    .iter()
+                    .all(|x| *x == 0.);
+            let end = if zero_horizontal { horizontal } else { last };
+            for j in first..end {
+                self.active_transverse_indices[active] = j;
+                active += 1;
+            }
+        }
+        let n = active + 1;
+        for (row, &j) in self.active_transverse_indices[..active].iter().enumerate() {
             self.solver_x[row] = self.ramp_start_force[j];
         }
         self.solver_x[n - 1] = 0.;
@@ -1582,7 +1628,7 @@ impl Choir {
             self.ramp_coordinate_work.fill(0.);
             self.ramp_weighted_displacement.fill(0.);
             let mut work = 0.;
-            for (row, &j) in self.transverse_indices.iter().enumerate() {
+            for (row, &j) in self.active_transverse_indices[..active].iter().enumerate() {
                 let force = self.solver_x[row];
                 self.ramp_end_force[j] = force;
                 let t = self.ramp_transfer[frames * self.size + j];
@@ -1644,7 +1690,7 @@ impl Choir {
             let mut shifted = residual;
             let mut force_difference = 0.;
             let mut displacement2 = 0.;
-            for (row, &j) in self.transverse_indices.iter().enumerate() {
+            for (row, &j) in self.active_transverse_indices[..active].iter().enumerate() {
                 let delta = self.block_next_force[j] - self.ramp_end_force[j];
                 force_difference += delta * delta;
                 shifted -= delta * self.ramp_weighted_displacement[j];
@@ -1679,6 +1725,8 @@ impl Choir {
                 self.endpoint_valid = true;
                 self.block_trace[..frames].fill(0.);
                 self.scalar_flight_blocks += 1;
+                self.scalar_unknowns_min = self.scalar_unknowns_min.min(n);
+                self.scalar_unknowns_max = self.scalar_unknowns_max.max(n);
                 return Some(Stats {
                     heat: 0.,
                     force: 0.,
@@ -2166,6 +2214,10 @@ fn main() {
     choir.canonical_correction = !args.iter().any(|arg| arg == "--legacy-correction");
     choir.use_scalar_flight = !args.iter().any(|arg| arg == "--vector-flight");
     choir.use_warm_felt = !args.iter().any(|arg| arg == "--cold-felt");
+    choir.use_zero_axis_invariant = !args.iter().any(|arg| arg == "--full-transverse-solve");
+    for wire in &mut choir.wires {
+        wire.plan.fused_passes = !args.iter().any(|arg| arg == "--split-fft-passes");
+    }
     if args.iter().any(|arg| arg == "--portable") {
         choir.gram_dot = dot;
         for wire in &mut choir.wires {
@@ -2288,7 +2340,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -2362,5 +2414,5 @@ fn main() {
         0.
     };
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
 }

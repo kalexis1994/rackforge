@@ -94,6 +94,19 @@ ledger <3e−12. Todas las rutas siguen fallando los **2 ms** a 128 kHz/16,
 sin cuerpo/presión/pedales ni polifonía. Sigue reducir costo de campos y
 validar el bloque temporal antes de integrar el instrumento completo.
 
+La [continuación de invariantes exactos y FFT](RESULTADOS-P7-invariantes-fft.md)
+omite sólo incógnitas horizontales exactamente nulas del vuelo, sin retirar
+modos, y fusiona pasadas de la FFT. C4 limpia: 577→289 incógnitas, media
+**1,9194 ms**, P99 **2,3351 ms**, máximo/ataque **3,7864 ms**. Repeticiones
+contra el ejecutable congelado: mediana de medias **2,1308→1,9725 ms** (7,4%).
+**21 pruebas pasan**; mismo estado largo **0,3241655%**, cero asignaciones.
+P99/ataque aún fallan 2 ms. Con ambos ejes excitados se mantienen 577
+incógnitas: 250 ms con reiteración reproducen el control exactamente, pero
+el benchmark sostenido sin reiteración falla en ambas versiones a 254,875 ms.
+Se conservan ese fallo y los rechazos de cache/disposición de coeficientes
+y bloques temporales mayores. Sigue refinar el bloque al fallar el solver,
+antes de aprobar duración y cerrar el instrumento completo.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

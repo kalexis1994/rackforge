@@ -22,3 +22,6 @@ tools/concert-grand-ilp-body.rs -text
 tools/measure-concert-grand-ilp-body.py -text
 tools/concert_grand_realtime_pressure.py -text
 docs/concert-grand-physics-roadmap-2026-10-02/medidas-P7-cuerdas-nativas-2026-10-13/*.json -text whitespace=cr-at-eol
+# Rejected candidate patches are hashed too; a blank context line is a
+# required single space in a unified diff, not source trailing whitespace.
+docs/concert-grand-physics-roadmap-2026-10-02/medidas-P7-cuerdas-nativas-2026-10-13/*.patch -text whitespace=-blank-at-eol

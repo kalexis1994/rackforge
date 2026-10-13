@@ -1,0 +1,308 @@
+diff --git a/tools/concert-grand-native-strings.rs b/tools/concert-grand-native-strings.rs
+index af8fe78d..1558ec46 100644
+--- a/tools/concert-grand-native-strings.rs
++++ b/tools/concert-grand-native-strings.rs
+@@ -131,6 +131,7 @@ struct CosinePlan {
+     simd_fft: bool,
+     real_roots: Vec<Complex>,
+     zero_transforms: usize,
++    fused_passes: bool,
+ }
+ impl CosinePlan {
+     fn new(nodes: usize) -> Self {
+@@ -152,6 +153,7 @@ impl CosinePlan {
+                 })
+                 .collect(),
+             zero_transforms: 0,
++            fused_passes: true,
+             fft: vec![Complex::default(); n],
+             roots: (1..=bits)
+                 .flat_map(|stage| {
+@@ -182,13 +184,15 @@ impl CosinePlan {
+     }
+     fn transform(&mut self, inverse: bool) {
+         let n = self.fft.len();
+-        for k in 0..n {
+-            if self.reverse[k] > k {
+-                self.fft.swap(k, self.reverse[k]);
++        if !self.fused_passes {
++            for k in 0..n {
++                if self.reverse[k] > k {
++                    self.fft.swap(k, self.reverse[k]);
++                }
+             }
+         }
+         (self.kernel)(&mut self.fft, &self.roots, inverse);
+-        if inverse {
++        if inverse && !self.fused_passes {
+             for x in &mut self.fft {
+                 x.r /= n as f64;
+                 x.i /= n as f64;
+@@ -230,7 +234,13 @@ impl CosinePlan {
+             let w = self.real_roots[k];
+             let dr = x.r - y.r;
+             let di = x.i - y.i;
+-            self.fft[k] = Complex {
++            // Pack directly into the radix-2 kernel's required permutation.
++            let target = if self.fused_passes {
++                self.reverse[k]
++            } else {
++                k
++            };
++            self.fft[target] = Complex {
+                 r: 0.5 * (x.r + y.r + w.i * dr - w.r * di),
+                 i: 0.5 * (x.i + y.i + w.r * dr + w.i * di),
+             };
+@@ -249,8 +259,11 @@ impl CosinePlan {
+             } else {
+                 2 * (self.nodes - 1 - b) + 1
+             };
+-            out[ia] = self.fft[j].r;
+-            out[ib] = self.fft[j].i;
++            // The inverse FFT normalization is a power of two. Apply the
++            // original division while unpacking, avoiding a separate pass.
++            let divisor = if self.fused_passes { m as f64 } else { 1. };
++            out[ia] = self.fft[j].r / divisor;
++            out[ib] = self.fft[j].i / divisor;
+         }
+     }
+     fn analyze(&mut self, values: &[f64], scales: &[f64], factor: f64, out: &mut [f64]) {
+@@ -275,7 +288,12 @@ impl CosinePlan {
+             } else {
+                 2 * (self.nodes - 1 - b) + 1
+             };
+-            self.fft[j] = Complex {
++            let target = if self.fused_passes {
++                self.reverse[j]
++            } else {
++                j
++            };
++            self.fft[target] = Complex {
+                 r: values[ia],
+                 i: values[ib],
+             };
+@@ -294,6 +312,14 @@ impl CosinePlan {
+     }
+ }
+ 
++fn carrier_start(t: [f64; 10], q0: f64, v0: f64, omega2: f64) -> [f64; 3] {
++    [
++        t[0] * q0 + t[1] * v0,
++        -omega2 * t[1] * q0 + t[0] * v0,
++        t[6] * q0 + t[7] * v0,
++    ]
++}
++
+ // Data for the axial endpoint elimination. The dynamic modal carriers
+ // remain live: only their nonlinear endpoint forces are solved directly.
+ struct AxialEndpoint<'a> {
+@@ -310,6 +336,7 @@ struct AxialEndpoint<'a> {
+     weighted_displacement: &'a mut [f64],
+     coordinate_work: &'a mut [f64],
+     transfer: &'a [[f64; 10]],
++    free_start: Option<&'a [[f64; 3]]>,
+     c: &'a [f64],
+     s: &'a [f64],
+     gain: &'a [f64],
+@@ -447,7 +474,11 @@ impl Wire {
+             let u = self.fields[j];
+             let v = self.fields[n + j];
+             let w = self.fields[2 * n + j];
+-            let eta = 0.5 * (v * v + w * w);
++            let eta = if axial_ready {
++                self.products[j]
++            } else {
++                0.5 * (v * v + w * w)
++            };
+             self.products[j] = eta;
+             self.products[n + j] = (u + eta) * v;
+             self.products[2 * n + j] = (u + eta) * w;
+@@ -503,15 +534,17 @@ impl Wire {
+             .analyze(&self.products[..n], &self.ku, factor, &mut out[..nl]);
+         let mut work_change = 0.;
+         for j in 0..nl {
++            let t = endpoint.transfer[j];
++            let start = match endpoint.free_start {
++                Some(values) => values[j],
++                None => carrier_start(t, endpoint.q0[j], endpoint.v0[j], self.omega2[j]),
++            };
+             let force = out[j];
+             let slope = (force - endpoint.start_force[j]) / endpoint.frames as f64;
+             let base_first = endpoint.start_force[j] + 0.5 * slope;
+             if let Some(lambda) = endpoint.scalar_correction {
+                 let t = endpoint.transfer[j];
+-                let free = t[0] * endpoint.q0[j]
+-                    + t[1] * endpoint.v0[j]
+-                    + t[2] * base_first
+-                    + t[3] * slope;
++                let free = start[0] + t[2] * base_first + t[3] * slope;
+                 let q = (free - t[2] * lambda * endpoint.q0[j]) / (1. - t[2] * lambda);
+                 endpoint.correction[j] = lambda * (q - endpoint.q0[j]);
+             }
+@@ -538,9 +571,9 @@ impl Wire {
+                 (q, v, work, weighted)
+             } else {
+                 let t = endpoint.transfer[j];
+-                let q = t[0] * q0 + t[1] * v0 + t[2] * first + t[3] * slope;
+-                let v = -self.omega2[j] * t[1] * q0 + t[0] * v0 + t[4] * first + t[5] * slope;
+-                let sum = t[6] * q0 + t[7] * v0 + t[8] * first + t[9] * slope;
++                let q = start[0] + t[2] * first + t[3] * slope;
++                let v = start[1] + t[4] * first + t[5] * slope;
++                let sum = start[2] + t[8] * first + t[9] * slope;
+                 let work =
+                     (first + slope * (endpoint.frames - 1) as f64) * q - first * q0 - slope * sum;
+                 let weighted = (1. - 0.5 / endpoint.frames as f64) * q
+@@ -894,6 +927,8 @@ pub struct Choir {
+     anderson_r: Vec<f64>,
+     free_indices: Vec<usize>,
+     ramp_transfer: Vec<[f64; 10]>,
++    ramp_free_start: Vec<[f64; 3]>,
++    use_cached_carrier_start: bool,
+     flight_bounds: Vec<[f64; 4]>,
+     ramp_micro_reference: bool,
+     last_certified_flight: bool,
+@@ -1071,6 +1106,8 @@ impl Choir {
+             anderson_r: vec![0.; 8 * size],
+             free_indices,
+             ramp_transfer,
++            ramp_free_start: vec![[0.; 3]; size],
++            use_cached_carrier_start: true,
+             flight_bounds,
+             ramp_micro_reference: false,
+             last_certified_flight: false,
+@@ -1536,6 +1573,18 @@ impl Choir {
+         }
+         true
+     }
++    fn free_carrier_start(&self, frames: usize, j: usize) -> [f64; 3] {
++        if self.use_cached_carrier_start {
++            self.ramp_free_start[j]
++        } else {
++            carrier_start(
++                self.ramp_transfer[frames * self.size + j],
++                self.block_start_q[j],
++                self.block_start_v[j],
++                self.omega2[j],
++            )
++        }
++    }
+     /// Solve the determined force-free block in transverse endpoint forces
+     /// and one signed work coefficient. All axial q/v are still propagated.
+     /// A failed contact certificate or unsafe iterate returns to the full
+@@ -1552,9 +1601,7 @@ impl Choir {
+         let mut displacement_scale2 = 0.;
+         for j in 0..head {
+             let t = self.ramp_transfer[frames * self.size + j];
+-            let q = t[0] * self.block_start_q[j]
+-                + t[1] * self.block_start_v[j]
+-                + t[2] * self.ramp_start_force[j];
++            let q = self.free_carrier_start(frames, j)[0] + t[2] * self.ramp_start_force[j];
+             displacement_scale2 += (q - self.block_start_q[j]).powi(2);
+         }
+         let scale = displacement_scale2.sqrt().max(1e-12);
+@@ -1587,17 +1634,17 @@ impl Choir {
+                 self.ramp_end_force[j] = force;
+                 let t = self.ramp_transfer[frames * self.size + j];
+                 let q0 = self.block_start_q[j];
+-                let v0 = self.block_start_v[j];
+                 let slope = (force - self.ramp_start_force[j]) / frames as f64;
+                 let base = self.ramp_start_force[j] + 0.5 * slope;
+-                let free = t[0] * q0 + t[1] * v0 + t[2] * base + t[3] * slope;
++                let start = self.free_carrier_start(frames, j);
++                let free = start[0] + t[2] * base + t[3] * slope;
+                 let projected = (free - t[2] * lambda * q0) / (1. - t[2] * lambda);
+                 let correction = lambda * (projected - q0);
+                 self.ramp_correction[j] = correction;
+                 let first = base + correction;
+-                let q = t[0] * q0 + t[1] * v0 + t[2] * first + t[3] * slope;
+-                let v = -self.omega2[j] * t[1] * q0 + t[0] * v0 + t[4] * first + t[5] * slope;
+-                let sum = t[6] * q0 + t[7] * v0 + t[8] * first + t[9] * slope;
++                let q = start[0] + t[2] * first + t[3] * slope;
++                let v = start[1] + t[4] * first + t[5] * slope;
++                let sum = start[2] + t[8] * first + t[9] * slope;
+                 let local_work =
+                     (first + slope * (frames - 1) as f64) * q - first * q0 - slope * sum;
+                 self.q[j] = q;
+@@ -1631,6 +1678,11 @@ impl Choir {
+                     coordinate_work: &mut self.ramp_coordinate_work[start..end],
+                     transfer: &self.ramp_transfer
+                         [frames * self.size + start..frames * self.size + end],
++                    free_start: if self.use_cached_carrier_start {
++                        Some(&self.ramp_free_start[start..end])
++                    } else {
++                        None
++                    },
+                     c: &self.c[start..end],
+                     s: &self.s[start..end],
+                     gain: &self.gain[start..end],
+@@ -1708,6 +1760,16 @@ impl Choir {
+         }
+         self.block_start_q.copy_from_slice(&self.q);
+         self.block_start_v.copy_from_slice(&self.v);
++        if self.use_cached_carrier_start {
++            for j in 0..self.size - 1 {
++                self.ramp_free_start[j] = carrier_start(
++                    self.ramp_transfer[frames * self.size + j],
++                    self.block_start_q[j],
++                    self.block_start_v[j],
++                    self.omega2[j],
++                );
++            }
++        }
+         let potential0 = if self.use_endpoint_cache && self.endpoint_valid {
+             self.ramp_start_force.copy_from_slice(&self.endpoint_force);
+             self.cached_initial_gradients += 1;
+@@ -1859,10 +1921,10 @@ impl Choir {
+                 let first = self.ramp_start_force[j] + 0.5 * slope + self.ramp_correction[j];
+                 let t = self.ramp_transfer[frames * self.size + j];
+                 let q0 = self.block_start_q[j];
+-                let v0 = self.block_start_v[j];
+-                let q1 = t[0] * q0 + t[1] * v0 + t[2] * first + t[3] * slope;
+-                let v1 = -self.omega2[j] * t[1] * q0 + t[0] * v0 + t[4] * first + t[5] * slope;
+-                let sum = t[6] * q0 + t[7] * v0 + t[8] * first + t[9] * slope;
++                let start = self.free_carrier_start(frames, j);
++                let q1 = start[0] + t[2] * first + t[3] * slope;
++                let v1 = start[1] + t[4] * first + t[5] * slope;
++                let sum = start[2] + t[8] * first + t[9] * slope;
+                 let coordinate_work =
+                     (first + slope * (frames - 1) as f64) * q1 - first * q0 - slope * sum;
+                 work += coordinate_work;
+@@ -1894,6 +1956,11 @@ impl Choir {
+                         coordinate_work: &mut self.ramp_coordinate_work[start..end],
+                         transfer: &self.ramp_transfer
+                             [frames * self.size + start..frames * self.size + end],
++                        free_start: if self.use_cached_carrier_start {
++                            Some(&self.ramp_free_start[start..end])
++                        } else {
++                            None
++                        },
+                         c: &self.c[start..end],
+                         s: &self.s[start..end],
+                         gain: &self.gain[start..end],
+@@ -2166,6 +2233,10 @@ fn main() {
+     choir.canonical_correction = !args.iter().any(|arg| arg == "--legacy-correction");
+     choir.use_scalar_flight = !args.iter().any(|arg| arg == "--vector-flight");
+     choir.use_warm_felt = !args.iter().any(|arg| arg == "--cold-felt");
++    choir.use_cached_carrier_start = !args.iter().any(|arg| arg == "--uncached-carrier-start");
++    for wire in &mut choir.wires {
++        wire.plan.fused_passes = !args.iter().any(|arg| arg == "--split-fft-passes");
++    }
+     if args.iter().any(|arg| arg == "--portable") {
+         choir.gram_dot = dot;
+         for wire in &mut choir.wires {
+@@ -2288,7 +2359,7 @@ fn main() {
+             frame += count;
+         }
+         let energy = choir.energy();
+-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
++        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"cached_carrier_start\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,choir.use_cached_carrier_start,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
+         return;
+     }
+     choir.launch(launch[0]).expect("cold launch");
+@@ -2362,5 +2433,5 @@ fn main() {
+         0.
+     };
+     times.sort_by(f64::total_cmp);
+-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
++    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"cached_carrier_start\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,choir.use_cached_carrier_start,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
+ }

@@ -249,6 +249,8 @@ impl PhaseQuadratic {
             samples,
             high,
             products: vec![[0.; 4]; self.axial.len()],
+            amplitudes: vec![0.; self.omega.len()],
+            simd: self.simd,
             sample_count: times.len(),
         }
     }
@@ -546,6 +548,8 @@ pub struct AxialWaveform {
     samples: Vec<[f64; 4]>,
     high: Vec<bool>,
     products: Vec<[f64; 4]>,
+    amplitudes: Vec<f64>,
+    simd: bool,
     sample_count: usize,
 }
 impl AxialWaveform {
@@ -556,6 +560,7 @@ impl AxialWaveform {
             + self.products.capacity())
             * std::mem::size_of::<[f64; 4]>()
             + self.omega.capacity() * 8
+            + self.amplitudes.capacity() * 8
             + self.indices.capacity() * 4
             + self.offsets.capacity() * std::mem::size_of::<usize>()
             + self.high.capacity() * std::mem::size_of::<bool>()
@@ -563,14 +568,22 @@ impl AxialWaveform {
     pub fn high_modes(&self) -> usize {
         self.high.iter().filter(|x| **x).count()
     }
+    pub fn set_portable(&mut self) {
+        self.simd = false;
+    }
     pub fn set_carriers(&mut self, q: &[f64], v: &[f64]) {
         assert!(q.len() == self.omega.len() && v.len() == q.len());
+        // Each transverse carrier participates in many triads. Preserve the
+        // same f64 division, but perform it once per mode, outside that loop.
+        for j in self.nl..self.omega.len() {
+            self.amplitudes[j] = v[j] / self.omega[j];
+        }
         for (product, &[left, right]) in self.products.iter_mut().zip(&self.indices) {
             let (left, right) = (left as usize, right as usize);
-            let (a, b) = (v[left] / self.omega[left], v[right] / self.omega[right]);
+            let (a, b) = (self.amplitudes[left], self.amplitudes[right]);
             let (c, d) = (
-                v[left + self.nt] / self.omega[left + self.nt],
-                v[right + self.nt] / self.omega[right + self.nt],
+                self.amplitudes[left + self.nt],
+                self.amplitudes[right + self.nt],
             );
             *product = [
                 q[left] * q[right] + q[left + self.nt] * q[right + self.nt],
@@ -585,6 +598,12 @@ impl AxialWaveform {
     }
     pub fn initial_particular(&self, q: &mut [f64], v: &mut [f64]) {
         assert!(q.len() == self.nl && v.len() == self.nl);
+        #[cfg(target_arch = "x86_64")]
+        if self.simd {
+            // simd is inherited from the prepared, runtime-checked phase plan.
+            unsafe { self.initial_particular_avx2(q, v) };
+            return;
+        }
         q.fill(0.);
         v.fill(0.);
         for (j, range) in self.offsets.windows(2).enumerate() {
@@ -596,6 +615,11 @@ impl AxialWaveform {
     }
     pub fn sample(&self, index: usize, out: &mut [f64]) {
         assert!(out.len() == self.nl && index < self.sample_count);
+        #[cfg(target_arch = "x86_64")]
+        if self.simd {
+            unsafe { self.sample_avx2(index, out) };
+            return;
+        }
         out.fill(0.);
         let start = index * self.products.len();
         for (j, range) in self.offsets.windows(2).enumerate() {
@@ -603,6 +627,61 @@ impl AxialWaveform {
                 out[j] += Self::dot(&self.samples[start + k], &self.products[k]);
             }
         }
+    }
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn initial_particular_avx2(&self, q: &mut [f64], v: &mut [f64]) {
+        use std::arch::x86_64::*;
+        unsafe {
+            for (j, range) in self.offsets.windows(2).enumerate() {
+                let mut sq = _mm256_setzero_pd();
+                let mut sv = _mm256_setzero_pd();
+                for k in range[0]..range[1] {
+                    let p = _mm256_loadu_pd(self.products[k].as_ptr());
+                    sq = _mm256_add_pd(
+                        sq,
+                        _mm256_mul_pd(p, _mm256_loadu_pd(self.initial_q[k].as_ptr())),
+                    );
+                    sv = _mm256_add_pd(
+                        sv,
+                        _mm256_mul_pd(p, _mm256_loadu_pd(self.initial_v[k].as_ptr())),
+                    );
+                }
+                q[j] = Self::sum_lanes(sq);
+                v[j] = Self::sum_lanes(sv);
+            }
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn sample_avx2(&self, index: usize, out: &mut [f64]) {
+        use std::arch::x86_64::*;
+        let start = index * self.products.len();
+        unsafe {
+            for (j, range) in self.offsets.windows(2).enumerate() {
+                let mut sum = _mm256_setzero_pd();
+                for k in range[0]..range[1] {
+                    sum = _mm256_add_pd(
+                        sum,
+                        _mm256_mul_pd(
+                            _mm256_loadu_pd(self.products[k].as_ptr()),
+                            _mm256_loadu_pd(self.samples[start + k].as_ptr()),
+                        ),
+                    );
+                }
+                out[j] = Self::sum_lanes(sum);
+            }
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn sum_lanes(value: std::arch::x86_64::__m256d) -> f64 {
+        use std::arch::x86_64::*;
+        let pair = _mm_add_pd(
+            _mm256_castpd256_pd128(value),
+            _mm256_extractf128_pd(value, 1),
+        );
+        _mm_cvtsd_f64(_mm_hadd_pd(pair, pair))
     }
 }
 

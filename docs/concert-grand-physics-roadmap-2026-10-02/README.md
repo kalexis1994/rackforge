@@ -177,6 +177,17 @@ de 39. Referencias finas reutilizadas y control compartido exacto. CPU sigue
 rechazado: media **1.039,585 ms** frente a **0,125 ms**, sin cuerpo/contacto.
 Se arregla el invariante local sin seleccionar una ruta de ejecución.
 
+La reconstrucción axial agrupa ahora cuatro productos SIMD por modo y calcula
+las amplitudes una sola vez por portador. Frente al control congelado en
+63be531a, la media baja **1.049,362 → 618,379 ms** por buffer (**41,07 %**, 1,70×);
+repetición **617,901 ms**, máximos **642,725/649,783 ms**. El estado cambia
+**3,78e−13**, mantiene **0,638741 %** frente al maestro y cierra energía por
+cuerda. El control escalar con amplitudes cacheadas reproduce exactamente
+q/v, ledger y lambda anteriores. Pasan 14 pruebas de fase/trayectoria, incluida
+la regresión SIMD/escalar. CPU sigue fallando el presupuesto **0,125 ms**:
+este progreso corresponde sólo al sostenido experimental de 6 ms.
+Ver [medición autenticada](medidas-P7-cuerdas-nativas-2026-10-13/phase-axial-waveform.json).
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

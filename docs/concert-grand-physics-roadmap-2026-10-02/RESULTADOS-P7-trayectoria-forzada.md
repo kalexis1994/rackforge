@@ -196,3 +196,61 @@ las contracciones temporales/espaciales. Hay que comprobar si eso permite
 volver a un reloj menor y reducir el costo antes de martillo, inercia
 compartida con el cuerpo, presión, pedales y polifonía. Conservación de
 energía, convergencia temporal y CPU mantienen gates separados. Global falso.
+
+### Contracción agrupada de la respuesta axial
+
+La [medición de esta optimización](medidas-P7-cuerdas-nativas-2026-10-13/phase-axial-waveform.json)
+autentica fuentes, ejecutable, entrada y resultado del control **63be531a**.
+Reutiliza el par de referencias finas anterior. Se conserva el mismo ensayo:
+C4 mixto, tres cuerdas 96/192, puente fijo, sin martillo, 2,048 MHz/N1/orden8,
+6 ms de evolución completa y tres restricciones independientes de energía.
+
+La hipótesis es reducir las operaciones repetidas en `AxialWaveform`. Las
+amplitudes `v/omega` se calculan una vez por modo transversal y se reutilizan
+en todas las tríadas. La inicialización particular y cada muestra temporal
+acumulan sus cuatro productos en registros AVX2; sólo se suman los canales
+al completar un modo axial. El guard de CPU preparado selecciona esa ruta.
+Todos los índices conservan validación de límites; las cargas admiten la
+alineación original. No se altera la cuadratura, las frecuencias, la precisión
+f64, los modos, las raíces energéticas ni el solver de centro.
+
+`--scalar-axial-waveform` conserva la contracción escalar y sólo comparte el
+cache de amplitudes; reproduce **exactamente** q/v, ledger total y lambda del
+control congelado en los 6 ms. `--portable` fuerza también la forma de onda
+escalar además del kernel cuadrático de fases. La trayectoria agrupada
+difiere del control en **3,778e−13** en norma de estado ponderada por omega.
+Frente a la referencia de 16,384 MHz mantiene **0,638741 %**; la auditoría
+espacial independiente pasa energía por cuerda, máximo **1,858e−10** frente
+al gate 1e−9. El ensayo pasa estado y energía dentro de esta ventana.
+
+Los benchmarks avanzan el mismo estado durante ocho buffers de 256 microframes
+(1 ms físico total), secuencialmente y sin pruebas simultáneas:
+
+| Ruta | Media por buffer | P99/máximo | Asignaciones |
+|---|---:|---:|---:|
+| Ejecutable congelado 63be531a | 1.049,362 ms | 1.117,820 ms | 0 |
+| Amplitudes cacheadas, contracción escalar | 1.026,789 ms | 1.113,070 ms | 0 |
+| Contracción axial agrupada | **618,379 ms** | **642,725 ms** | **0** |
+| Repetición agrupada | **617,901 ms** | **649,783 ms** | **0** |
+
+La media mejora **1,697× / 41,07 %** frente al control medido en esta sesión;
+el cache aislado aporta ~2,15 %. Cada benchmark también pasa energía por
+cuerda y ledger total. Las tablas y buffers contabilizados aumentan de
+16.311.816 a **16.321.032 bytes** por el cache de amplitudes preasignado.
+No hay asignaciones al avanzar ni reducción del máximo de cuatro iteraciones.
+El plazo sigue siendo **0,125 ms**: los dos máximos agrupados lo superan
+más de 5.100 veces. **CPU continúa rechazado**, sin instrumento integrado.
+
+Pasan las **14 pruebas actuales** de fases y trayectoria. La nueva regresión
+compara SIMD, contracción axial escalar y kernel de fases escalar en cuatro
+y 96 modos, a ambos relojes, y comprueba la reconstrucción en cinco tiempos,
+incluido cero. Las pruebas independientes de integral Duhamel, energía por
+cuerda, publicación atómica y convergencia contra ODE siguen pasando.
+Las 26 pruebas del núcleo nativo/presión pasaron en la etapa anterior;
+esos algoritmos no cambian aquí. La suite acumulada contiene 40 pruebas.
+
+Esta aceleración confirma el costo de las contracciones repetidas. Sigue
+factorizar la dependencia temporal y representar la respuesta transversal
+interna para reducir también el reloj necesario, con estado y energía como
+controles. No extiende la validación de duración, contacto, cuerpo, presión,
+pedales o polifonía. No se modifica la fábrica ni se instala el prototipo.

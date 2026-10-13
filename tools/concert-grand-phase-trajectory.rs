@@ -532,6 +532,12 @@ fn main() {
         let mut axial_omega = Vec::new();
         for (i, plan) in plans.iter().enumerate() {
             let mut wave = plan.axial_waveform(&times);
+            if args
+                .iter()
+                .any(|x| x == "--portable" || x == "--scalar-axial-waveform")
+            {
+                wave.set_portable();
+            }
             wave.set_carriers(
                 &q[i * width..(i + 1) * width],
                 &v[i * width..(i + 1) * width],
@@ -579,6 +585,14 @@ fn main() {
     if args.iter().any(|x| x == "--portable") {
         for plan in &mut model.plans {
             plan.set_portable();
+        }
+    }
+    if args
+        .iter()
+        .any(|x| x == "--portable" || x == "--scalar-axial-waveform")
+    {
+        for wave in &mut model.waves {
+            wave.set_portable();
         }
     }
     let initial = model.energy();

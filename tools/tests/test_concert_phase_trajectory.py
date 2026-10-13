@@ -102,6 +102,26 @@ class PhaseTrajectoryTests(unittest.TestCase):
         self.assertEqual(native['initial_wire_energy_j'][0],0.)
         self.assertEqual(native['final_wire_energy_j'][0],0.)
 
+    def test_grouped_axial_waveform_preserves_scalar_trajectory(self):
+        for nt,rate,frames,order in [(4,128000,16,64),(96,128000,16,96),(96,2048000,1,8)]:
+            f=fixture(transverse=nt,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.
+            fast=self.run_native(f,'verify',frames,order)
+            scalar=self.run_native(f,'verify',frames,order,'--scalar-axial-waveform')
+            portable=self.run_native(f,'verify',frames,order,'--portable')
+            omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+            def metric(data):return np.r_[omega*np.asarray(data['q'])[:-1],data['v'][:-1]]
+            for other in [scalar,portable]:
+                self.assertTrue(fast['completed'] and other['completed'])
+                self.assertLess(relative(metric(fast),metric(other)),1e-11)
+                self.assertLess(other['work_relative_max'],1e-9)
+                self.assertEqual(other['allocations'],0)
+            self.assertEqual(fast['allocations'],0)
+            # The diagnostic exercises both low/resonant and high branches at
+            # multiple times, including their exactly-zero initial waveform.
+            a=self.run_native(f,'waveform',frames,order)
+            b=self.run_native(f,'waveform',frames,order,'--scalar-axial-waveform')
+            self.assertLess(relative(np.asarray(a['driven_axial_q']),np.asarray(b['driven_axial_q'])),1e-12)
+
     def test_coupled_trajectory_refines_against_continuous_ode(self):
         f=self.coast(4,.0005);ns=len(f['q'])-1;core=f['system'].string
         def derivative(_t,y):

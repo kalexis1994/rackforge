@@ -61,4 +61,11 @@ flatpak build-bundle \
   "$repo" "$output_directory/RackForge-Linux-x86_64.flatpak" "$app_id"
 
 printf 'edition=standard\n' >"$output_directory/build-info.txt"
+# What the build was given to carry, by name, which is what the Windows builds
+# record for tools/verify-release-edition.py: a Flatpak bundle is an OSTree
+# delta, not an archive the check can list.
+{
+  printf 'RF-Concert-Grand.rfplugin\n'
+  find dist/bundled-plugins/official -maxdepth 1 -name '*.rfplugin' -printf '%f\n' | LC_ALL=C sort
+} >"$output_directory/bundled-plugins.txt"
 printf 'RACKFORGE_FLATPAK_READY %s\n' "$output_directory/RackForge-Linux-x86_64.flatpak"

@@ -9,7 +9,9 @@ Players can install other portable plugins later.
 
 The release workflow builds the Standard edition on every platform. The build
 entry points retain their edition option for development, but the release
-assembler accepts only the five Standard artifacts from one CI run.
+assembler accepts only the six Standard artifacts from one CI run: the
+Windows executable and VST3 bundle, the Linux x86-64 archive and Flatpak, the
+Raspberry Pi archive and the Android APK.
 
 Every release bundle contains `build-info.txt`. CI inspects the Android, Linux,
 and Raspberry Pi archives and verifies their bundled plugins.

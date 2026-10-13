@@ -111,3 +111,20 @@ fino. Sigue reducir ese trabajo manteniendo precisión a duración completa,
 después cerrar inercia y trabajo del puerto cuerda/cuerpo y agregar presión,
 apagadores/pedales y host MIDI/audio. Los bloques 64 y la tasa 44,1 kHz que
 fallaron duración siguen rechazados; estas optimizaciones no los rehabilitan.
+
+## Instalador pendiente y chequeo del escritorio
+
+También se conserva el cambio previo de `apps/rackforge-desktop/src/main.rs`:
+el marcador de primera instalación ya no bloquea actualizaciones de un
+Concert Grand conocido. Se usa la misma instalación/reemplazo que los
+plugins oficiales, se conserva un plugin deshabilitado y el marcador sigue
+respetando su eliminación intencional. No se ejecuta el instalador durante
+esta validación ni se incorpora el coro experimental al paquete de fábrica.
+
+`cargo +1.98.0-x86_64-pc-windows-msvc check -p rackforge-desktop --locked --offline`
+pasa con entorno Visual Studio/LLVM y `CPAL_ASIO_DIR` apuntando al SDK local
+en `local/build-dependencies/asio-sdk/ASIOSDK`. El chequeo GNU inicial carecía
+de dlltool; el MSVC inicial falló en el extractor PowerShell del SDK.
+Se extrajo el ZIP ya descargado al directorio ignorado, comprobando sus rutas,
+y se repitió el chequeo con esa dependencia preparada. No se modifica la
+configuración global del sistema ni se instala una nueva app.

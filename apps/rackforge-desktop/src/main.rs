@@ -8726,37 +8726,50 @@ fn install_bundled_default_plugin(options: &Options) -> Result<()> {
     let Some(store_root) = options.plugin_store_root.as_deref() else {
         return Ok(());
     };
+    let inspection = inspect_local_archive(store_root, bytes)
+        .context("validating the bundled default instrument")?;
+    let known_plugin = store_root
+        .join("packages")
+        .join(&inspection.plugin_id)
+        .is_dir();
     let marker = options
         .rackforge_root
         .join("state")
         .join("bundled-default-initialized");
-    if marker.is_file() {
+    if !known_plugin
+        && (marker.is_file()
+            || fs::read_dir(store_root.join("packages"))
+                .ok()
+                .is_some_and(|mut entries| entries.next().is_some()))
+    {
         return Ok(());
     }
-    let packages_root = store_root.join("packages");
-    if fs::read_dir(&packages_root)
-        .ok()
-        .is_some_and(|mut entries| entries.next().is_some())
-    {
+    // The marker used by older builds stopped every later Concert Grand
+    // update. An installed 0.171.33 kept playing even after 0.171.34 fixed
+    // a re-strike that could send a string pole outside the unit circle.
+    // Update an installed default from the version carried by this build.
+    // Discovery selects the highest version, and a user-disabled plugin stays
+    // disabled. The marker still remembers an intentional removal.
+    let installed = install_local_archive_replacing(store_root, bytes)
+        .context("installing the bundled default instrument")?;
+    if !known_plugin {
+        set_plugin_enabled(store_root, &inspection.plugin_id, true)
+            .context("enabling the bundled default instrument")?;
+    }
+    if !marker.is_file() {
         if let Some(parent) = marker.parent() {
             fs::create_dir_all(parent)?;
         }
         fs::write(&marker, b"1\n")?;
-        return Ok(());
     }
-    let installed = install_local_archive(store_root, bytes)
-        .context("installing the bundled default instrument")?;
     eprintln!(
-        "DESKTOP_DEFAULT_PLUGIN id={} version={} path={} existing={}",
+        "DESKTOP_DEFAULT_PLUGIN id={} version={} path={} existing={} enabled_by_build={}",
         installed.record.plugin_id,
         installed.record.version,
         installed.path.display(),
-        installed.already_installed
+        installed.already_installed,
+        !known_plugin
     );
-    if let Some(parent) = marker.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&marker, b"1\n")?;
     Ok(())
 }
 

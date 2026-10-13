@@ -294,6 +294,25 @@ impl CosinePlan {
     }
 }
 
+// Data for the axial endpoint elimination. The dynamic modal carriers
+// remain live: only their nonlinear endpoint forces are solved directly.
+struct AxialEndpoint<'a> {
+    frames: usize,
+    micro_reference: bool,
+    q: &'a mut [f64],
+    v: &'a mut [f64],
+    q0: &'a [f64],
+    v0: &'a [f64],
+    start_force: &'a [f64],
+    end_force: &'a mut [f64],
+    correction: &'a [f64],
+    weighted_displacement: &'a mut [f64],
+    coordinate_work: &'a mut [f64],
+    transfer: &'a [[f64; 10]],
+    c: &'a [f64],
+    s: &'a [f64],
+    gain: &'a [f64],
+}
 pub struct Wire {
     nt: usize,
     nl: usize,
@@ -418,6 +437,9 @@ impl Wire {
     }
     fn point_nonlinearity(&mut self, q: &[f64], out: &mut [f64]) -> f64 {
         self.fields(q, 0., 0);
+        self.point_from_fields(out, false)
+    }
+    fn point_from_fields(&mut self, out: &mut [f64], axial_ready: bool) -> f64 {
         let n = self.nodes;
         let mut energy = 0.;
         for j in 0..n {
@@ -431,8 +453,10 @@ impl Wire {
             energy += (u + 0.5 * eta) * eta;
         }
         let factor = self.ea * self.length / (2 * n) as f64;
-        self.plan
-            .analyze(&self.products[..n], &self.ku, factor, &mut out[..self.nl]);
+        if !axial_ready {
+            self.plan
+                .analyze(&self.products[..n], &self.ku, factor, &mut out[..self.nl]);
+        }
         self.plan.analyze(
             &self.products[n..2 * n],
             &self.kv,
@@ -446,6 +470,83 @@ impl Wire {
             &mut out[self.nl + self.nt..],
         );
         self.ea * self.length / n as f64 * energy
+    }
+    /// g_u = EA D_u^T eta(v,w) is independent of u. Evaluate it first,
+    /// then compose every axial carrier with this exact endpoint force.
+    /// The force is not static: q0/v0 and all fast modal phases are retained.
+    fn point_condensed_axial(
+        &mut self,
+        endpoint: AxialEndpoint<'_>,
+        out: &mut [f64],
+    ) -> (f64, f64) {
+        let n = self.nodes;
+        let nl = self.nl;
+        let nt = self.nt;
+        self.plan.synthesize(
+            &endpoint.q[nl..nl + nt],
+            &self.kv,
+            &mut self.fields[n..2 * n],
+        );
+        self.plan.synthesize(
+            &endpoint.q[nl + nt..],
+            &self.kv,
+            &mut self.fields[2 * n..3 * n],
+        );
+        for node in 0..n {
+            let v = self.fields[n + node];
+            let w = self.fields[2 * n + node];
+            self.products[node] = 0.5 * (v * v + w * w);
+        }
+        let factor = self.ea * self.length / (2 * n) as f64;
+        self.plan
+            .analyze(&self.products[..n], &self.ku, factor, &mut out[..nl]);
+        let mut work_change = 0.;
+        for j in 0..nl {
+            let force = out[j];
+            let slope = (force - endpoint.start_force[j]) / endpoint.frames as f64;
+            let first = endpoint.start_force[j] + 0.5 * slope + endpoint.correction[j];
+            let q0 = endpoint.q0[j];
+            let v0 = endpoint.v0[j];
+            let (q1, v1, work, weighted) = if endpoint.micro_reference {
+                // Independent replay of the same force ramp at every tick.
+                let mut q = q0;
+                let mut v = v0;
+                let mut work = 0.;
+                let mut weighted = 0.;
+                for frame in 0..endpoint.frames {
+                    let alpha = (frame as f64 + 0.5) / endpoint.frames as f64;
+                    let g = (1. - alpha) * endpoint.start_force[j]
+                        + alpha * force
+                        + endpoint.correction[j];
+                    let next = endpoint.c[j] * q + endpoint.s[j] * v - endpoint.gain[j] * g;
+                    v = -self.omega2[j] * endpoint.s[j] * q + endpoint.c[j] * v - endpoint.s[j] * g;
+                    work += g * (next - q);
+                    weighted += alpha * (next - q);
+                    q = next;
+                }
+                (q, v, work, weighted)
+            } else {
+                let t = endpoint.transfer[j];
+                let q = t[0] * q0 + t[1] * v0 + t[2] * first + t[3] * slope;
+                let v = -self.omega2[j] * t[1] * q0 + t[0] * v0 + t[4] * first + t[5] * slope;
+                let sum = t[6] * q0 + t[7] * v0 + t[8] * first + t[9] * slope;
+                let work =
+                    (first + slope * (endpoint.frames - 1) as f64) * q - first * q0 - slope * sum;
+                let weighted = (1. - 0.5 / endpoint.frames as f64) * q
+                    - 0.5 / endpoint.frames as f64 * q0
+                    - sum / endpoint.frames as f64;
+                (q, v, work, weighted)
+            };
+            work_change += work - endpoint.coordinate_work[j];
+            endpoint.coordinate_work[j] = work;
+            endpoint.weighted_displacement[j] = weighted;
+            endpoint.q[j] = q1;
+            endpoint.v[j] = v1;
+            endpoint.end_force[j] = force;
+        }
+        self.plan
+            .synthesize(&endpoint.q[..nl], &self.ku, &mut self.fields[..n]);
+        (self.point_from_fields(out, true), work_change)
     }
     pub fn nonlinear_avf(
         &mut self,
@@ -696,6 +797,8 @@ pub struct Choir {
     endpoint_valid: bool,
     use_endpoint_cache: bool,
     cached_initial_gradients: usize,
+    ramp_coordinate_work: Vec<f64>,
+    use_condensed_axial: bool,
 }
 impl Choir {
     fn new(
@@ -855,6 +958,8 @@ impl Choir {
             endpoint_valid: false,
             use_endpoint_cache: true,
             cached_initial_gradients: 0,
+            ramp_coordinate_work: vec![0.; size],
+            use_condensed_axial: true,
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -1308,6 +1413,7 @@ impl Choir {
             self.q.copy_from_slice(&self.block_start_q);
             self.v.copy_from_slice(&self.block_start_v);
             self.ramp_weighted_displacement.fill(0.);
+            self.ramp_coordinate_work.fill(0.);
             let mut work = 0.;
             let mut stats = Stats::default();
             let certified_flight = !self.ramp_micro_reference && self.certified_ramp_flight(frames);
@@ -1364,14 +1470,16 @@ impl Choir {
                         } else {
                             start + self.wires[i].nt
                         };
-                        for (((q, old), f), weighted) in self.q[start..end]
+                        for ((((q, old), f), weighted), coordinate_work) in self.q[start..end]
                             .iter()
                             .zip(&self.candidate[start..end])
                             .zip(&self.block_force[start..end])
                             .zip(&mut self.ramp_weighted_displacement[start..end])
+                            .zip(&mut self.ramp_coordinate_work[start..end])
                         {
                             let displacement = *q - *old;
                             work += *f * displacement;
+                            *coordinate_work += *f * displacement;
                             *weighted += alpha * displacement;
                         }
                     }
@@ -1406,7 +1514,10 @@ impl Choir {
                 let q1 = t[0] * q0 + t[1] * v0 + t[2] * first + t[3] * slope;
                 let v1 = -self.omega2[j] * t[1] * q0 + t[0] * v0 + t[4] * first + t[5] * slope;
                 let sum = t[6] * q0 + t[7] * v0 + t[8] * first + t[9] * slope;
-                work += (first + slope * (frames - 1) as f64) * q1 - first * q0 - slope * sum;
+                let coordinate_work =
+                    (first + slope * (frames - 1) as f64) * q1 - first * q0 - slope * sum;
+                work += coordinate_work;
+                self.ramp_coordinate_work[j] = coordinate_work;
                 self.ramp_weighted_displacement[j] = (1. - 0.5 / frames as f64) * q1
                     - 0.5 / frames as f64 * q0
                     - sum / frames as f64;
@@ -1416,10 +1527,37 @@ impl Choir {
             self.block_next_force.fill(0.);
             let mut potential1 = 0.;
             for i in 0..3 {
-                potential1 += self.wires[i].point_nonlinearity(
-                    &self.q[i * self.width..(i + 1) * self.width],
-                    &mut self.block_next_force[i * self.width..(i + 1) * self.width],
-                );
+                let start = i * self.width;
+                let end = (i + 1) * self.width;
+                if self.use_condensed_axial {
+                    let endpoint = AxialEndpoint {
+                        frames,
+                        micro_reference: self.ramp_micro_reference,
+                        q: &mut self.q[start..end],
+                        v: &mut self.v[start..end],
+                        q0: &self.block_start_q[start..end],
+                        v0: &self.block_start_v[start..end],
+                        start_force: &self.ramp_start_force[start..end],
+                        end_force: &mut self.ramp_end_force[start..end],
+                        correction: &self.ramp_correction[start..end],
+                        weighted_displacement: &mut self.ramp_weighted_displacement[start..end],
+                        coordinate_work: &mut self.ramp_coordinate_work[start..end],
+                        transfer: &self.ramp_transfer
+                            [frames * self.size + start..frames * self.size + end],
+                        c: &self.c[start..end],
+                        s: &self.s[start..end],
+                        gain: &self.gain[start..end],
+                    };
+                    let (potential, changed_work) = self.wires[i]
+                        .point_condensed_axial(endpoint, &mut self.block_next_force[start..end]);
+                    potential1 += potential;
+                    work += changed_work;
+                } else {
+                    potential1 += self.wires[i].point_nonlinearity(
+                        &self.q[start..end],
+                        &mut self.block_next_force[start..end],
+                    );
+                }
             }
             let work_residual = potential1 - potential0 - work;
             let mut shifted_work = work_residual;
@@ -1744,6 +1882,7 @@ fn main() {
     let mut choir = Choir::new(wires, 1. / p[4], p[5], p[6] / 3., p[7], p[8], shapes, q, v);
     choir.ramp_micro_reference = args.iter().any(|arg| arg == "--micro-reference");
     choir.use_endpoint_cache = !args.iter().any(|arg| arg == "--uncached");
+    choir.use_condensed_axial = !args.iter().any(|arg| arg == "--uncondensed");
     if args.iter().any(|arg| arg == "--portable") {
         choir.gram_dot = dot;
         for wire in &mut choir.wires {
@@ -1866,7 +2005,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -1940,5 +2079,5 @@ fn main() {
         0.
     };
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial);
 }

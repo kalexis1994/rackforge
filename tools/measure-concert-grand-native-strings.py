@@ -25,8 +25,10 @@ def main():
     parser.add_argument('--micro-block',type=int,default=1)
     parser.add_argument('--ramp',action='store_true')
     parser.add_argument('--portable',action='store_true')
+    parser.add_argument('--uncondensed',action='store_true')
+    parser.add_argument('--compare-uncondensed',action='store_true')
     args=parser.parse_args()
-    flags=['--portable'] if args.portable else []
+    flags=(['--portable'] if args.portable else [])+(['--uncondensed'] if args.uncondensed else [])
     if args.local.exists() or args.report.exists() or not 8<=args.buffers<=2048 or not 1<=args.micro_block<=64:
         raise ValueError('new native string measurement paths and valid buffer count required')
     root=Path(__file__).resolve().parent.parent
@@ -41,6 +43,7 @@ def main():
     record=dict(stage='native fixed-bridge nonlinear choir measured',source_sha256=source,
         executable_path=str(exe.resolve()),executable_sha256=digest(exe),cases=[],
         math_backend='portable' if args.portable else 'prepared CPU dispatch',
+        condensed_axial=args.ramp and not args.uncondensed,
         fixed_bridge=True,moving_body_attached=False,pressure_included=False,pedals_included=False,
         nonlinear_micro_block=args.micro_block,work_checked_at_nonlinear_block_boundaries=True,ramped_nonlinearity=args.ramp,
         full_piano_realtime=False,global_physics_approved=False,factory_updated=False)
@@ -73,6 +76,14 @@ def main():
                         case.update(blocked_state_relative=state,blocked_force_relative=force,
                             blocked_accuracy_1percent_gate_passed=state<=.01 and force<=.01,
                             nonlinear_outer_iterations=native['maximum_outer_iterations'])
+                    if args.compare_uncondensed and args.ramp and not args.uncondensed:
+                        old=json.loads(subprocess.check_output([str(exe),str(path),*mode,*flags,'--uncondensed'],text=True,stderr=subprocess.STDOUT))
+                        omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+                        target=np.r_[omega*np.asarray(old['q'])[:-1],old['v']]
+                        actual=np.r_[omega*np.asarray(native['q'])[:-1],native['v']]
+                        case.update(change_from_uncondensed_state_relative=float(np.linalg.norm(actual-target)/np.linalg.norm(target)),
+                            change_from_uncondensed_force_relative=float(np.linalg.norm(np.asarray(native['force_trace'])-old['force_trace'])/np.linalg.norm(old['force_trace'])),
+                            uncondensed_outer_iterations=old['maximum_outer_iterations'])
                     if args.replay:
                         reference=replay(f)
                         omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]

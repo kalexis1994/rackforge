@@ -202,5 +202,41 @@ class NativeStringsTests(unittest.TestCase):
             self.assertEqual(cached['work_relative_max'],uncached['work_relative_max'])
 
 
+    def test_axial_endpoint_force_matches_independent_spatial_quadrature(self):
+        for nt in [4,12,96]:
+            f=fixture(transverse=nt,rate=128000,seed=83,duration=.002)
+            native=self.run_native(f,'verify-ramp',16)
+            q=np.asarray(native['q']);force=np.asarray(native['endpoint_nonlinear_force'])
+            length,mu,young,density=f['parameters'][:4]
+            ea=young*mu/density;mass=mu*length/2;cells=2*nt
+            points,weights=roots_legendre(16)
+            x=((np.arange(cells)[:,None]+(points[None]+1)/2)*length/cells).ravel()
+            weight=np.tile(weights*length/(2*cells),cells)
+            ku=np.pi*np.arange(1,2*nt+1)/length/np.sqrt(mass)
+            kv=np.pi*np.arange(1,nt+1)/length/np.sqrt(mass)
+            du=np.cos(x[:,None]*np.pi*np.arange(1,2*nt+1)/length)*ku
+            dv=np.cos(x[:,None]*np.pi*np.arange(1,nt+1)/length)*kv
+            for wire in range(3):
+                start=wire*4*nt
+                v=dv @ q[start+2*nt:start+3*nt]
+                w=dv @ q[start+3*nt:start+4*nt]
+                expected=ea*du.T @ (weight*.5*(v*v+w*w))
+                np.testing.assert_allclose(force[start:start+2*nt],expected,rtol=2e-10,atol=2e-12)
+            self.assertLess(native['work_relative_max'],1e-9)
+
+    def test_axial_elimination_retains_live_modal_dynamics_against_old_solver(self):
+        for nt,duration in [(4,.016),(96,.006)]:
+            f=fixture(transverse=nt,rate=128000,seed=83,second_speed=.1,second_time=1417/128000,duration=duration)
+            native=self.run_native(f,'verify-ramp',16)
+            old=self.run_native(f,'verify-ramp',16,'--uncondensed')
+            omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+            expected=np.r_[omega*np.asarray(old['q'])[:-1],old['v']]
+            actual=np.r_[omega*np.asarray(native['q'])[:-1],native['v']]
+            self.assertLess(np.linalg.norm(actual-expected)/np.linalg.norm(expected),1e-6)
+            self.assertLess(native['work_relative_max'],1e-9)
+            self.assertLess(old['work_relative_max'],1e-9)
+            self.assertLess(native['maximum_outer_iterations'],old['maximum_outer_iterations'])
+
+
 
 if __name__=='__main__':unittest.main()

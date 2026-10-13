@@ -41,6 +41,8 @@ def main():
     if any(not 1 <= block <= 64 for block in blocks):
         raise ValueError('blocks must contain 1..64 microsteps')
     flags=['--portable'] if parent.get('math_backend')=='portable' else []
+    if parent.get('condensed_axial') is False:
+        flags.append('--uncondensed')
     reused=None
     if args.reference_report:
         reused=json.loads(args.reference_report.read_text(encoding='utf-8'))
@@ -62,6 +64,7 @@ def main():
         pressure_included=False, pedals_included=False,
         full_piano_realtime=False, global_physics_approved=False,
         math_backend=parent.get('math_backend','prepared CPU dispatch'),
+        condensed_axial=parent.get('condensed_axial',False),
         reference_parent_path=str(args.reference_report.resolve()) if reused else None,
         reference_parent_sha256=digest(args.reference_report) if reused else None,
         cases=[],

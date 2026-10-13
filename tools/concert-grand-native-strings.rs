@@ -513,6 +513,9 @@ pub struct Choir {
     anderson_r: Vec<f64>,
     free_indices: Vec<usize>,
     ramp_transfer: Vec<[f64; 10]>,
+    flight_bounds: Vec<[f64; 4]>,
+    ramp_micro_reference: bool,
+    last_certified_flight: bool,
 }
 impl Choir {
     fn new(
@@ -591,9 +594,12 @@ impl Choir {
         // Entries: C,S,qa,qb,va,vb, sumC,sumS,sumQa,sumQb. Sums exclude
         // the endpoint, as required by discrete summation by parts.
         let mut ramp_transfer = vec![[0.; 10]; 65 * size];
-        for &j in &free_indices {
+        let nt = wires[0].nt;
+        let mut flight_bounds = vec![[0.; 4]; 65 * 3 * nt];
+        for j in 0..size - 1 {
             let (mut cj, mut sj, mut qa, mut qb, mut va, mut vb) = (1., 0., 0., 0., 0., 0.);
             let (mut sc, mut ss, mut sa, mut sb) = (0., 0., 0., 0.);
+            let mut bound: [f64; 4] = [1., 0., 0., 0.];
             for frame in 0..64 {
                 let nq_a = c[j] * qa + s[j] * va - gain[j];
                 let nq_b = c[j] * qb + s[j] * vb - gain[j] * frame as f64;
@@ -605,6 +611,14 @@ impl Choir {
                 sj = s[j] * cj + c[j] * sj;
                 cj = nc;
                 ramp_transfer[(frame + 1) * size + j] = [cj, sj, qa, qb, va, vb, sc, ss, sa, sb];
+                let mode = j % width;
+                if mode >= wires[0].nl && mode < wires[0].nl + nt {
+                    for (maximum, value) in bound.iter_mut().zip([cj, sj, qa, qb]) {
+                        *maximum = maximum.max(value.abs());
+                    }
+                    flight_bounds[((frame + 1) * 3 + j / width) * nt + mode - wires[0].nl] = bound;
+                }
+
                 sc += cj;
                 ss += sj;
                 sa += qa;
@@ -650,6 +664,9 @@ impl Choir {
             anderson_r: vec![0.; 8 * size],
             free_indices,
             ramp_transfer,
+            flight_bounds,
+            ramp_micro_reference: false,
+            last_certified_flight: false,
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -1020,6 +1037,42 @@ impl Choir {
         self.v.copy_from_slice(&self.block_start_v);
         Err("nonlinear block failed to converge; shorten block")
     }
+    /// Certify zero contact over *every* microstep of a proposed ramp.
+    /// Triangle bounds enclose each actual prepared carrier coefficient at
+    /// all ticks, including the old state. A head moving toward the strings
+    /// therefore cannot be skipped merely because it starts separated.
+    fn certified_ramp_flight(&self, frames: usize) -> bool {
+        let head = self.size - 1;
+        let head0 = self.block_start_q[head] / self.mass.sqrt();
+        let travel = frames as f64 * self.dt * self.block_start_v[head] / self.mass.sqrt();
+        let head_max = head0.max(head0 + travel);
+        if !head_max.is_finite() {
+            return false;
+        }
+        for i in 0..3 {
+            let nt = self.wires[i].nt;
+            let start = i * self.width + self.wires[i].nl;
+            let mut bound = 0.;
+            for mode in 0..nt {
+                let j = start + mode;
+                let slope = (self.ramp_end_force[j] - self.ramp_start_force[j]) / frames as f64;
+                let first = self.ramp_start_force[j] + 0.5 * slope + self.ramp_correction[j];
+                let b = self.flight_bounds[(frames * 3 + i) * nt + mode];
+                bound += self.shapes[i * nt + mode].abs()
+                    * (b[0] * self.block_start_q[j].abs()
+                        + b[1] * self.block_start_v[j].abs()
+                        + b[2] * first.abs()
+                        + b[3] * slope.abs());
+            }
+            // Include accumulated floating-point composition error. Values
+            // too close to first touch take the original contact path.
+            let margin = 256. * f64::EPSILON * (head0.abs() + travel.abs() + bound) + 1e-15;
+            if !bound.is_finite() || head_max + bound >= -margin {
+                return false;
+            }
+        }
+        true
+    }
     /// Endpoint force interpolation plus an explicit discrete-work correction.
     /// The correction acts only on string coordinates, never on the hammer.
     /// It is solved jointly with the endpoint trajectory, not applied after it.
@@ -1061,56 +1114,94 @@ impl Choir {
             self.ramp_weighted_displacement.fill(0.);
             let mut work = 0.;
             let mut stats = Stats::default();
-            for frame in 0..frames {
-                let alpha = (frame as f64 + 0.5) / frames as f64;
-                for i in 0..3 {
-                    let start = i * self.width + self.wires[i].nl;
-                    let end = start + self.wires[i].nt;
-                    for (((f, g0), g1), correction) in self.block_force[start..end]
-                        .iter_mut()
-                        .zip(&self.ramp_start_force[start..end])
-                        .zip(&self.ramp_end_force[start..end])
-                        .zip(&self.ramp_correction[start..end])
-                    {
-                        *f = (1. - alpha) * *g0 + alpha * *g1 + *correction;
-                    }
-                    self.candidate[start..end].copy_from_slice(&self.q[start..end]);
-                }
+            let certified_flight = !self.ramp_micro_reference && self.certified_ramp_flight(frames);
+            if certified_flight {
                 let head = self.size - 1;
-                self.block_force[head] = 0.;
-                self.candidate[head] = self.q[head];
-                let micro = match self.contact_with_held_nonlinearity(true) {
-                    Ok(v) => v,
-                    Err(error) => {
-                        self.q.copy_from_slice(&self.block_start_q);
-                        self.v.copy_from_slice(&self.block_start_v);
-                        return Err(error);
+                self.q[head] =
+                    self.block_start_q[head] + frames as f64 * self.dt * self.block_start_v[head];
+                self.block_trace[..frames].fill(0.);
+                stats.iterations = 1;
+            } else {
+                for frame in 0..frames {
+                    let alpha = (frame as f64 + 0.5) / frames as f64;
+                    for i in 0..3 {
+                        let start = if self.ramp_micro_reference {
+                            i * self.width
+                        } else {
+                            i * self.width + self.wires[i].nl
+                        };
+                        let end = if self.ramp_micro_reference {
+                            (i + 1) * self.width
+                        } else {
+                            start + self.wires[i].nt
+                        };
+                        for (((f, g0), g1), correction) in self.block_force[start..end]
+                            .iter_mut()
+                            .zip(&self.ramp_start_force[start..end])
+                            .zip(&self.ramp_end_force[start..end])
+                            .zip(&self.ramp_correction[start..end])
+                        {
+                            *f = (1. - alpha) * *g0 + alpha * *g1 + *correction;
+                        }
+                        self.candidate[start..end].copy_from_slice(&self.q[start..end]);
                     }
-                };
-                for i in 0..3 {
-                    let start = i * self.width + self.wires[i].nl;
-                    let end = start + self.wires[i].nt;
-                    for (((q, old), f), weighted) in self.q[start..end]
-                        .iter()
-                        .zip(&self.candidate[start..end])
-                        .zip(&self.block_force[start..end])
-                        .zip(&mut self.ramp_weighted_displacement[start..end])
-                    {
-                        let displacement = *q - *old;
-                        work += *f * displacement;
-                        *weighted += alpha * displacement;
+                    let head = self.size - 1;
+                    self.block_force[head] = 0.;
+                    self.candidate[head] = self.q[head];
+                    let micro =
+                        match self.contact_with_held_nonlinearity(!self.ramp_micro_reference) {
+                            Ok(v) => v,
+                            Err(error) => {
+                                self.q.copy_from_slice(&self.block_start_q);
+                                self.v.copy_from_slice(&self.block_start_v);
+                                return Err(error);
+                            }
+                        };
+                    for i in 0..3 {
+                        let start = if self.ramp_micro_reference {
+                            i * self.width
+                        } else {
+                            i * self.width + self.wires[i].nl
+                        };
+                        let end = if self.ramp_micro_reference {
+                            (i + 1) * self.width
+                        } else {
+                            start + self.wires[i].nt
+                        };
+                        for (((q, old), f), weighted) in self.q[start..end]
+                            .iter()
+                            .zip(&self.candidate[start..end])
+                            .zip(&self.block_force[start..end])
+                            .zip(&mut self.ramp_weighted_displacement[start..end])
+                        {
+                            let displacement = *q - *old;
+                            work += *f * displacement;
+                            *weighted += alpha * displacement;
+                        }
                     }
+                    stats.heat += micro.heat;
+                    stats.force = stats.force.max(micro.force);
+                    stats.iterations = stats.iterations.max(micro.iterations);
+                    self.block_trace[frame] = micro.force;
                 }
-                stats.heat += micro.heat;
-                stats.force = stats.force.max(micro.force);
-                stats.iterations = stats.iterations.max(micro.iterations);
-                self.block_trace[frame] = micro.force;
             }
             // Non-contact coordinates are independent linear oscillators
             // under the same ramp used in the microsteps. Compose them once.
             // Discrete summation by parts gives both force work and the
             // weighted displacement used by the endpoint correction.
-            for &j in &self.free_indices {
+            let carriers = if self.ramp_micro_reference {
+                0
+            } else if certified_flight {
+                self.size - 1
+            } else {
+                self.free_indices.len()
+            };
+            for index in 0..carriers {
+                let j = if certified_flight {
+                    index
+                } else {
+                    self.free_indices[index]
+                };
                 let slope = (self.ramp_end_force[j] - self.ramp_start_force[j]) / frames as f64;
                 let first = self.ramp_start_force[j] + 0.5 * slope + self.ramp_correction[j];
                 let t = self.ramp_transfer[frames * self.size + j];
@@ -1172,6 +1263,7 @@ impl Choir {
                 && work_residual.abs() <= 1e-13 * energy.max(1e-30)
             {
                 self.last_outer_iterations = outer + 1;
+                self.last_certified_flight = certified_flight;
                 return Ok(stats);
             }
             self.accelerate_ramp_fixed_point(outer);
@@ -1434,6 +1526,7 @@ fn main() {
         .map(|t| Wire::new(nt, nl, nodes, p[0], p[1], *t, ea, ei))
         .collect();
     let mut choir = Choir::new(wires, 1. / p[4], p[5], p[6] / 3., p[7], p[8], shapes, q, v);
+    choir.ramp_micro_reference = args.iter().any(|arg| arg == "--micro-reference");
     if args.get(2).map(String::as_str) == Some("kernel") {
         let mut gradients = vec![0.; 3 * width];
         let mut boundaries = [0.; 3];
@@ -1482,6 +1575,7 @@ fn main() {
         let mut maximum_iterations = 0;
         let mut work_relative_max = 0f64;
         let mut maximum_outer_iterations = 0;
+        let mut certified_flight_blocks = 0;
         let total = (durations[2] * p[4]).round() as usize;
         let mut events = Vec::new();
         let mut checkpoints = Vec::new();
@@ -1515,6 +1609,9 @@ fn main() {
             }
             .expect("native step");
             maximum_outer_iterations = maximum_outer_iterations.max(choir.last_outer_iterations);
+            if ramp_mode && choir.last_certified_flight {
+                certified_flight_blocks += 1;
+            }
             heat += stats.heat;
             peak = peak.max(stats.force);
             maximum_iterations = maximum_iterations.max(stats.iterations);
@@ -1538,7 +1635,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -1554,6 +1651,7 @@ fn main() {
     let mut peak = 0f64;
     let mut iterations = 0;
     let mut outer_iterations = 0;
+    let mut certified_flight_blocks = 0;
     for _ in 0..blocks {
         let start = Instant::now();
         let mut completed = 0;
@@ -1572,6 +1670,9 @@ fn main() {
             peak = peak.max(stats.force);
             iterations = iterations.max(stats.iterations);
             outer_iterations = outer_iterations.max(choir.last_outer_iterations);
+            if ramp_mode && choir.last_certified_flight {
+                certified_flight_blocks += 1;
+            }
             completed += count;
         }
         times.push(start.elapsed().as_secs_f64() * 1000.);
@@ -1579,5 +1680,5 @@ fn main() {
     let allocations = ALLOCATIONS.load(Ordering::Relaxed) - allocations;
     let mean = times.iter().sum::<f64>() / blocks as f64;
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference);
 }

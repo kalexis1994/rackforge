@@ -152,3 +152,25 @@ Sigue resolver el avance temporal no lineal que cumpla a la vez duración y
 costo; después cerrar cuerda/cuerpo con masa mixta, trabajo recíproco y
 presión causal. Quedan apagadores/pedales, sostenidos, reiteraciones del
 teclado, polifonía y el host MIDI/audio antes de entregar una prueba tocable.
+
+## Continuación: vuelo certificado del martillo
+
+Se compone también el avance vertical si una cota triangular, preparada
+sobre todos los ticks del bloque, demuestra compresión negativa en los tres
+contactos. La cota incluye la fuerza interpolada/corrección propuesta y el
+movimiento futuro de la cabeza; no basta con estar separado al inicio.
+Un margen de redondeo devuelve los casos cercanos al primer toque a la ruta
+original. No se omite ni modifica una interacción con fuerza distinta de cero.
+
+La referencia explícita `--micro-reference` avanza todos los portadores en
+cada micro-paso, sin composición ni certificación. Ocho pruebas de cuerdas
+pasan, incluidas la cabeza que se aproxima y los estados/energía de vuelos
+4/12/96. Las cotas adicionales ocupan ~0,57 MiB por coro 96/192.
+
+[Primer costo del vuelo certificado](medidas-P7-cuerdas-nativas-2026-10-13/vuelo16-primer-costo.json):
+128 kHz, bloque 16, 128 buffers. La ruta se acepta en 2033 de 2048 bloques;
+mantiene el error corto 0,100690% y cero asignaciones. Costo medio 9,7912 ms,
+P99 15,0464 ms, máximo **16,7539 ms** frente a 2 ms. Sigue fallando CPU;
+esta corrida conserva la variabilidad y no demuestra una mejora del peor caso.
+Ahora se pueden atacar las transformadas/solver que quedan dominando el
+sostenido sin alterar el contacto ni repetir los micro-pasos libres.

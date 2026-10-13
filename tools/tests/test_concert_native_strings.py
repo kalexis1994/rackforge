@@ -16,35 +16,6 @@ class NativeStringsTests(unittest.TestCase):
         cls.folder=Path(cls.temp.name);cls.exe=cls.folder/'strings.exe'
         root=Path(__file__).resolve().parents[2]
         subprocess.run(['rustc','--edition=2021','-O',str(root/'tools/concert-grand-native-strings.rs'),'-o',str(cls.exe)],check=True)
-        # Independent reference composes every carrier at every microstep,
-        # rather than using the prepared block maps/summation by parts.
-        source=(root/'tools/concert-grand-native-strings.rs').read_text()
-        start=source.index('    pub fn step_ramp(')
-        end=source.index('    /// Depth-three Anderson',start)
-        ramp=source[start:end]
-        first=ramp.index('                for i in 0..3 {',ramp.index('for frame in 0..frames'))
-        last=ramp.index('                let micro =',first)
-        ramp=ramp[:first]+"""                for j in 0..self.size {
-                    self.block_force[j]=(1.-alpha)*self.ramp_start_force[j]+alpha*self.ramp_end_force[j]+self.ramp_correction[j];
-                }
-                self.candidate.copy_from_slice(&self.q);
-"""+ramp[last:]
-        first=ramp.index('                for i in 0..3 {',ramp.index('let micro ='))
-        last=ramp.index('                stats.heat',first)
-        ramp=ramp[:first]+"""                for j in 0..self.size {
-                    let displacement=self.q[j]-self.candidate[j];
-                    work+=self.block_force[j]*displacement;
-                    self.ramp_weighted_displacement[j]+=alpha*displacement;
-                }
-"""+ramp[last:]
-        ramp=ramp.replace('self.contact_with_held_nonlinearity(true)','self.contact_with_held_nonlinearity(false)')
-        ramp=ramp.replace('for &j in &self.free_indices {','for &j in &self.free_indices[..0] {')
-        reference=cls.folder/'micro-reference.rs'
-        reference.write_text(source[:start]+ramp+source[end:],encoding='utf-8')
-        cls.micro_exe=cls.folder/'micro-reference.exe'
-        subprocess.run(['rustc','--edition=2021','-O',str(reference),'-o',str(cls.micro_exe)],check=True)
-
-
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
@@ -157,7 +128,7 @@ class NativeStringsTests(unittest.TestCase):
         f=fixture(transverse=4,rate=128000,seed=83,second_speed=.1,second_time=1417/128000,duration=.016)
         for frames in [1,16,64]:
             native=self.run_native(f,'verify-ramp',frames)
-            micro=self.run_native(f,'verify-ramp',frames,exe=self.micro_exe)
+            micro=self.run_native(f,'verify-ramp',frames,'--micro-reference')
             np.testing.assert_allclose(native['q'],micro['q'],rtol=2e-8,atol=2e-12)
             np.testing.assert_allclose(native['v'],micro['v'],rtol=2e-8,atol=2e-9)
             np.testing.assert_allclose(native['force_trace'],micro['force_trace'],rtol=2e-8,atol=2e-8)
@@ -165,6 +136,40 @@ class NativeStringsTests(unittest.TestCase):
             self.assertLess(native['work_relative_max'],1e-9)
             self.assertLess(native['launch_work_j'][1],0.)
             self.assertEqual(len(native['force_trace']),768)
+            self.assertGreater(native['certified_flight_blocks'],0)
+            self.assertEqual(micro['certified_flight_blocks'],0)
+
+
+
+    def test_flight_guard_does_not_skip_a_future_impact(self):
+        f=fixture(transverse=4,rate=128000,duration=.0005)
+        f['launch_speeds'][:]=0.
+        mass=f['parameters'][5]
+        f['q'][-1]=-.0004*np.sqrt(mass)
+        f['v'][-1]=5.*np.sqrt(mass)
+        native=self.run_native(f,'verify-ramp',64)
+        micro=self.run_native(f,'verify-ramp',64,'--micro-reference')
+        self.assertEqual(native['certified_flight_blocks'],0)
+        self.assertGreater(native['force_peak_n'],1.)
+        np.testing.assert_allclose(native['q'],micro['q'],rtol=2e-8,atol=2e-12)
+        np.testing.assert_allclose(native['v'],micro['v'],rtol=2e-8,atol=2e-9)
+        np.testing.assert_allclose(native['force_trace'],micro['force_trace'],rtol=2e-8,atol=2e-8)
+
+    def test_certified_flight_preserves_every_carrier_and_work(self):
+        for nt in [4,12,96]:
+            f=fixture(transverse=nt,rate=128000,seed=67,duration=.001)
+            f['launch_speeds'][:]=0.
+            mass=f['parameters'][5]
+            f['q'][-1]=-.005*np.sqrt(mass)
+            f['v'][-1]=-np.sqrt(mass)
+            native=self.run_native(f,'verify-ramp',16)
+            micro=self.run_native(f,'verify-ramp',16,'--micro-reference')
+            self.assertEqual(native['certified_flight_blocks'],8)
+            self.assertEqual(native['force_peak_n'],0.)
+            self.assertEqual(native['heat_j'],0.)
+            self.assertLess(native['work_relative_max'],1e-9)
+            np.testing.assert_allclose(native['q'],micro['q'],rtol=2e-8,atol=2e-12)
+            np.testing.assert_allclose(native['v'],micro['v'],rtol=2e-8,atol=2e-9)
 
 
 

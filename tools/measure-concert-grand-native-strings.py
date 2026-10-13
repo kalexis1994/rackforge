@@ -58,7 +58,8 @@ def main():
                     native=json.loads(subprocess.check_output([str(exe),str(path),*mode],text=True,stderr=subprocess.STDOUT))
                     case.update(mechanical_work_relative_max=native['work_relative_max'],felt_heat_j=native['heat_j'],
                         force_peak_n=native['force_peak_n'],maximum_iterations=native['maximum_iterations'],
-                        mechanical_work_1e9_gate_passed=native['work_relative_max']<=1e-9)
+                        mechanical_work_1e9_gate_passed=native['work_relative_max']<=1e-9,
+                        certified_flight_blocks=native['certified_flight_blocks'])
                     if args.micro_block>1:
                         baseline=json.loads(subprocess.check_output([str(exe),str(path),'verify'],text=True,stderr=subprocess.STDOUT))
                         omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]

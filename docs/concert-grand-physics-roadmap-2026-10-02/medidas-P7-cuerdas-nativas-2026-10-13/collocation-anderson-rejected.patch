@@ -1,0 +1,164 @@
+diff --git a/tools/concert-grand-collocation.rs b/tools/concert-grand-collocation.rs
+index 1cc753d7..5aac44e3 100644
+--- a/tools/concert-grand-collocation.rs
++++ b/tools/concert-grand-collocation.rs
+@@ -33,6 +33,7 @@ pub(super) fn integration_matrix(rule: &[(f64, f64)], h: f64) -> Vec<f64> {
+ }
+ 
+ pub(super) struct Collocation {
++    acceleration: Option<Anderson>,
+     order: usize,
+     size: usize,
+     transfer: Vec<[f64; 2]>,
+@@ -72,6 +73,7 @@ impl Collocation {
+             }
+         }
+         Self {
++            acceleration: Some(Anderson::new(order * size)),
+             order,
+             size,
+             transfer,
+@@ -91,6 +93,14 @@ impl Collocation {
+                 + self.next.capacity()
+                 + self.gradient.capacity())
+                 * 8
++            + self
++                .acceleration
++                .as_ref()
++                .map(|a| a.prepared_bytes())
++                .unwrap_or(0)
++    }
++    pub(super) fn set_plain_picard(&mut self) {
++        self.acceleration = None;
+     }
+     fn forces(&mut self, wires: &mut [Wire]) {
+         let width = wires[0].size();
+@@ -155,8 +165,8 @@ impl Collocation {
+             if !residual.is_finite() {
+                 return Err("nonfinite collocation residual");
+             }
+-            self.q.copy_from_slice(&self.next);
+             if residual <= 1e-11 {
++                self.q.copy_from_slice(&self.next);
+                 self.forces(wires);
+                 dq.fill(0.);
+                 dv.fill(0.);
+@@ -169,7 +179,102 @@ impl Collocation {
+                 }
+                 return Ok((iteration, residual));
+             }
++            if let Some(acceleration) = &mut self.acceleration {
++                acceleration.advance(&self.next, &mut self.q, omega2, wires[0].size(), iteration);
++            } else {
++                self.q.copy_from_slice(&self.next);
++            }
+         }
+         Err("collocation did not converge")
+     }
+ }
++
++/// Two secant directions accelerate only the nonlinear solver. The original
++/// fixed-point residual, not the mixed update, remains the acceptance test.
++struct Anderson {
++    f1: Vec<f64>,
++    f2: Vec<f64>,
++    r1: Vec<f64>,
++    r2: Vec<f64>,
++}
++impl Anderson {
++    fn new(size: usize) -> Self {
++        Self {
++            f1: vec![0.; size],
++            f2: vec![0.; size],
++            r1: vec![0.; size],
++            r2: vec![0.; size],
++        }
++    }
++    fn prepared_bytes(&self) -> usize {
++        (self.f1.capacity() + self.f2.capacity() + self.r1.capacity() + self.r2.capacity()) * 8
++    }
++    fn advance(
++        &mut self,
++        f: &[f64],
++        q: &mut [f64],
++        omega2: &[f64],
++        width: usize,
++        iteration: usize,
++    ) {
++        let size = omega2.len();
++        let mut sums = [[0.; 7]; 3];
++        if iteration > 1 {
++            for k in 0..q.len() {
++                let mode = k % size;
++                let s = &mut sums[mode / width];
++                let r = f[k] - q[k];
++                let d1 = r - self.r1[k];
++                let d2 = if iteration > 2 {
++                    self.r1[k] - self.r2[k]
++                } else {
++                    0.
++                };
++                let w = omega2[mode];
++                s[0] += w * d1 * d1;
++                s[1] += w * d1 * d2;
++                s[2] += w * d2 * d2;
++                s[3] += w * d1 * r;
++                s[4] += w * d2 * r;
++                s[5] += w * r * r;
++                s[6] += w * self.r1[k] * self.r1[k];
++            }
++        }
++        let mut gamma = [[0.; 2]; 3];
++        for (g, s) in gamma.iter_mut().zip(sums) {
++            // Revert to Picard on a growing residual or a singular secant fit.
++            // Bounds constrain the numerical extrapolation, never material
++            // forces, state amplitudes, or the convergence tolerance.
++            if s[5] > s[6] || s[0] == 0. {
++                continue;
++            }
++            let det = s[0] * s[2] - s[1] * s[1];
++            if det > 1e-12 * s[0] * s[2] {
++                *g = [
++                    (s[2] * s[3] - s[1] * s[4]) / det,
++                    (s[0] * s[4] - s[1] * s[3]) / det,
++                ];
++            } else {
++                g[0] = s[3] / s[0];
++            }
++            if !g.iter().all(|x| x.is_finite()) || g[0].abs() + g[1].abs() > 2. {
++                *g = [0.; 2];
++            }
++        }
++        for k in 0..q.len() {
++            let r = f[k] - q[k];
++            let g = gamma[(k % size) / width];
++            let d1 = if iteration > 1 { f[k] - self.f1[k] } else { 0. };
++            let d2 = if iteration > 2 {
++                self.f1[k] - self.f2[k]
++            } else {
++                0.
++            };
++            q[k] = f[k] - g[0] * d1 - g[1] * d2;
++            self.f2[k] = self.f1[k];
++            self.f1[k] = f[k];
++            self.r2[k] = self.r1[k];
++            self.r1[k] = r;
++        }
++    }
++}
+diff --git a/tools/concert-grand-phase-trajectory.rs b/tools/concert-grand-phase-trajectory.rs
+index f384ea7c..1f21c3f9 100644
+--- a/tools/concert-grand-phase-trajectory.rs
++++ b/tools/concert-grand-phase-trajectory.rs
+@@ -697,6 +697,11 @@ fn main() {
+         use_collocation,
+     );
+     model.constrained = !args.iter().any(|x| x == "--unconstrained");
++    if args.iter().any(|x| x == "--plain-picard") {
++        if let Some(collocation) = &mut model.collocation {
++            collocation.set_plain_picard();
++        }
++    }
+     model.transverse_sample_gradient = !args.iter().any(|x| x == "--full-sample-gradient");
+     model.per_wire_constraint = !args.iter().any(|x| x == "--shared-energy-root");
+     if let Some(limit) = args

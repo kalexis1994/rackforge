@@ -697,6 +697,11 @@ fn main() {
         use_collocation,
     );
     model.constrained = !args.iter().any(|x| x == "--unconstrained");
+    if args.iter().any(|x| x == "--refresh-converged-forces") {
+        if let Some(collocation) = &mut model.collocation {
+            collocation.refresh_converged_forces();
+        }
+    }
     model.transverse_sample_gradient = !args.iter().any(|x| x == "--full-sample-gradient");
     model.per_wire_constraint = !args.iter().any(|x| x == "--shared-energy-root");
     if let Some(limit) = args

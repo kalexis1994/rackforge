@@ -213,6 +213,17 @@ fallan ampliamente el plazo. Pasan 20 pruebas actuales de fase/trayectoria;
 suite acumulada 46. Es un nuevo control experimental por flag, validado sólo
 en este sostenido; siguen costo/duración e integración antes del host tocable.
 
+La reutilización de fuerzas en los nodos convergidos elimina una evaluación
+final por paso sin cambiar el residual 1e−11. En los 6 ms, el estado cambia
+como máximo **3,572e−12** respecto a 98487265 y pasa energía por cuerda.
+CPU a 512 kHz/8 baja **91,442 → 81,739/85,854 ms** de media (**10,61/6,11 %**),
+máximos **83,877/93,305 ms**, cero asignaciones y misma memoria contabilizada.
+El presupuesto de 0,125 ms sigue rechazado. Pasan 21 pruebas actuales;
+suite acumulada 47. El refresco final anterior se conserva por flag y es
+exacto al control. Anderson se descarta por mayor costo e iteraciones.
+Ver [medición](medidas-P7-cuerdas-nativas-2026-10-13/collocation-force-reuse.json)
+y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

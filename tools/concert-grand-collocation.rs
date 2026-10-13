@@ -33,6 +33,7 @@ pub(super) fn integration_matrix(rule: &[(f64, f64)], h: f64) -> Vec<f64> {
 }
 
 pub(super) struct Collocation {
+    refresh_converged_forces: bool,
     order: usize,
     size: usize,
     transfer: Vec<[f64; 2]>,
@@ -72,6 +73,7 @@ impl Collocation {
             }
         }
         Self {
+            refresh_converged_forces: false,
             order,
             size,
             transfer,
@@ -100,6 +102,9 @@ impl Collocation {
                 wire.point_nonlinearity(&self.q[range.clone()], &mut self.gradient[range]);
             }
         }
+    }
+    pub(super) fn refresh_converged_forces(&mut self) {
+        self.refresh_converged_forces = true;
     }
     pub(super) fn solve(
         &mut self,
@@ -155,9 +160,14 @@ impl Collocation {
             if !residual.is_finite() {
                 return Err("nonfinite collocation residual");
             }
-            self.q.copy_from_slice(&self.next);
             if residual <= 1e-11 {
-                self.forces(wires);
+                // g(q) already belongs to nodes whose fixed-point residual
+                // meets the original tolerance. Use that certified iterate.
+                // The control performs one extra update and force evaluation.
+                if self.refresh_converged_forces {
+                    self.q.copy_from_slice(&self.next);
+                    self.forces(wires);
+                }
                 dq.fill(0.);
                 dv.fill(0.);
                 for node in 0..self.order {
@@ -169,6 +179,7 @@ impl Collocation {
                 }
                 return Ok((iteration, residual));
             }
+            self.q.copy_from_slice(&self.next);
         }
         Err("collocation did not converge")
     }

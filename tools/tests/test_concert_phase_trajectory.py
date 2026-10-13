@@ -209,6 +209,21 @@ class PhaseTrajectoryTests(unittest.TestCase):
         self.assertEqual(bench['allocations'],0)
         np.testing.assert_array_equal(bench['q'],verify['q']);np.testing.assert_array_equal(bench['v'],verify['v'])
 
+    def test_converged_node_force_reuse_preserves_state_and_wire_energy(self):
+        for nt,rate,order in [(4,128000,8),(96,128000,24),(96,256000,16),(96,512000,8)]:
+            f=fixture(transverse=nt,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.
+            reused=self.run_native(f,'verify',1,order,'--collocation')
+            refreshed=self.run_native(f,'verify',1,order,'--collocation','--refresh-converged-forces')
+            omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+            def metric(d):return np.r_[omega*np.asarray(d['q'])[:-1],d['v'][:-1]]
+            self.assertTrue(reused['completed'] and refreshed['completed'])
+            self.assertLess(relative(metric(reused),metric(refreshed)),1e-10)
+            initial=self.audit.wire_energies(f,f['q'],f['v'])
+            final=self.audit.wire_energies(f,reused['q'],reused['v'])
+            self.assertLess(max(abs(final-initial)/np.maximum(initial,1e-30)),1e-9)
+            self.assertEqual(reused['allocations'],0)
+            self.assertLess(reused['midpoint_residual_relative_max'],1e-11)
+
     def test_coupled_trajectory_refines_against_continuous_ode(self):
         f=self.coast(4,.0005);ns=len(f['q'])-1;core=f['system'].string
         def derivative(_t,y):

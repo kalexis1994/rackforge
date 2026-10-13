@@ -124,3 +124,64 @@ Sigue reducir ese costo, mantener el refinamiento de orden/reloj y extender
 la validación de duración antes de martillo, cuerpo, presión, pedales y
 polifonía. El flag experimental no selecciona, instala ni modifica fábrica;
 todavía no hay instrumento tocable integrado.
+
+## Reutilización de las fuerzas al converger
+
+La [medición de reutilización](medidas-P7-cuerdas-nativas-2026-10-13/collocation-force-reuse.json)
+autentica el control **98487265** y reutiliza sus referencias finas. La ruta
+anterior calculaba `F(q)`, verificaba `|F(q)−q|` y, al pasar el gate, actualizaba
+otra vez los nodos y recalculaba todas sus fuerzas. La ruta nueva usa las
+fuerzas de los nodos `q` que ya cumplen ese residual. No cambia la ecuación,
+el límite de iteraciones ni la tolerancia **1e−11**; elimina una pasada de
+fuerzas por paso. La reconstrucción del extremo y las raíces energéticas
+siguen usando el mismo potencial SI. El estado físico se publica después
+de completar todas las comprobaciones.
+
+`--refresh-converged-forces` conserva la actualización y evaluación finales
+anteriores. Reproduce **exactamente** q/v, ledger y lambda de 98487265 en los
+tres controles de 6 ms. La reutilización cambia el estado respecto al control
+en **2,559e−13 / 3,572e−12 / 1,450e−13** a 128/256/512 kHz; pasa un gate
+de comparación 1e−9 además del gate de 1 % frente al maestro independiente.
+
+| Reloj / orden | Error frente a 16,384 MHz | Máximo energético por cuerda | Ledger total máximo |
+|---|---:|---:|---:|
+| 128 kHz / 24 | 0,053051 % | 2,048e−13 | 1,239e−13 |
+| 256 kHz / 16 | 0,040580 % | 4,974e−14 | 5,010e−14 |
+| 512 kHz / 8 | 0,044801 % | 8,302e−14 | 2,883e−14 |
+
+CPU vuelve a medirse secuencialmente con ocho buffers de **0,125 ms** y
+**1 ms físico total**, incluyendo comprobaciones de energía por paso:
+
+| Ruta | Media por buffer | P99/máximo | Asignaciones |
+|---|---:|---:|---:|
+| Ejecutable congelado 98487265, 512 kHz/8 | 91,442 ms | 96,460 ms | 0 |
+| Ejecutable actual, refresco final | 98,953 ms | 107,234 ms | 0 |
+| Reutilización 512 kHz/8 | **81,739 ms** | **83,877 ms** | **0** |
+| Repetición de reutilización | **85,854 ms** | **93,305 ms** | **0** |
+| Reutilización 256 kHz/16 | 94,355 ms | 100,778 ms | 0 |
+
+Frente al ejecutable congelado, la media baja **10,61 %**, repetición
+**6,11 %**. Los dos máximos también bajan en estos ensayos. Las tablas/buffers
+contabilizados no crecen: **1.179.648 bytes** a 512 kHz/8; máximos de
+iteraciones siguen en 8/7/6 para 128/256/512 kHz. Todos los benchmarks pasan
+ledger y energía por cuerda. **CPU sigue rechazado**: 83,877/93,305 ms frente
+a 0,125 ms, unas 671/746 veces el plazo. Las cifras no amplían la aprobación
+de trayectoria fuera de los 6 ms.
+
+Pasan **21 pruebas actuales** de fase/trayectoria. La nueva regresión compara
+reutilización y refresco en cuatro/96 modos y tres relojes, verifica estado,
+energía individual, residual y ausencia de asignaciones. Se mantiene el
+refinamiento contra ODE continuo sin proyección. La suite acumulada contiene
+47 pruebas; el núcleo nativo y presión no cambian en esta etapa.
+
+Antes se probó acelerar la iteración con dos direcciones secantes Anderson
+por cuerda. Se conserva el
+[ensayo rechazado](medidas-P7-cuerdas-nativas-2026-10-13/collocation-anderson-rejected.json)
+y su [patch reproducible](medidas-P7-cuerdas-nativas-2026-10-13/collocation-anderson-rejected.patch)
+sobre 98487265: en los mismos 6 ms a 512 kHz/8, máximo **7 iteraciones** frente
+a **6** y tiempo de evolución **4,990 s** frente a **4,250 s**. Es tiempo total
+del sostenido, no el benchmark por callback. Se descarta por mayor trabajo;
+su código no queda en la ruta actual.
+
+Sigue reducir las evaluaciones y contracciones de la colocación, y extender
+duración/contacto antes de integración con cuerpo, presión, pedales y polifonía.

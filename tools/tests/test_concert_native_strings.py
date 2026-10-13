@@ -151,6 +151,8 @@ class NativeStringsTests(unittest.TestCase):
         micro=self.run_native(f,'verify-ramp',64,'--micro-reference')
         self.assertEqual(native['certified_flight_blocks'],0)
         self.assertGreater(native['force_peak_n'],1.)
+        self.assertEqual(native['scalar_flight_blocks'],0)
+        self.assertGreater(native['scalar_flight_fallbacks'],0)
         np.testing.assert_allclose(native['q'],micro['q'],rtol=2e-8,atol=2e-12)
         np.testing.assert_allclose(native['v'],micro['v'],rtol=2e-8,atol=2e-9)
         np.testing.assert_allclose(native['force_trace'],micro['force_trace'],rtol=2e-8,atol=2e-8)
@@ -235,6 +237,26 @@ class NativeStringsTests(unittest.TestCase):
             self.assertLess(np.linalg.norm(actual-expected)/np.linalg.norm(expected),1e-6)
             self.assertLess(native['work_relative_max'],1e-9)
             self.assertLess(old['work_relative_max'],1e-9)
+
+
+    def test_scalar_work_coefficient_matches_full_vector_step(self):
+        f=fixture(transverse=96,rate=128000,seed=83,duration=.002)
+        f['launch_speeds'][:]=0.
+        mass=f['parameters'][5]
+        f['q'][-1]=-.005*np.sqrt(mass)
+        f['v'][-1]=-np.sqrt(mass)
+        native=self.run_native(f,'verify-ramp',16)
+        vector=self.run_native(f,'verify-ramp',16,'--vector-flight')
+        self.assertGreater(native['scalar_flight_blocks'],0)
+        self.assertEqual(vector['scalar_flight_blocks'],0)
+        omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+        target=np.r_[omega*np.asarray(vector['q'])[:-1],vector['v']]
+        actual=np.r_[omega*np.asarray(native['q'])[:-1],native['v']]
+        self.assertLess(np.linalg.norm(actual-target)/np.linalg.norm(target),1e-6)
+        self.assertLess(native['work_relative_max'],1e-9)
+        self.assertLess(vector['work_relative_max'],1e-9)
+        self.assertEqual(native['force_peak_n'],0.)
+        self.assertEqual(native['heat_j'],0.)
 
 
 

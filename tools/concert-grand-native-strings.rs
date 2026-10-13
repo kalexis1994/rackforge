@@ -305,7 +305,8 @@ struct AxialEndpoint<'a> {
     v0: &'a [f64],
     start_force: &'a [f64],
     end_force: &'a mut [f64],
-    correction: &'a [f64],
+    correction: &'a mut [f64],
+    scalar_correction: Option<f64>,
     weighted_displacement: &'a mut [f64],
     coordinate_work: &'a mut [f64],
     transfer: &'a [[f64; 10]],
@@ -504,7 +505,17 @@ impl Wire {
         for j in 0..nl {
             let force = out[j];
             let slope = (force - endpoint.start_force[j]) / endpoint.frames as f64;
-            let first = endpoint.start_force[j] + 0.5 * slope + endpoint.correction[j];
+            let base_first = endpoint.start_force[j] + 0.5 * slope;
+            if let Some(lambda) = endpoint.scalar_correction {
+                let t = endpoint.transfer[j];
+                let free = t[0] * endpoint.q0[j]
+                    + t[1] * endpoint.v0[j]
+                    + t[2] * base_first
+                    + t[3] * slope;
+                let q = (free - t[2] * lambda * endpoint.q0[j]) / (1. - t[2] * lambda);
+                endpoint.correction[j] = lambda * (q - endpoint.q0[j]);
+            }
+            let first = base_first + endpoint.correction[j];
             let q0 = endpoint.q0[j];
             let v0 = endpoint.v0[j];
             let (q1, v1, work, weighted) = if endpoint.micro_reference {
@@ -747,6 +758,103 @@ pub struct Stats {
     pub force: f64,
     pub iterations: usize,
 }
+fn anderson_update(
+    iteration: usize,
+    x: &mut [f64],
+    fx: &[f64],
+    history_x: &mut [f64],
+    history_r: &mut [f64],
+    delta_r: &mut [f64],
+    delta_f: &mut [f64],
+    gram_dot: fn(&[f64], &[f64]) -> f64,
+) {
+    let n = x.len();
+    let slot = iteration % 4;
+    history_x[slot * n..(slot + 1) * n].copy_from_slice(x);
+    for j in 0..n {
+        history_r[slot * n + j] = fx[j] - x[j];
+    }
+    let depth = iteration.min(3);
+    let mut coefficients = [0.; 3];
+    let mut matrix = [[0.; 3]; 3];
+    if depth > 0 {
+        for i in 0..depth {
+            let before = (iteration - depth + i) % 4;
+            let after = (iteration - depth + i + 1) % 4;
+            let dr = &mut delta_r[i * n..(i + 1) * n];
+            let df = &mut delta_f[i * n..(i + 1) * n];
+            for (((((dr, df), xa), xb), ra), rb) in dr
+                .iter_mut()
+                .zip(df)
+                .zip(&history_x[after * n..(after + 1) * n])
+                .zip(&history_x[before * n..(before + 1) * n])
+                .zip(&history_r[after * n..(after + 1) * n])
+                .zip(&history_r[before * n..(before + 1) * n])
+            {
+                *dr = *ra - *rb;
+                *df = *xa - *xb + *ra - *rb;
+            }
+            coefficients[i] = (gram_dot)(
+                &delta_r[i * n..(i + 1) * n],
+                &history_r[slot * n..(slot + 1) * n],
+            );
+        }
+        for i in 0..depth {
+            for j in i..depth {
+                let value = (gram_dot)(&delta_r[i * n..(i + 1) * n], &delta_r[j * n..(j + 1) * n]);
+                matrix[i][j] = value;
+                matrix[j][i] = value;
+            }
+        }
+        let ridge = (0..depth).map(|i| matrix[i][i]).fold(0f64, f64::max) * 1e-10;
+        let mut valid = ridge > 0. && ridge.is_finite();
+        for i in 0..depth {
+            matrix[i][i] += ridge;
+        }
+        for column in 0..depth {
+            let pivot = (column..depth)
+                .max_by(|i, j| {
+                    matrix[*i][column]
+                        .abs()
+                        .total_cmp(&matrix[*j][column].abs())
+                })
+                .unwrap();
+            matrix.swap(column, pivot);
+            coefficients.swap(column, pivot);
+            if !matrix[column][column].is_finite() || matrix[column][column].abs() < 1e-300 {
+                valid = false;
+                break;
+            }
+            for row in column + 1..depth {
+                let fraction = matrix[row][column] / matrix[column][column];
+                for j in column..depth {
+                    matrix[row][j] -= fraction * matrix[column][j];
+                }
+                coefficients[row] -= fraction * coefficients[column];
+            }
+        }
+        if valid {
+            for i in (0..depth).rev() {
+                coefficients[i] = (coefficients[i]
+                    - (i + 1..depth)
+                        .map(|j| matrix[i][j] * coefficients[j])
+                        .sum::<f64>())
+                    / matrix[i][i];
+            }
+            valid = coefficients[..depth].iter().all(|v| v.is_finite())
+                && coefficients[..depth].iter().map(|v| v.abs()).sum::<f64>() <= 8.;
+        }
+        if !valid {
+            coefficients.fill(0.);
+        }
+    }
+    x.copy_from_slice(fx);
+    for i in 0..depth {
+        for (value, difference) in x.iter_mut().zip(&delta_f[i * n..(i + 1) * n]) {
+            *value -= coefficients[i] * difference;
+        }
+    }
+}
 pub struct Choir {
     wires: Vec<Wire>,
     width: usize,
@@ -800,6 +908,12 @@ pub struct Choir {
     ramp_coordinate_work: Vec<f64>,
     use_condensed_axial: bool,
     canonical_correction: bool,
+    solver_x: Vec<f64>,
+    solver_next: Vec<f64>,
+    transverse_indices: Vec<usize>,
+    use_scalar_flight: bool,
+    scalar_flight_blocks: usize,
+    scalar_flight_fallbacks: usize,
 }
 impl Choir {
     fn new(
@@ -909,6 +1023,9 @@ impl Choir {
                 sb += qb;
             }
         }
+        let transverse_indices = (0..3)
+            .flat_map(|i| (0..2 * nt).map(move |j| i * width + (width - 2 * nt) + j))
+            .collect();
         Self {
             wires,
             width,
@@ -962,6 +1079,12 @@ impl Choir {
             ramp_coordinate_work: vec![0.; size],
             use_condensed_axial: true,
             canonical_correction: true,
+            solver_x: vec![0.; 2 * size],
+            solver_next: vec![0.; 2 * size],
+            transverse_indices,
+            use_scalar_flight: true,
+            scalar_flight_blocks: 0,
+            scalar_flight_fallbacks: 0,
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -1369,6 +1492,172 @@ impl Choir {
         }
         true
     }
+    /// Solve the determined force-free block in transverse endpoint forces
+    /// and one signed work coefficient. All axial q/v are still propagated.
+    /// A failed contact certificate or unsafe iterate returns to the full
+    /// determined solver with the initial physical state, never a shortened
+    /// or partially accepted trajectory.
+    fn try_scalar_flight(&mut self, frames: usize, potential0: f64, energy: f64) -> Option<Stats> {
+        let head = self.size - 1;
+        let h = frames as f64 * self.dt;
+        let head0 = self.block_start_q[head] / self.mass.sqrt();
+        let travel = h * self.block_start_v[head] / self.mass.sqrt();
+        if !head0.max(head0 + travel).is_finite() || head0.max(head0 + travel) >= -1e-15 {
+            return None;
+        }
+        let mut displacement_scale2 = 0.;
+        for j in 0..head {
+            let t = self.ramp_transfer[frames * self.size + j];
+            let q = t[0] * self.block_start_q[j]
+                + t[1] * self.block_start_v[j]
+                + t[2] * self.ramp_start_force[j];
+            displacement_scale2 += (q - self.block_start_q[j]).powi(2);
+        }
+        let scale = displacement_scale2
+            .sqrt()
+            .max(h * self.block_start_v[head].abs())
+            .max(1e-12);
+        let n = self.transverse_indices.len() + 1;
+        for (row, &j) in self.transverse_indices.iter().enumerate() {
+            self.solver_x[row] = self.ramp_start_force[j];
+        }
+        self.solver_x[n - 1] = 0.;
+        for outer in 0..32 {
+            let gamma = self.solver_x[n - 1];
+            let lambda = gamma / scale;
+            if !lambda.is_finite() {
+                return None;
+            }
+            for j in 0..head {
+                let denominator = 1. - self.ramp_transfer[frames * self.size + j][2] * lambda;
+                if !denominator.is_finite() || denominator <= 1e-6 {
+                    return None;
+                }
+            }
+            self.q.copy_from_slice(&self.block_start_q);
+            self.v.copy_from_slice(&self.block_start_v);
+            self.ramp_end_force.copy_from_slice(&self.ramp_start_force);
+            self.ramp_correction.fill(0.);
+            self.ramp_coordinate_work.fill(0.);
+            self.ramp_weighted_displacement.fill(0.);
+            let mut work = 0.;
+            for (row, &j) in self.transverse_indices.iter().enumerate() {
+                let force = self.solver_x[row];
+                self.ramp_end_force[j] = force;
+                let t = self.ramp_transfer[frames * self.size + j];
+                let q0 = self.block_start_q[j];
+                let v0 = self.block_start_v[j];
+                let slope = (force - self.ramp_start_force[j]) / frames as f64;
+                let base = self.ramp_start_force[j] + 0.5 * slope;
+                let free = t[0] * q0 + t[1] * v0 + t[2] * base + t[3] * slope;
+                let projected = (free - t[2] * lambda * q0) / (1. - t[2] * lambda);
+                let correction = lambda * (projected - q0);
+                self.ramp_correction[j] = correction;
+                let first = base + correction;
+                let q = t[0] * q0 + t[1] * v0 + t[2] * first + t[3] * slope;
+                let v = -self.omega2[j] * t[1] * q0 + t[0] * v0 + t[4] * first + t[5] * slope;
+                let sum = t[6] * q0 + t[7] * v0 + t[8] * first + t[9] * slope;
+                let local_work =
+                    (first + slope * (frames - 1) as f64) * q - first * q0 - slope * sum;
+                self.q[j] = q;
+                self.v[j] = v;
+                self.ramp_coordinate_work[j] = local_work;
+                work += local_work;
+                self.ramp_weighted_displacement[j] =
+                    (1. - 0.5 / frames as f64) * q - 0.5 / frames as f64 * q0 - sum / frames as f64;
+            }
+            if !self.certified_ramp_flight(frames) {
+                return None;
+            }
+            self.q[head] = self.block_start_q[head] + h * self.block_start_v[head];
+            self.block_next_force.fill(0.);
+            let mut potential1 = 0.;
+            for i in 0..3 {
+                let start = i * self.width;
+                let end = (i + 1) * self.width;
+                let endpoint = AxialEndpoint {
+                    frames,
+                    micro_reference: false,
+                    q: &mut self.q[start..end],
+                    v: &mut self.v[start..end],
+                    q0: &self.block_start_q[start..end],
+                    v0: &self.block_start_v[start..end],
+                    start_force: &self.ramp_start_force[start..end],
+                    end_force: &mut self.ramp_end_force[start..end],
+                    correction: &mut self.ramp_correction[start..end],
+                    scalar_correction: Some(lambda),
+                    weighted_displacement: &mut self.ramp_weighted_displacement[start..end],
+                    coordinate_work: &mut self.ramp_coordinate_work[start..end],
+                    transfer: &self.ramp_transfer
+                        [frames * self.size + start..frames * self.size + end],
+                    c: &self.c[start..end],
+                    s: &self.s[start..end],
+                    gain: &self.gain[start..end],
+                };
+                let (potential, delta_work) = self.wires[i]
+                    .point_condensed_axial(endpoint, &mut self.block_next_force[start..end]);
+                potential1 += potential;
+                work += delta_work;
+            }
+            let residual = potential1 - potential0 - work;
+            let mut shifted = residual;
+            let mut force_difference = 0.;
+            let mut displacement2 = 0.;
+            for (row, &j) in self.transverse_indices.iter().enumerate() {
+                let delta = self.block_next_force[j] - self.ramp_end_force[j];
+                force_difference += delta * delta;
+                shifted -= delta * self.ramp_weighted_displacement[j];
+                self.solver_next[row] = self.block_next_force[j];
+            }
+            for j in 0..head {
+                displacement2 += (self.q[j] - self.block_start_q[j]).powi(2);
+            }
+            let next_gamma = if displacement2 > 1e-40 {
+                gamma + shifted * scale / displacement2
+            } else if shifted.abs() <= 1e-13 * energy.max(1e-30) {
+                0.
+            } else {
+                return None;
+            };
+            let correction_difference = (next_gamma - gamma).abs() * displacement2.sqrt() / scale;
+            let force_scale = norm(&self.block_next_force)
+                .max(norm(&self.ramp_end_force))
+                .max(norm(&self.ramp_correction))
+                .max(1e-30);
+            if !residual.is_finite() || !next_gamma.is_finite() || !force_difference.is_finite() {
+                return None;
+            }
+            if force_difference.sqrt() <= 1e-11 * force_scale
+                && correction_difference <= 1e-11 * force_scale
+                && residual.abs() <= 1e-13 * energy.max(1e-30)
+            {
+                self.last_outer_iterations = outer + 1;
+                self.last_certified_flight = true;
+                self.endpoint_force.copy_from_slice(&self.block_next_force);
+                self.endpoint_potential = potential1;
+                self.endpoint_valid = true;
+                self.block_trace[..frames].fill(0.);
+                self.scalar_flight_blocks += 1;
+                return Some(Stats {
+                    heat: 0.,
+                    force: 0.,
+                    iterations: 1,
+                });
+            }
+            self.solver_next[n - 1] = next_gamma;
+            anderson_update(
+                outer,
+                &mut self.solver_x[..n],
+                &self.solver_next[..n],
+                &mut self.anderson_x,
+                &mut self.anderson_r,
+                &mut self.anderson_delta_r,
+                &mut self.anderson_delta_f,
+                self.gram_dot,
+            );
+        }
+        None
+    }
     /// Endpoint force interpolation plus an explicit discrete-work correction.
     /// The correction acts only on string coordinates, never on the hammer.
     /// It is solved jointly with the endpoint trajectory, not applied after it.
@@ -1408,6 +1697,18 @@ impl Choir {
                     .compression(&self.q, i)
                     .max(0.)
                     .powf(self.exponent + 1.);
+        }
+        if self.use_scalar_flight
+            && self.use_condensed_axial
+            && self.canonical_correction
+            && !self.ramp_micro_reference
+        {
+            if let Some(stats) = self.try_scalar_flight(frames, potential0, energy) {
+                return Ok(stats);
+            }
+            self.scalar_flight_fallbacks += 1;
+            self.q.copy_from_slice(&self.block_start_q);
+            self.v.copy_from_slice(&self.block_start_v);
         }
         self.ramp_end_force.copy_from_slice(&self.ramp_start_force);
         self.ramp_correction.fill(0.);
@@ -1546,7 +1847,8 @@ impl Choir {
                         v0: &self.block_start_v[start..end],
                         start_force: &self.ramp_start_force[start..end],
                         end_force: &mut self.ramp_end_force[start..end],
-                        correction: &self.ramp_correction[start..end],
+                        correction: &mut self.ramp_correction[start..end],
+                        scalar_correction: None,
                         weighted_displacement: &mut self.ramp_weighted_displacement[start..end],
                         coordinate_work: &mut self.ramp_coordinate_work[start..end],
                         transfer: &self.ramp_transfer
@@ -1636,110 +1938,24 @@ impl Choir {
     /// force/work equations or convergence tolerances. Storage is prepared.
     fn accelerate_ramp_fixed_point(&mut self, iteration: usize) {
         let n = 2 * self.size;
-        let slot = iteration % 4;
-        for j in 0..self.size {
-            self.anderson_x[slot * n + j] = self.ramp_end_force[j];
-            self.anderson_x[slot * n + self.size + j] = self.ramp_correction[j];
-            self.anderson_r[slot * n + j] = self.block_next_force[j] - self.ramp_end_force[j];
-            self.anderson_r[slot * n + self.size + j] =
-                self.ramp_next_correction[j] - self.ramp_correction[j];
-        }
-        let depth = iteration.min(3);
-        let mut coefficients = [0.; 3];
-        let mut matrix = [[0.; 3]; 3];
-        if depth > 0 {
-            for i in 0..depth {
-                let before = (iteration - depth + i) % 4;
-                let after = (iteration - depth + i + 1) % 4;
-                let dr = &mut self.anderson_delta_r[i * n..(i + 1) * n];
-                let df = &mut self.anderson_delta_f[i * n..(i + 1) * n];
-                for (((((dr, df), xa), xb), ra), rb) in dr
-                    .iter_mut()
-                    .zip(df)
-                    .zip(&self.anderson_x[after * n..(after + 1) * n])
-                    .zip(&self.anderson_x[before * n..(before + 1) * n])
-                    .zip(&self.anderson_r[after * n..(after + 1) * n])
-                    .zip(&self.anderson_r[before * n..(before + 1) * n])
-                {
-                    *dr = *ra - *rb;
-                    *df = *xa - *xb + *ra - *rb;
-                }
-                coefficients[i] = (self.gram_dot)(
-                    &self.anderson_delta_r[i * n..(i + 1) * n],
-                    &self.anderson_r[slot * n..(slot + 1) * n],
-                );
-            }
-            for i in 0..depth {
-                for j in i..depth {
-                    let value = (self.gram_dot)(
-                        &self.anderson_delta_r[i * n..(i + 1) * n],
-                        &self.anderson_delta_r[j * n..(j + 1) * n],
-                    );
-                    matrix[i][j] = value;
-                    matrix[j][i] = value;
-                }
-            }
-            let ridge = (0..depth).map(|i| matrix[i][i]).fold(0f64, f64::max) * 1e-10;
-            let mut valid = ridge > 0. && ridge.is_finite();
-            for i in 0..depth {
-                matrix[i][i] += ridge;
-            }
-            for column in 0..depth {
-                let pivot = (column..depth)
-                    .max_by(|i, j| {
-                        matrix[*i][column]
-                            .abs()
-                            .total_cmp(&matrix[*j][column].abs())
-                    })
-                    .unwrap();
-                matrix.swap(column, pivot);
-                coefficients.swap(column, pivot);
-                if !matrix[column][column].is_finite() || matrix[column][column].abs() < 1e-300 {
-                    valid = false;
-                    break;
-                }
-                for row in column + 1..depth {
-                    let fraction = matrix[row][column] / matrix[column][column];
-                    for j in column..depth {
-                        matrix[row][j] -= fraction * matrix[column][j];
-                    }
-                    coefficients[row] -= fraction * coefficients[column];
-                }
-            }
-            if valid {
-                for i in (0..depth).rev() {
-                    coefficients[i] = (coefficients[i]
-                        - (i + 1..depth)
-                            .map(|j| matrix[i][j] * coefficients[j])
-                            .sum::<f64>())
-                        / matrix[i][i];
-                }
-                valid = coefficients[..depth].iter().all(|v| v.is_finite())
-                    && coefficients[..depth].iter().map(|v| v.abs()).sum::<f64>() <= 8.;
-            }
-            if !valid {
-                coefficients.fill(0.);
-            }
-        }
-        self.ramp_end_force.copy_from_slice(&self.block_next_force);
+        self.solver_x[..self.size].copy_from_slice(&self.ramp_end_force);
+        self.solver_x[self.size..n].copy_from_slice(&self.ramp_correction);
+        self.solver_next[..self.size].copy_from_slice(&self.block_next_force);
+        self.solver_next[self.size..n].copy_from_slice(&self.ramp_next_correction);
+        anderson_update(
+            iteration,
+            &mut self.solver_x[..n],
+            &self.solver_next[..n],
+            &mut self.anderson_x,
+            &mut self.anderson_r,
+            &mut self.anderson_delta_r,
+            &mut self.anderson_delta_f,
+            self.gram_dot,
+        );
+        self.ramp_end_force
+            .copy_from_slice(&self.solver_x[..self.size]);
         self.ramp_correction
-            .copy_from_slice(&self.ramp_next_correction);
-        for i in 0..depth {
-            for (force, delta) in self
-                .ramp_end_force
-                .iter_mut()
-                .zip(&self.anderson_delta_f[i * n..i * n + self.size])
-            {
-                *force -= coefficients[i] * delta;
-            }
-            for (correction, delta) in self
-                .ramp_correction
-                .iter_mut()
-                .zip(&self.anderson_delta_f[i * n + self.size..(i + 1) * n])
-            {
-                *correction -= coefficients[i] * delta;
-            }
-        }
+            .copy_from_slice(&self.solver_x[self.size..n]);
     }
     pub fn step(&mut self) -> Result<Stats, &'static str> {
         self.endpoint_valid = false;
@@ -1907,6 +2123,7 @@ fn main() {
     choir.use_endpoint_cache = !args.iter().any(|arg| arg == "--uncached");
     choir.use_condensed_axial = !args.iter().any(|arg| arg == "--uncondensed");
     choir.canonical_correction = !args.iter().any(|arg| arg == "--legacy-correction");
+    choir.use_scalar_flight = !args.iter().any(|arg| arg == "--vector-flight");
     if args.iter().any(|arg| arg == "--portable") {
         choir.gram_dot = dot;
         for wire in &mut choir.wires {
@@ -2029,7 +2246,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -2103,5 +2320,5 @@ fn main() {
         0.
     };
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks);
 }

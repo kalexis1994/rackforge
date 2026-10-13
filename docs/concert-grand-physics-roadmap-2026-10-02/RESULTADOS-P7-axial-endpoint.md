@@ -63,3 +63,26 @@ determinado; no se presenta como identidad con el paso anterior ambiguo.
 conserva el ataque y el fallo de presupuesto de 2 ms. Todavía se itera un
 vector de corrección completo. Sigue aprovechar su único coeficiente
 escalar en el vuelo certificado, sin dejar de verificar el contacto fino.
+
+## Vuelo con una corrección escalar
+
+En ausencia certificada de contacto, el mapa lineal permite resolver
+`q_end = (q_free - Qa lambda q_start)/(1 - Qa lambda)` y `c=lambda Δq`
+directamente para las coordenadas transversales. Después se determina el
+extremo axial con la misma identidad, conservando su posición/velocidad.
+Sólo se iteran 576 fuerzas transversales y un coeficiente de trabajo: **577**
+incógnitas frente a 2306 en la ruta vectorial, con **1153 estados físicos**.
+El escalado del coeficiente es fijo por bloque y tiene unidades de fuerza.
+Si una propuesta no certifica separación o no tiene denominadores seguros,
+se vuelve al solver determinado completo desde el estado físico inicial.
+`--vector-flight` conserva ese control.
+
+[Primer costo escalar](medidas-P7-cuerdas-nativas-2026-10-13/axial16-scalar-flight.json):
+128 kHz/16, 128 buffers. Media **2,0709 ms**, P99 **2,7140 ms**, máximo/ataque
+**4,3844 ms** frente a 2 ms. Cero asignaciones; 2033 vuelos escalares y 15
+retornos a la ruta completa. Estado corto cambia 3,37e−13 respecto a la ruta
+sin eliminación axial del mismo paso determinado. La prueba con ambos
+campos excitados también pasa ≤1e−6 contra la corrección vectorial.
+No se afirma mejora de tiempo respecto al primer costo vectorial; sigue
+calcular/escalar el vuelo sin trabajo redundante y reducir el costo de
+resolver nuevamente el contacto durante el ataque.

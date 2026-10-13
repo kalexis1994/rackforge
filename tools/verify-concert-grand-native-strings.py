@@ -45,6 +45,8 @@ def main():
         flags.append('--uncondensed')
     if parent.get('correction_direction')=='accumulated vector':
         flags.append('--legacy-correction')
+    if parent.get('scalar_flight') is False:
+        flags.append('--vector-flight')
     reused=None
     if args.reference_report:
         reused=json.loads(args.reference_report.read_text(encoding='utf-8'))
@@ -68,6 +70,7 @@ def main():
         math_backend=parent.get('math_backend','prepared CPU dispatch'),
         condensed_axial=parent.get('condensed_axial',False),
         correction_direction=parent.get('correction_direction','accumulated vector'),
+        scalar_flight=parent.get('scalar_flight',False),
         reference_parent_path=str(args.reference_report.resolve()) if reused else None,
         reference_parent_sha256=digest(args.reference_report) if reused else None,
         cases=[],
@@ -119,6 +122,8 @@ def main():
                         certified_flight_blocks=native.get('certified_flight_blocks',0),
                         cached_initial_gradients=native.get('cached_initial_gradients',0),
                         simd_fft=native.get('simd_fft',False),
+                        scalar_flight_blocks=native.get('scalar_flight_blocks',0),
+                        scalar_flight_fallbacks=native.get('scalar_flight_fallbacks',0),
                         completed=True, blocked_state_relative=state, attack_force_relative=force,
                         accuracy_1percent_gate_passed=state <= .01 and force <= .01,
                         mechanical_work_relative_max=native['work_relative_max'],

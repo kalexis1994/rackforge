@@ -105,6 +105,66 @@ el máximo no mejora uniformemente y C4 empeora frente al ensayo inicial.
 **Ambas rutas siguen fallando 2 ms**, incluso sin iteraciones/contacto.
 No atribuir estas medidas al tiempo del motor vigente ni sustituir sus gates.
 
+## Agrupación por salida y tablas compactas
+
+Continuación sobre **b1f4ce75**, con el motor y la referencia temporal intactos.
+[Medición de 512 buffers](medidas-P7-cuerdas-nativas-2026-10-13/phase-forces-grouped.json)
+y [repetición independiente](medidas-P7-cuerdas-nativas-2026-10-13/phase-forces-grouped-repeat.json).
+Ambas autentican fuentes de control desde Git, ejecutables, mismos fixtures
+y arrays anteriores. Se conserva también el pico alto de la primera corrida.
+
+Los términos se agrupan de manera estable por modo de salida. Cada salida
+acumula los cuatro canales de fase en registros SIMD y se reduce al terminar
+su grupo, en lugar de reducir/escribir cada término. Para el coro se pasa de
+137.664 reducciones de pares `delta q/delta v` a 1.152 por evaluación; esto
+no implica esa misma aceleración de CPU. La ruta portable mantiene la suma
+escalar original dentro de cada salida y reproduce sus arrays exactamente.
+
+Se separan las filas de respuesta, los índices y los coeficientes usados por
+el diagnóstico puntual. Las filas de 64 bytes tienen alineación de 32 bytes;
+ambas cargas AVX2 de cuatro doubles quedan dentro de la fila. Los índices
+se almacenan en 16 bits: el constructor limita 256/512 modos y como máximo
+1.024 coordenadas por cuerda. **Los estados, frecuencias y coeficientes siguen
+en f64**; no se retira ninguna de las 82.656 interacciones preparadas.
+
+El procesamiento comprueba las longitudes de los estados al entrar. Los
+índices de lectura de la ruta SIMD se mantienen privados y proceden de la
+enumeración del constructor: axial en `[nl,nl+nt)`, transversal izquierdo en `[0,nl)` y derecho
+en `[nl,nl+nt)`. Sumar `nt` selecciona el otro eje dentro del mismo estado.
+Esto permite evitar comprobaciones repetidas de esos límites en cada producto.
+Se prueba además el último índice físico con una integral temporal continua
+independiente, usando **256/512 modos** y ambos ejes, sin referencia densa grande.
+
+Memoria preparada: **7.953.408 → 6.307.248 bytes**, baja **20,7 %**.
+Las tablas consultadas por el callback ocupan **5.627.568 bytes**; el resto
+incluye los coeficientes de diagnóstico y vectores de frecuencias/amplitudes.
+No se cuentan estructuras propietarias o buffers del llamador, como en la
+medida inicial. Preparación fuera del procesamiento: **30,5–32,3 ms**.
+Cero asignaciones durante los buffers medidos.
+
+| Geometría | AVX2 media / P99 / máximo, ms | Repetición AVX2 media / P99 / máximo, ms | Media AVX2 en b1f4ce75, ms |
+|---|---:|---:|---:|
+| C3 | 1,747 / 2,527 / 3,022 | 1,708 / 2,499 / 2,615 | 3,723 |
+| C4 | 1,704 / 2,409 / 2,691 | 1,841 / 2,871 / 6,793 | 3,788 |
+| C5 | 1,717 / 2,429 / 2,586 | 1,679 / 2,334 / 2,467 | 3,657 |
+
+C4 mejora **2,06–2,22× en media** frente al control congelado, sin cambios
+del operador. La diferencia de respuesta AVX2 queda **2,47–2,70e−16**;
+error frente a Gauss refinado **1,88–3,84e−11**, mismos gates sin relajar.
+Las dos ejecuciones producen los mismos incrementos por backend.
+
+Portable contemporáneo, media/P99/máximo en ms: C3 **4,852/5,226/5,970**,
+C4 **4,864/5,331/5,747**, C5 **5,327/14,378/28,677**. La repetición conserva
+C3 **4,857/5,247/7,459**, C4 **4,884/5,769/6,699**, C5 **4,875/5,313/6,271**.
+El pico de C5 no se reproduce, pero se conserva; no se atribuye una causa
+sin evidencia. No se selecciona la ruta portable como mejora de CPU.
+
+**Sigue fallando el plazo de 2 ms en todas las geometrías y ejecuciones**:
+P99 y máximo AVX2 quedan por encima, y la repetición C4 alcanza 6,793 ms.
+Que la media pase no aprueba tiempo real. Es una evaluación cuadrática sobre
+un estado fijo repetido: aún faltan trayectoria no lineal acoplada, fuerza
+cúbica, contacto, comprobación de trabajo y resto del instrumento.
+
 ## Validación y siguiente paso
 
 30 pruebas pasan: cuatro nuevas de convolución, resonancia/signo/cero,
@@ -117,6 +177,11 @@ Después de SIMD pasan las cinco pruebas del componente, incluida la paridad
 SIMD/portable a 4 y 96 modos. Las 26 pruebas del motor/cuerpo pasaron en la
 corrida previa; sus fuentes no cambian durante esta continuación. La suite
 acumulada contiene 31 pruebas. No se vuelve a integrar la referencia larga.
+
+Después de agrupar pasan las seis pruebas actuales del componente, incluida
+la nueva integral de modos máximos. Los 26 controles anteriores mantienen
+sus fuentes sin cambios; la suite acumulada contiene ahora 32 pruebas.
+No se vuelven a ejecutar los contactos largos para esta modificación aislada.
 
 Sigue reducir tablas y contracción con una factorización temporal controlada,
 sin retirar coordenadas físicas, y luego evaluar

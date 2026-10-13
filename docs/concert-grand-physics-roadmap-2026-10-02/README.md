@@ -147,6 +147,14 @@ La continuación SIMD comparte el factor axial entre ejes: C4 media
 los arrays originales exactamente. Máximo C4 **9,908 ms**: sigue fallando CPU
 sin contacto/iteraciones. Sigue factorizar tablas/fuerzas antes de acoplar
 la trayectoria no lineal, sin ampliar aprobación del instrumento.
+La agrupación por modo de salida y filas alineadas conserva las 82.656
+interacciones y baja memoria **7,95→6,31 MB**. C4 media **1,704 ms**, P99
+**2,409 ms**, máximo **2,691 ms**; repetición **1,841/2,871/6,793 ms**.
+Mejora de media **2,06–2,22×** frente a b1f4ce75, diferencia de respuesta
+**2,47e−16** y control portable exacto; seis pruebas del componente pasan,
+incluida la integral con 256/512 modos. Todavía falla plazo en las tres
+geometrías, sin contacto/trayectoria acoplada. Sigue reducir costo y resolver
+ese acoplamiento conservativo; no es aún un instrumento tocable.
 
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)

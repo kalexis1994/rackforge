@@ -1,0 +1,319 @@
+{
+  "stage": "quadratic force convolution on free modal carriers",
+  "parent_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-13\\checked16-final.json",
+  "parent_sha256": "973f4eb2ec7960b0a4c7b99b06d430a580918b64c6b4ad9a4e4d1409d1f83222",
+  "source_sha256": {
+    "measure-concert-grand-native-strings.py": "cf5da1c3225751639e1fc7985a4892662edf18e4e777b4e175879e2e58b2a5a2",
+    "concert-grand-native-strings.rs": "71b781b299d2fe0c87e27718bc6e1e6fd5f8c66fc145dfef26b799560f842c65",
+    "concert_grand_native_strings.py": "4c0cae8d1155dab1a97c3ddbfa2afa6f6f08afb1e90167edbdfe7d14f78be450",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "measure-concert-grand-phase-forces.py": "0aaf964185aafe6efb6bd3fe4591d635459e05eaa206585bdfe08570d24dc064",
+    "concert-grand-phase-forces.rs": "aa1fc849a9db06d53c8bcecc21f805a2e564bb2e5b8257a2c29e62927abbb3fc",
+    "concert_grand_phase_forces.py": "02854406da8aa6516c311fac97445be44dcf2d23fcebc3eb8dff82b5c4d902c8",
+    "tests/test_concert_phase_forces.py": "20b93fad7e74a984e1202a8172a74c79a551edfa1c06d395d742890bda5a1438"
+  },
+  "transverse": 96,
+  "axial": 192,
+  "mechanical_coordinates": 1153,
+  "rate_hz": 128000,
+  "frames_per_force_block": 16,
+  "seed": 83,
+  "benchmark_fixed_state_repeated": true,
+  "trajectory": "exact free carriers from the serialized q/v; no launches",
+  "force_operator": "gradient of EA integral u_x*(v_x^2+w_x^2)/2 dx",
+  "cubic_force_included": false,
+  "nonlinear_step": false,
+  "contact_included": false,
+  "conservation_ledger_checked": false,
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "factory_updated": false,
+  "cases": [
+    {
+      "note": 48,
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\choir-48.bin",
+      "coefficient_sha256": "d26a5412784c27af41ab52a9316627663f0e86a9218c188d77ffbb2d70339629",
+      "gauss_time_orders": [
+        1024,
+        2048
+      ],
+      "spatial_cosine_nodes": 256,
+      "gauss_response_refinement_relative": 1.7476873772719007e-11,
+      "affine_endpoint_force_response_relative": 1.0808212453895312,
+      "largest_free_carrier_cycles_per_block": 48.847206302426,
+      "reference_response_norm": 0.009739288256393508,
+      "reference_response_to_initial_state": 0.02724604636910074,
+      "backends": {
+        "native": {
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\48-native.json",
+          "result_sha256": "d2a1d2396f9cfc747dbf5e1dc1f6e46a00e07daba6e0babef573d880cc9941a3",
+          "response_relative": 1.8811158073059242e-11,
+          "endpoint_gradient_relative": 3.437852559875819e-14,
+          "component_accuracy_1e9_gate_passed": true,
+          "prepared_terms": 82656,
+          "prepared_bytes": 6307248,
+          "callback_table_bytes": 5627568,
+          "prepared_index_bits": 16,
+          "response_alignment_bytes": 32,
+          "grouped_outputs": true,
+          "simd": true,
+          "runtime_flags": [],
+          "preparation_ms": 31.277,
+          "benchmark": {
+            "buffers": 512,
+            "frames": 16,
+            "mean_ms": 1.7084130859375004,
+            "p99_ms": 2.4992,
+            "max_ms": 2.6153999999999997,
+            "allocations": 0,
+            "frames_per_buffer": 256,
+            "deadline_ms": 2.0,
+            "isolated_component_budget_passed": false
+          },
+          "control_response_relative": 2.541275954199112e-16,
+          "control_response_arrays_equal": false,
+          "control_same_term_count": true,
+          "control_mean_speedup": 2.179039964788227,
+          "control_response_1e13_gate_passed": true
+        },
+        "portable": {
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\48-portable.json",
+          "result_sha256": "46803a130598accafa9d088ab6fae1b292047c76ac6ea5c25caf72fff251ee0f",
+          "response_relative": 1.8811163453688853e-11,
+          "endpoint_gradient_relative": 3.437852559875819e-14,
+          "component_accuracy_1e9_gate_passed": true,
+          "prepared_terms": 82656,
+          "prepared_bytes": 6307248,
+          "callback_table_bytes": 5627568,
+          "prepared_index_bits": 16,
+          "response_alignment_bytes": 32,
+          "grouped_outputs": true,
+          "simd": false,
+          "runtime_flags": [
+            "--portable"
+          ],
+          "preparation_ms": 30.9887,
+          "benchmark": {
+            "buffers": 512,
+            "frames": 16,
+            "mean_ms": 4.857094140625003,
+            "p99_ms": 5.2473,
+            "max_ms": 7.4589,
+            "allocations": 0,
+            "frames_per_buffer": 256,
+            "deadline_ms": 2.0,
+            "isolated_component_budget_passed": false
+          },
+          "control_response_relative": 0.0,
+          "control_response_arrays_equal": true,
+          "control_same_term_count": true,
+          "control_mean_speedup": 0.9849063800927128,
+          "control_response_1e13_gate_passed": true
+        }
+      },
+      "native_portable_response_relative": 2.65968878531422e-16,
+      "native_portable_mean_speedup": 2.8430443319624
+    },
+    {
+      "note": 60,
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\choir-60.bin",
+      "coefficient_sha256": "71a3235de205ab3d591aeaabafe81d4fc0ca2019916310bb161c11b22643d0f1",
+      "gauss_time_orders": [
+        1024,
+        2048
+      ],
+      "spatial_cosine_nodes": 256,
+      "gauss_response_refinement_relative": 2.642967363713515e-11,
+      "affine_endpoint_force_response_relative": 1.0048889144815027,
+      "largest_free_carrier_cycles_per_block": 97.69441260485202,
+      "reference_response_norm": 0.07584938608619107,
+      "reference_response_to_initial_state": 0.07905782362871362,
+      "backends": {
+        "native": {
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\60-native.json",
+          "result_sha256": "ad2bb31895f4dfe975ed0f62be2daa65b79692271285677e41ef7e327259305f",
+          "response_relative": 2.8024068940873146e-11,
+          "endpoint_gradient_relative": 3.8274626274798186e-14,
+          "component_accuracy_1e9_gate_passed": true,
+          "prepared_terms": 82656,
+          "prepared_bytes": 6307248,
+          "callback_table_bytes": 5627568,
+          "prepared_index_bits": 16,
+          "response_alignment_bytes": 32,
+          "grouped_outputs": true,
+          "simd": true,
+          "runtime_flags": [],
+          "preparation_ms": 31.046899999999997,
+          "benchmark": {
+            "buffers": 512,
+            "frames": 16,
+            "mean_ms": 1.8407169921874993,
+            "p99_ms": 2.8714999999999997,
+            "max_ms": 6.7927,
+            "allocations": 0,
+            "frames_per_buffer": 256,
+            "deadline_ms": 2.0,
+            "isolated_component_budget_passed": false
+          },
+          "control_response_relative": 2.4739997441858707e-16,
+          "control_response_arrays_equal": false,
+          "control_same_term_count": true,
+          "control_mean_speedup": 2.057640052157836,
+          "control_response_1e13_gate_passed": true
+        },
+        "portable": {
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\60-portable.json",
+          "result_sha256": "63fee0b3b899ba4c2fdd1c43c9669b688cb3e838ac5ebdab5813874280a9e2bb",
+          "response_relative": 2.8024062781236028e-11,
+          "endpoint_gradient_relative": 3.8274626274798186e-14,
+          "component_accuracy_1e9_gate_passed": true,
+          "prepared_terms": 82656,
+          "prepared_bytes": 6307248,
+          "callback_table_bytes": 5627568,
+          "prepared_index_bits": 16,
+          "response_alignment_bytes": 32,
+          "grouped_outputs": true,
+          "simd": false,
+          "runtime_flags": [
+            "--portable"
+          ],
+          "preparation_ms": 32.1243,
+          "benchmark": {
+            "buffers": 512,
+            "frames": 16,
+            "mean_ms": 4.883739453124999,
+            "p99_ms": 5.768599999999999,
+            "max_ms": 6.6988,
+            "allocations": 0,
+            "frames_per_buffer": 256,
+            "deadline_ms": 2.0,
+            "isolated_component_budget_passed": false
+          },
+          "control_response_relative": 0.0,
+          "control_response_arrays_equal": true,
+          "control_same_term_count": true,
+          "control_mean_speedup": 0.9789622338095334,
+          "control_response_1e13_gate_passed": true
+        }
+      },
+      "native_portable_response_relative": 2.2971277911140675e-16,
+      "native_portable_mean_speedup": 2.6531723637326707
+    },
+    {
+      "note": 72,
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\choir-72.bin",
+      "coefficient_sha256": "e2080e4ac08d7659cdf6d253b5a80ad573780c80e40ac3852fe1f1bb41a054ff",
+      "gauss_time_orders": [
+        1024,
+        2048
+      ],
+      "spatial_cosine_nodes": 256,
+      "gauss_response_refinement_relative": 3.478251143805469e-11,
+      "affine_endpoint_force_response_relative": 0.9623981657779449,
+      "largest_free_carrier_cycles_per_block": 195.388825209704,
+      "reference_response_norm": 0.6190536789702564,
+      "reference_response_to_initial_state": 0.19161327261733938,
+      "backends": {
+        "native": {
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\72-native.json",
+          "result_sha256": "dbe5f59ed7de7d250a1760ca232aa3f715807428537acc65a021e905793997d3",
+          "response_relative": 3.8360339364278424e-11,
+          "endpoint_gradient_relative": 3.541455866456343e-14,
+          "component_accuracy_1e9_gate_passed": true,
+          "prepared_terms": 82656,
+          "prepared_bytes": 6307248,
+          "callback_table_bytes": 5627568,
+          "prepared_index_bits": 16,
+          "response_alignment_bytes": 32,
+          "grouped_outputs": true,
+          "simd": true,
+          "runtime_flags": [],
+          "preparation_ms": 31.0593,
+          "benchmark": {
+            "buffers": 512,
+            "frames": 16,
+            "mean_ms": 1.6788837890625012,
+            "p99_ms": 2.3337000000000003,
+            "max_ms": 2.4672,
+            "allocations": 0,
+            "frames_per_buffer": 256,
+            "deadline_ms": 2.0,
+            "isolated_component_budget_passed": false
+          },
+          "control_response_relative": 2.70229951789926e-16,
+          "control_response_arrays_equal": false,
+          "control_same_term_count": true,
+          "control_mean_speedup": 2.178205385483868,
+          "control_response_1e13_gate_passed": true
+        },
+        "portable": {
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\72-portable.json",
+          "result_sha256": "757419f4bb544a00f5e07b10a1aaa556851682e2ef88793b73aa14b29faf1878",
+          "response_relative": 3.836034137278855e-11,
+          "endpoint_gradient_relative": 3.541455866456343e-14,
+          "component_accuracy_1e9_gate_passed": true,
+          "prepared_terms": 82656,
+          "prepared_bytes": 6307248,
+          "callback_table_bytes": 5627568,
+          "prepared_index_bits": 16,
+          "response_alignment_bytes": 32,
+          "grouped_outputs": true,
+          "simd": false,
+          "runtime_flags": [
+            "--portable"
+          ],
+          "preparation_ms": 32.1659,
+          "benchmark": {
+            "buffers": 512,
+            "frames": 16,
+            "mean_ms": 4.874765234374999,
+            "p99_ms": 5.3126,
+            "max_ms": 6.2714,
+            "allocations": 0,
+            "frames_per_buffer": 256,
+            "deadline_ms": 2.0,
+            "isolated_component_budget_passed": false
+          },
+          "control_response_relative": 0.0,
+          "control_response_arrays_equal": true,
+          "control_same_term_count": true,
+          "control_mean_speedup": 0.9810969662881993,
+          "control_response_1e13_gate_passed": true
+        }
+      },
+      "native_portable_response_relative": 2.688837053068406e-16,
+      "native_portable_mean_speedup": 2.903575140895903
+    }
+  ],
+  "control_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-13\\phase-forces-simd.json",
+  "control_sha256": "b9d68642919785315d20de84a6a22647e70f67432198c686465f10a1d5f31f63",
+  "control_ref": "b1f4ce75",
+  "control_sources_authenticated_from_git": true,
+  "seconds": 14.401468500029296,
+  "executables": {
+    "native": {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\phase-native.exe",
+      "sha256": "f531ec0ada302ef5957dd9132c4c8c23ee2549d0b0fda67bf4cb19686bbbd919",
+      "compiler_flags": [
+        "-C",
+        "target-cpu=native"
+      ]
+    },
+    "portable": {
+      "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-forces-grouped-repeat-2026-10-13\\phase-portable.exe",
+      "sha256": "ce000e87651e13a2e8a3ddbc443ead3de14b7906d43b80ccc9d638f830394e02",
+      "compiler_flags": [
+        "-C",
+        "target-cpu=generic"
+      ]
+    }
+  },
+  "sources_unchanged": true,
+  "all_component_accuracy_gates_passed": true,
+  "parent_unchanged": true,
+  "control_unchanged": true
+}

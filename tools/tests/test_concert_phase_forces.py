@@ -93,5 +93,39 @@ class PhaseForcesTests(unittest.TestCase):
             self.assertGreater(np.linalg.norm(native['dv'][16*wire:16*wire+8]),0.)
             np.testing.assert_array_equal(native['dv'][16*wire+8:16*(wire+1)],np.zeros(8))
 
+    def test_maximum_modal_indices_match_sparse_continuous_force_integral(self):
+        # Build the serialization directly, avoiding a dense 3073-coordinate
+        # reference system. Only the final axial/transverse modes are excited.
+        f=fixture(transverse=4);nt=256;nl=512;width=nl+2*nt
+        f.update(transverse=nt,axial=nl,nodes=1024,shapes=np.zeros(3*nt),
+            q=np.zeros(3*width+1),v=np.zeros(3*width+1),endpoint=np.zeros(3*width+1))
+        selected=np.array([nl-1,nl+nt-1,width-1])
+        f['q'][selected]=[2e-10,1e-8,-1.2e-8]
+        f['v'][selected]=[.0001,.002,-.001]
+        native=self.native(f);portable=self.native(f,16,'--portable')
+        length,mu,young,density,rate=f['parameters'][:5]
+        ea=young*mu/density;ei=young*(mu/density)**2/(4*np.pi)
+        root=np.sqrt(mu*length/2)
+        ku=np.pi*nl/length/root;kv=np.pi*nt/length/root
+        axial=np.sqrt(ea*length/2)*ku
+        transverse=np.sqrt(f['tensions'][0]*length/2*kv**2+
+            ei*length/2*(np.pi*nt/length)**4/root**2)
+        omega=np.array([axial,transverse,transverse]);h=16/rate
+        points,weights=roots_legendre(4096);t=(points+1)*h/2;wt=weights*h/2
+        qt=np.cos(t[:,None]*omega)*f['q'][selected]+np.sin(t[:,None]*omega)*f['v'][selected]/omega
+        u,a,b=qt.T
+        coefficient=ea*length/8*ku*kv**2
+        gradient=coefficient*np.column_stack([a*a+b*b,2*u*a,2*u*b])
+        expected_q=-np.sum(wt[:,None]*np.sin((h-t[:,None])*omega)/omega*gradient,axis=0)
+        expected_v=-np.sum(wt[:,None]*np.cos((h-t[:,None])*omega)*gradient,axis=0)
+        expected=np.r_[omega*expected_q,expected_v]
+        for result in [native,portable]:
+            observed=np.r_[omega*np.asarray(result['dq'])[selected],np.asarray(result['dv'])[selected]]
+            self.assertLess(relative(observed,expected),1e-9)
+            other=np.ones(3*width,dtype=bool);other[selected]=False
+            np.testing.assert_array_equal(np.asarray(result['dq'])[other],np.zeros(sum(other)))
+            np.testing.assert_array_equal(np.asarray(result['dv'])[other],np.zeros(sum(other)))
+            self.assertEqual(result['allocations'],0)
+
 
 if __name__=='__main__':unittest.main()

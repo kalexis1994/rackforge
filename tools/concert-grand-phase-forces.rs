@@ -64,12 +64,12 @@ fn harmonic_response(omega: f64, nu: f64, h: f64) -> [[f64; 2]; 2] {
 }
 
 #[derive(Clone)]
+#[repr(C)]
 struct Term {
-    left: usize,
-    right: usize,
-    output: usize,
-    coefficient: f64,
     response: [[f64; 4]; 2],
+    coefficient: f64,
+    left: u16,
+    right: u16,
 }
 impl Term {
     fn new(
@@ -92,20 +92,80 @@ impl Term {
             ];
         }
         Self {
-            left,
-            right,
-            output,
+            left: u16::try_from(left).expect("bounded modal index"),
+            right: u16::try_from(right).expect("bounded modal index"),
             coefficient,
             response,
         }
     }
 }
 
+/// Stable output grouping retains the scalar summation order within a mode.
+/// Only prepared indices are compressed; every physical mode remains f64.
+#[repr(C, align(32))]
+struct Response([[f64; 4]; 2]);
+struct TermTables {
+    responses: Vec<Response>,
+    indices: Vec<[u16; 2]>,
+    // Used only by the point-gradient diagnostic, outside the timed callback.
+    coefficients: Vec<f64>,
+}
+impl TermTables {
+    fn len(&self) -> usize {
+        self.responses.len()
+    }
+    fn bytes(&self) -> usize {
+        self.responses.capacity() * std::mem::size_of::<Response>()
+            + self.indices.capacity() * std::mem::size_of::<[u16; 2]>()
+            + self.coefficients.capacity() * std::mem::size_of::<f64>()
+    }
+    fn hot_bytes(&self) -> usize {
+        self.responses.capacity() * std::mem::size_of::<Response>()
+            + self.indices.capacity() * std::mem::size_of::<[u16; 2]>()
+    }
+    fn range(&self, range: &[usize]) -> impl Iterator<Item = (&Response, &[u16; 2])> {
+        self.responses[range[0]..range[1]]
+            .iter()
+            .zip(&self.indices[range[0]..range[1]])
+    }
+    fn points(&self, range: &[usize]) -> impl Iterator<Item = (&f64, &[u16; 2])> {
+        self.coefficients[range[0]..range[1]]
+            .iter()
+            .zip(&self.indices[range[0]..range[1]])
+    }
+}
+fn group_terms(
+    mut terms: Vec<(usize, Term)>,
+    first: usize,
+    count: usize,
+) -> (TermTables, Vec<usize>) {
+    terms.sort_by_key(|(output, _)| *output);
+    let mut offsets = vec![0; count + 1];
+    let mut grouped = TermTables {
+        responses: Vec::with_capacity(terms.len()),
+        indices: Vec::with_capacity(terms.len()),
+        coefficients: Vec::with_capacity(terms.len()),
+    };
+    for (output, term) in terms {
+        assert!(output >= first && output < first + count);
+        offsets[output - first + 1] += 1;
+        grouped.responses.push(Response(term.response));
+        grouped.indices.push([term.left, term.right]);
+        grouped.coefficients.push(term.coefficient);
+    }
+    for i in 1..offsets.len() {
+        offsets[i] += offsets[i - 1];
+    }
+    (grouped, offsets)
+}
+
 pub struct PhaseQuadratic {
     nt: usize,
     omega: Vec<f64>,
-    axial: Vec<Term>,
-    transverse: Vec<Term>,
+    axial: TermTables,
+    transverse: TermTables,
+    axial_offsets: Vec<usize>,
+    transverse_offsets: Vec<usize>,
     amplitudes: Vec<f64>,
     simd: bool,
 }
@@ -119,7 +179,7 @@ impl PhaseQuadratic {
         ea_length: f64,
         h: f64,
     ) -> Self {
-        assert!(nt > 0 && nl > 0 && omega.len() == nl + 2 * nt);
+        assert!(nt > 0 && nt <= 256 && nl > 0 && nl <= 512 && omega.len() == nl + 2 * nt);
         assert!(ku.len() == nl && kv.len() == nt);
         assert!(h.is_finite() && h > 0. && ea_length.is_finite() && ea_length > 0.);
         assert!(omega.iter().all(|w| w.is_finite() && *w > 0.));
@@ -139,30 +199,25 @@ impl PhaseQuadratic {
                         * kv[k - 1]
                         * kv[l - 1]
                         * if k == l { 1. } else { 2. };
-                    axial.push(Term::new(
-                        nl + k - 1,
-                        nl + l - 1,
+                    axial.push((
                         j - 1,
-                        coefficient,
-                        &omega,
-                        h,
+                        Term::new(nl + k - 1, nl + l - 1, j - 1, coefficient, &omega, h),
                     ));
-                    transverse.push(Term::new(
-                        j - 1,
-                        nl + l - 1,
+                    transverse.push((
                         nl + k - 1,
-                        coefficient * if k == l { 2. } else { 1. },
-                        &omega,
-                        h,
-                    ));
-                    if k != l {
-                        transverse.push(Term::new(
+                        Term::new(
                             j - 1,
-                            nl + k - 1,
                             nl + l - 1,
-                            coefficient,
+                            nl + k - 1,
+                            coefficient * if k == l { 2. } else { 1. },
                             &omega,
                             h,
+                        ),
+                    ));
+                    if k != l {
+                        transverse.push((
+                            nl + l - 1,
+                            Term::new(j - 1, nl + k - 1, nl + l - 1, coefficient, &omega, h),
                         ));
                     }
                 }
@@ -171,19 +226,23 @@ impl PhaseQuadratic {
         // Transverse terms share the axial left carrier across both axes.
         // Store [q_cc,q_cs,v_cc,v_cs] and [q_sc,q_ss,v_sc,v_ss] so SIMD
         // can contract the left carrier once, then apply each right axis.
-        for term in &mut transverse {
+        for (_, term) in &mut transverse {
             let r = term.response;
             term.response = [
                 [r[0][0], r[0][1], r[1][0], r[1][1]],
                 [r[0][2], r[0][3], r[1][2], r[1][3]],
             ];
         }
+        let (axial, axial_offsets) = group_terms(axial, 0, nl);
+        let (transverse, transverse_offsets) = group_terms(transverse, nl, nt);
         let size = omega.len();
         Self {
             nt,
             omega,
             axial,
             transverse,
+            axial_offsets,
+            transverse_offsets,
             amplitudes: vec![0.; size],
             simd: {
                 #[cfg(target_arch = "x86_64")]
@@ -201,8 +260,17 @@ impl PhaseQuadratic {
         self.axial.len() + self.transverse.len()
     }
     pub fn prepared_bytes(&self) -> usize {
-        (self.axial.capacity() + self.transverse.capacity()) * std::mem::size_of::<Term>()
+        self.axial.bytes()
+            + self.transverse.bytes()
             + (self.omega.capacity() + self.amplitudes.capacity()) * std::mem::size_of::<f64>()
+            + (self.axial_offsets.capacity() + self.transverse_offsets.capacity())
+                * std::mem::size_of::<usize>()
+    }
+    pub fn callback_table_bytes(&self) -> usize {
+        self.axial.hot_bytes()
+            + self.transverse.hot_bytes()
+            + (self.axial_offsets.capacity() + self.transverse_offsets.capacity())
+                * std::mem::size_of::<usize>()
     }
     /// Force-induced increments only: q(t)=q0*cos(w*t)+v0/w*sin(w*t).
     /// Quadratic part of the ORIGINAL gradient: gu=EA Du' eta,
@@ -231,31 +299,38 @@ impl PhaseQuadratic {
             ]
         };
         let dot4 = |a: &[f64; 4], b: &[f64; 4]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f64>();
-        for term in &self.axial {
-            let a = products(term.left, term.right);
-            let b = products(term.left + self.nt, term.right + self.nt);
-            let combined = [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]];
-            dq[term.output] -= dot4(&term.response[0], &combined);
-            dv[term.output] -= dot4(&term.response[1], &combined);
+        for (output, range) in self.axial_offsets.windows(2).enumerate() {
+            for (response, indices) in self.axial.range(range) {
+                let (left, right) = (indices[0] as usize, indices[1] as usize);
+                let a = products(left, right);
+                let b = products(left + self.nt, right + self.nt);
+                let combined = [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]];
+                dq[output] -= dot4(&response.0[0], &combined);
+                dv[output] -= dot4(&response.0[1], &combined);
+            }
         }
-        for term in &self.transverse {
-            // Restore the original expanded order for the portable control.
-            let rq = [
-                term.response[0][0],
-                term.response[0][1],
-                term.response[1][0],
-                term.response[1][1],
-            ];
-            let rv = [
-                term.response[0][2],
-                term.response[0][3],
-                term.response[1][2],
-                term.response[1][3],
-            ];
-            for axis in [0, self.nt] {
-                let a = products(term.left, term.right + axis);
-                dq[term.output + axis] -= dot4(&rq, &a);
-                dv[term.output + axis] -= dot4(&rv, &a);
+        let nl = self.axial_offsets.len() - 1;
+        for (mode, range) in self.transverse_offsets.windows(2).enumerate() {
+            for (response, indices) in self.transverse.range(range) {
+                let (left, right) = (indices[0] as usize, indices[1] as usize);
+                // Restore the original expanded order for the portable control.
+                let rq = [
+                    response.0[0][0],
+                    response.0[0][1],
+                    response.0[1][0],
+                    response.0[1][1],
+                ];
+                let rv = [
+                    response.0[0][2],
+                    response.0[0][3],
+                    response.0[1][2],
+                    response.0[1][3],
+                ];
+                for axis in [0, self.nt] {
+                    let a = products(left, right + axis);
+                    dq[nl + mode + axis] -= dot4(&rq, &a);
+                    dv[nl + mode + axis] -= dot4(&rv, &a);
+                }
             }
         }
     }
@@ -263,15 +338,22 @@ impl PhaseQuadratic {
     #[target_feature(enable = "avx2")]
     unsafe fn contract_avx2(&self, q: &[f64], dq: &mut [f64], dv: &mut [f64]) {
         use std::arch::x86_64::*;
+        // apply() checks all state lengths. Private constructor-generated
+        // indices satisfy: axial inputs in [nl,nl+nt), transverse left in
+        // [0,nl), right in [nl,nl+nt); adding nt reaches the other axis.
+        // Grouping copies these indices without altering them. Avoid checking
+        // these established bounds separately for every product in the loop.
+        #[inline(always)]
+        unsafe fn state(q: &[f64], amplitudes: &[f64], index: usize) -> (f64, f64) {
+            unsafe { (*q.get_unchecked(index), *amplitudes.get_unchecked(index)) }
+        }
         #[target_feature(enable = "avx2")]
         unsafe fn pair(qi: f64, bi: f64, qj: f64, bj: f64) -> __m256d {
             _mm256_mul_pd(_mm256_set_pd(bi, bi, qi, qi), _mm256_set_pd(bj, qj, bj, qj))
         }
         #[target_feature(enable = "avx2")]
-        unsafe fn responses(term: &Term, products: __m256d) -> [f64; 2] {
+        unsafe fn reduce_pair(q: __m256d, v: __m256d) -> [f64; 2] {
             unsafe {
-                let q = _mm256_mul_pd(_mm256_loadu_pd(term.response[0].as_ptr()), products);
-                let v = _mm256_mul_pd(_mm256_loadu_pd(term.response[1].as_ptr()), products);
                 // Pairwise sums may round differently from the scalar oracle.
                 // Both products cover exactly four doubles without overread.
                 let pairs = _mm256_hadd_pd(q, v);
@@ -285,46 +367,65 @@ impl PhaseQuadratic {
             }
         }
         unsafe {
-            for term in &self.axial {
-                let a = pair(
-                    q[term.left],
-                    self.amplitudes[term.left],
-                    q[term.right],
-                    self.amplitudes[term.right],
-                );
-                let b = pair(
-                    q[term.left + self.nt],
-                    self.amplitudes[term.left + self.nt],
-                    q[term.right + self.nt],
-                    self.amplitudes[term.right + self.nt],
-                );
-                let result = responses(term, _mm256_add_pd(a, b));
-                dq[term.output] -= result[0];
-                dv[term.output] -= result[1];
+            for (output, range) in self.axial_offsets.windows(2).enumerate() {
+                // One horizontal reduction per output, rather than per term.
+                // Response has 32-byte alignment and 64-byte stride: both
+                // four-double rows are aligned and remain within the object.
+                let mut sum_q = _mm256_setzero_pd();
+                let mut sum_v = _mm256_setzero_pd();
+                for (response, indices) in self.axial.range(range) {
+                    let (left, right) = (indices[0] as usize, indices[1] as usize);
+                    let (ql, bl) = state(q, &self.amplitudes, left);
+                    let (qr, br) = state(q, &self.amplitudes, right);
+                    let (wl, cl) = state(q, &self.amplitudes, left + self.nt);
+                    let (wr, cr) = state(q, &self.amplitudes, right + self.nt);
+                    let a = pair(ql, bl, qr, br);
+                    let b = pair(wl, cl, wr, cr);
+                    let products = _mm256_add_pd(a, b);
+                    sum_q = _mm256_add_pd(
+                        sum_q,
+                        _mm256_mul_pd(_mm256_load_pd(response.0[0].as_ptr()), products),
+                    );
+                    sum_v = _mm256_add_pd(
+                        sum_v,
+                        _mm256_mul_pd(_mm256_load_pd(response.0[1].as_ptr()), products),
+                    );
+                }
+                let result = reduce_pair(sum_q, sum_v);
+                dq[output] -= result[0];
+                dv[output] -= result[1];
             }
-            for term in &self.transverse {
-                let factors = _mm256_add_pd(
-                    _mm256_mul_pd(
-                        _mm256_loadu_pd(term.response[0].as_ptr()),
-                        _mm256_set1_pd(q[term.left]),
-                    ),
-                    _mm256_mul_pd(
-                        _mm256_loadu_pd(term.response[1].as_ptr()),
-                        _mm256_set1_pd(self.amplitudes[term.left]),
-                    ),
-                );
-                for axis in [0, self.nt] {
-                    let qj = q[term.right + axis];
-                    let bj = self.amplitudes[term.right + axis];
-                    let products = _mm256_mul_pd(factors, _mm256_set_pd(bj, qj, bj, qj));
+            let nl = self.axial_offsets.len() - 1;
+            for (mode, range) in self.transverse_offsets.windows(2).enumerate() {
+                let mut vertical = _mm256_setzero_pd();
+                let mut horizontal = _mm256_setzero_pd();
+                for (response, indices) in self.transverse.range(range) {
+                    let (left, right) = (indices[0] as usize, indices[1] as usize);
+                    let (ql, bl) = state(q, &self.amplitudes, left);
+                    let factors = _mm256_add_pd(
+                        _mm256_mul_pd(_mm256_load_pd(response.0[0].as_ptr()), _mm256_set1_pd(ql)),
+                        _mm256_mul_pd(_mm256_load_pd(response.0[1].as_ptr()), _mm256_set1_pd(bl)),
+                    );
+                    let (qv, bv) = state(q, &self.amplitudes, right);
+                    let (qw, bw) = state(q, &self.amplitudes, right + self.nt);
+                    vertical = _mm256_add_pd(
+                        vertical,
+                        _mm256_mul_pd(factors, _mm256_set_pd(bv, qv, bv, qv)),
+                    );
+                    horizontal = _mm256_add_pd(
+                        horizontal,
+                        _mm256_mul_pd(factors, _mm256_set_pd(bw, qw, bw, qw)),
+                    );
+                }
+                for (axis, products) in [(0, vertical), (self.nt, horizontal)] {
                     let total = _mm_hadd_pd(
                         _mm256_castpd256_pd128(products),
                         _mm256_extractf128_pd(products, 1),
                     );
                     let mut result = [0.; 2];
                     _mm_storeu_pd(result.as_mut_ptr(), total);
-                    dq[term.output + axis] -= result[0];
-                    dv[term.output + axis] -= result[1];
+                    dq[nl + mode + axis] -= result[0];
+                    dv[nl + mode + axis] -= result[1];
                 }
             }
         }
@@ -332,13 +433,20 @@ impl PhaseQuadratic {
     /// Point gradient for verifying the spatial contraction separately.
     fn point(&self, q: &[f64], out: &mut [f64]) {
         out.fill(0.);
-        for term in &self.axial {
-            out[term.output] += term.coefficient
-                * (q[term.left] * q[term.right] + q[term.left + self.nt] * q[term.right + self.nt]);
+        for (output, range) in self.axial_offsets.windows(2).enumerate() {
+            for (coefficient, indices) in self.axial.points(range) {
+                let (left, right) = (indices[0] as usize, indices[1] as usize);
+                out[output] +=
+                    coefficient * (q[left] * q[right] + q[left + self.nt] * q[right + self.nt]);
+            }
         }
-        for term in &self.transverse {
-            for axis in [0, self.nt] {
-                out[term.output + axis] += term.coefficient * q[term.left] * q[term.right + axis];
+        let nl = self.axial_offsets.len() - 1;
+        for (mode, range) in self.transverse_offsets.windows(2).enumerate() {
+            for (coefficient, indices) in self.transverse.points(range) {
+                let (left, right) = (indices[0] as usize, indices[1] as usize);
+                for axis in [0, self.nt] {
+                    out[nl + mode + axis] += coefficient * q[left] * q[right + axis];
+                }
             }
         }
     }
@@ -487,5 +595,5 @@ fn main() {
             &mut end_force[i * width..(i + 1) * width],
         );
     }
-    println!("{{\"dq\":{:?},\"dv\":{:?},\"endpoint_quadratic_gradient\":{:?},\"omega\":{:?},\"prepared_terms\":{},\"prepared_bytes\":{},\"preparation_ms\":{},\"block_seconds\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"allocations\":{},\"simd\":{},\"nonlinear_step\":false}}", dq,dv,end_force,plans.iter().flat_map(|p|p.omega.iter()).collect::<Vec<_>>(),plans.iter().map(|p|p.terms()).sum::<usize>(),plans.iter().map(|p|p.prepared_bytes()).sum::<usize>(),preparation_ms,h,frames,buffers,mean,times[buffers*99/100],times[buffers-1],allocations,plans[0].simd);
+    println!("{{\"dq\":{:?},\"dv\":{:?},\"endpoint_quadratic_gradient\":{:?},\"omega\":{:?},\"prepared_terms\":{},\"prepared_bytes\":{},\"callback_table_bytes\":{},\"prepared_index_bits\":16,\"response_alignment_bytes\":32,\"grouped_outputs\":true,\"preparation_ms\":{},\"block_seconds\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"allocations\":{},\"simd\":{},\"nonlinear_step\":false}}", dq,dv,end_force,plans.iter().flat_map(|p|p.omega.iter()).collect::<Vec<_>>(),plans.iter().map(|p|p.terms()).sum::<usize>(),plans.iter().map(|p|p.prepared_bytes()).sum::<usize>(),plans.iter().map(|p|p.callback_table_bytes()).sum::<usize>(),preparation_ms,h,frames,buffers,mean,times[buffers*99/100],times[buffers-1],allocations,plans[0].simd);
 }

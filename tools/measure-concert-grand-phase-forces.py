@@ -103,6 +103,9 @@ def main():
                     response_relative=error,endpoint_gradient_relative=endpoint_error,
                     component_accuracy_1e9_gate_passed=error<=1e-9 and refine<=1e-10 and endpoint_error<=1e-10,
                     prepared_terms=native['prepared_terms'],prepared_bytes=native['prepared_bytes'],
+                    callback_table_bytes=native['callback_table_bytes'],
+                    prepared_index_bits=native['prepared_index_bits'],
+                    response_alignment_bytes=native['response_alignment_bytes'],grouped_outputs=native['grouped_outputs'],
                     simd=native['simd'],runtime_flags=flags,
                     preparation_ms=native['preparation_ms'],
                     benchmark={key:native[key] for key in ['buffers','frames','mean_ms','p99_ms','max_ms','allocations']})

@@ -181,6 +181,7 @@ between the native platforms without creating a platform-specific preset.
 | **Android ARM64** | A compact touchscreen instrument | Low-latency native audio and USB MIDI/audio |
 | **Raspberry Pi OS ARM64** | A dedicated instrument that starts at boot | ALSA, USB MIDI, Web control, and system services |
 | **Linux x86-64** | A PC-based headless or Web-controlled instrument | ALSA, Linux MIDI, Web control, and system services |
+| **Linux desktop (Flatpak)** | The desktop app on a Linux computer that is used for other things too | PipeWire or PulseAudio, ALSA MIDI, and the same window as on Windows |
 | **Windows VST3 x86-64** | Opening RackForge as an instrument inside a DAW | DAW-provided MIDI, timing, state, and stereo audio |
 
 Native packages are available from the
@@ -272,6 +273,17 @@ This edition uses the same headless Core and adaptive Web interface as
 Raspberry Pi, built natively for 64-bit Intel and AMD computers. See the
 [Linux x86-64 guide](platforms/linux-x86_64/README.md).
 
+### Linux desktop (Flatpak)
+
+1. Download `RackForge-Linux-x86_64.flatpak` from the latest release.
+2. Add Flathub once, for the GNOME runtime it runs on:
+   `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`
+3. Install it for your user: `flatpak install --user RackForge-Linux-x86_64.flatpak`.
+
+It is the same desktop application as on Windows, sharing the sound card
+through the desktop's sound server. See the
+[Flatpak guide](platforms/linux-flatpak/README.md).
+
 ### Windows VST3 preview
 
 The release includes an installable `RackForge.vst3` bundle. Copy that complete
@@ -345,8 +357,8 @@ Current limitations:
 
 - Windows packages are not code-signed.
 - Android packages are ARM64 and debug-signed.
-- Linux x86-64 currently uses a headless/Web interface rather than a native
-  desktop window.
+- The Linux x86-64 archive uses a headless/Web interface; the Flatpak is the
+  native desktop window.
 - Raspberry Pi requires a 64-bit Raspberry Pi OS userspace.
 - Optional instruments such as RF-Soundfonts are separate downloads.
 - The optional Desktop HTTP server is disabled by default.

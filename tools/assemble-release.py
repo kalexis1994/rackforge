@@ -163,6 +163,7 @@ def main() -> None:
         "RackForge-VST3-Windows-x86_64",
         "RackForge-Windows-x86_64",
         "RackForge-Linux-x86_64",
+        "RackForge-Linux-x86_64-Flatpak",
         "RackForge-RaspberryPi-arm64",
         "RackForge-Android-arm64",
     }
@@ -180,6 +181,8 @@ def main() -> None:
             shutil.copy2(os.path.join(folder, "rackforge.exe"), os.path.join(assets, "RackForge-Windows-x86_64.exe"))
         elif kind == "RackForge-Linux-x86_64":
             shutil.copy2(os.path.join(folder, "RackForge-Linux-x86_64.tar.gz"), os.path.join(assets, "RackForge-Linux-x86_64.tar.gz"))
+        elif kind == "RackForge-Linux-x86_64-Flatpak":
+            shutil.copy2(os.path.join(folder, "RackForge-Linux-x86_64.flatpak"), os.path.join(assets, "RackForge-Linux-x86_64.flatpak"))
         elif kind == "RackForge-RaspberryPi-arm64":
             shutil.copy2(os.path.join(folder, "RackForge-RaspberryPi-arm64.tar.gz"), os.path.join(assets, "RackForge-RaspberryPi-arm64.tar.gz"))
         elif kind == "RackForge-Android-arm64":

@@ -174,3 +174,16 @@ P99 15,0464 ms, máximo **16,7539 ms** frente a 2 ms. Sigue fallando CPU;
 esta corrida conserva la variabilidad y no demuestra una mejora del peor caso.
 Ahora se pueden atacar las transformadas/solver que quedan dominando el
 sostenido sin alterar el contacto ni repetir los micro-pasos libres.
+
+La siguiente variante prepara twiddles contiguos para mariposas AVX2 y usa
+productos escalares vectorizados en el Gram de Anderson. La detección CPU
+ocurre en preparación; `--portable` fuerza ambos kernels escalares. Se
+preparan las diferencias de Anderson una vez, se calcula sólo el triángulo
+simétrico del Gram y se actualizan las fuerzas sobre vectores contiguos.
+Se mantienen profundidad, regularización, límites y tolerancias.
+
+[Vuelo16 con SIMD](medidas-P7-cuerdas-nativas-2026-10-13/vuelo16-SIMD.json):
+128 kHz/16, 128 buffers. Media **5,3284 ms**, P99 **6,1985 ms**, máximo
+**10,6779 ms** frente a 2 ms, cero asignaciones. Error corto de estado
+0,100690%, mismo ataque y ledger. Sigue fallando CPU; no se promueve al host.
+La comparación portable/SIMD de AVF, fuerza, estado y energía pasa en 4/96.

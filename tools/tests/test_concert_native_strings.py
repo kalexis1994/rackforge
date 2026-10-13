@@ -172,5 +172,22 @@ class NativeStringsTests(unittest.TestCase):
             np.testing.assert_allclose(native['v'],micro['v'],rtol=2e-8,atol=2e-9)
 
 
+    def test_simd_and_portable_match_force_states_and_work(self):
+        for nt in [4,96]:
+            f=fixture(transverse=nt,rate=128000,seed=83,duration=.006)
+            kernel=self.run_native(f,'kernel')
+            portable_kernel=self.run_native(f,'kernel','--portable')
+            np.testing.assert_allclose(kernel['gradient'],portable_kernel['gradient'],rtol=2e-13,atol=2e-13)
+            np.testing.assert_allclose(kernel['boundary_gradient'],portable_kernel['boundary_gradient'],rtol=2e-13,atol=1e-14)
+            native=self.run_native(f,'verify-ramp',16)
+            portable=self.run_native(f,'verify-ramp',16,'--portable')
+            self.assertFalse(portable['simd_fft'])
+            np.testing.assert_allclose(native['q'],portable['q'],rtol=2e-8,atol=2e-12)
+            np.testing.assert_allclose(native['v'],portable['v'],rtol=2e-8,atol=2e-9)
+            np.testing.assert_allclose(native['force_trace'],portable['force_trace'],rtol=2e-8,atol=2e-8)
+            self.assertLess(native['work_relative_max'],1e-9)
+            self.assertLess(portable['work_relative_max'],1e-9)
+
+
 
 if __name__=='__main__':unittest.main()

@@ -24,10 +24,102 @@ unsafe impl GlobalAlloc for CountAlloc {
 }
 #[global_allocator]
 static ALLOCATOR: CountAlloc = CountAlloc;
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct Complex {
     r: f64,
     i: f64,
+}
+type FftKernel = fn(&mut [Complex], &[Complex], bool);
+fn fft_butterflies_portable(data: &mut [Complex], roots: &[Complex], inverse: bool) {
+    let mut width = 2;
+    while width <= data.len() {
+        let half = width / 2;
+        let twiddles = &roots[half - 1..2 * half - 1];
+        for chunk in data.chunks_exact_mut(width) {
+            let (left, right) = chunk.split_at_mut(half);
+            for ((u, v), root) in left.iter_mut().zip(right).zip(twiddles) {
+                let wi = if inverse { -root.i } else { root.i };
+                let r = v.r * root.r - v.i * wi;
+                let i = v.r * wi + v.i * root.r;
+                *v = Complex {
+                    r: u.r - r,
+                    i: u.i - i,
+                };
+                *u = Complex {
+                    r: u.r + r,
+                    i: u.i + i,
+                };
+            }
+        }
+        width *= 2;
+    }
+}
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn fft_butterflies_avx2(data: &mut [Complex], roots: &[Complex], inverse: bool) {
+    use std::arch::x86_64::*;
+    // Complex has repr(C); each load covers exactly two adjacent complex
+    // values. Power-of-two halves >=2 are even, with no overread.
+    unsafe {
+        let ptr = data.as_mut_ptr();
+        let mut width = 2;
+        while width <= data.len() {
+            let half = width / 2;
+            let twiddle = roots.as_ptr().add(half - 1);
+            for first in (0..data.len()).step_by(width) {
+                if half == 1 {
+                    let u = *ptr.add(first);
+                    let v = *ptr.add(first + half);
+                    let w = *twiddle;
+                    let wi = if inverse { -w.i } else { w.i };
+                    let r = v.r * w.r - v.i * wi;
+                    let i = v.r * wi + v.i * w.r;
+                    *ptr.add(first) = Complex {
+                        r: u.r + r,
+                        i: u.i + i,
+                    };
+                    *ptr.add(first + half) = Complex {
+                        r: u.r - r,
+                        i: u.i - i,
+                    };
+                } else {
+                    for j in (0..half).step_by(2) {
+                        let u = _mm256_loadu_pd(ptr.add(first + j).cast());
+                        let v = _mm256_loadu_pd(ptr.add(first + j + half).cast());
+                        let mut w = _mm256_loadu_pd(twiddle.add(j).cast());
+                        if inverse {
+                            w = _mm256_xor_pd(w, _mm256_set_pd(-0., 0., -0., 0.));
+                        }
+                        let wr = _mm256_movedup_pd(w);
+                        let wi = _mm256_permute_pd(w, 15);
+                        let swapped = _mm256_permute_pd(v, 5);
+                        let product =
+                            _mm256_addsub_pd(_mm256_mul_pd(v, wr), _mm256_mul_pd(swapped, wi));
+                        _mm256_storeu_pd(ptr.add(first + j).cast(), _mm256_add_pd(u, product));
+                        _mm256_storeu_pd(
+                            ptr.add(first + j + half).cast(),
+                            _mm256_sub_pd(u, product),
+                        );
+                    }
+                }
+            }
+            width *= 2;
+        }
+    }
+}
+#[cfg(target_arch = "x86_64")]
+fn fft_simd(data: &mut [Complex], roots: &[Complex], inverse: bool) {
+    unsafe {
+        fft_butterflies_avx2(data, roots, inverse);
+    }
+}
+fn fft_dispatch() -> (FftKernel, bool) {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        return (fft_simd, true);
+    }
+    (fft_butterflies_portable, false)
 }
 struct CosinePlan {
     nodes: usize,
@@ -35,22 +127,31 @@ struct CosinePlan {
     roots: Vec<Complex>,
     phase: Vec<Complex>,
     reverse: Vec<usize>,
+    kernel: FftKernel,
+    simd_fft: bool,
 }
 impl CosinePlan {
     fn new(nodes: usize) -> Self {
         assert!(nodes.is_power_of_two());
         let n = nodes;
         let bits = n.trailing_zeros();
+        let (kernel, simd_fft) = fft_dispatch();
         Self {
+            kernel,
+            simd_fft,
             nodes,
             fft: vec![Complex::default(); n],
-            roots: (0..n / 2)
-                .map(|k| {
-                    let a = -2. * std::f64::consts::PI * k as f64 / n as f64;
-                    Complex {
-                        r: a.cos(),
-                        i: a.sin(),
-                    }
+            roots: (1..=bits)
+                .flat_map(|stage| {
+                    let half = 1usize << (stage - 1);
+                    let stride = n / (2 * half);
+                    (0..half).map(move |k| {
+                        let a = -2. * std::f64::consts::PI * (k * stride) as f64 / n as f64;
+                        Complex {
+                            r: a.cos(),
+                            i: a.sin(),
+                        }
+                    })
                 })
                 .collect(),
             phase: (0..nodes)
@@ -74,32 +175,7 @@ impl CosinePlan {
                 self.fft.swap(k, self.reverse[k]);
             }
         }
-        let mut width = 2;
-        while width <= n {
-            let half = width / 2;
-            let stride = n / width;
-            for first in (0..n).step_by(width) {
-                for j in 0..half {
-                    let mut w = self.roots[j * stride];
-                    if inverse {
-                        w.i = -w.i;
-                    }
-                    let v = self.fft[first + j + half];
-                    let u = self.fft[first + j];
-                    let r = v.r * w.r - v.i * w.i;
-                    let i = v.r * w.i + v.i * w.r;
-                    self.fft[first + j] = Complex {
-                        r: u.r + r,
-                        i: u.i + i,
-                    };
-                    self.fft[first + j + half] = Complex {
-                        r: u.r - r,
-                        i: u.i - i,
-                    };
-                }
-            }
-            width *= 2;
-        }
+        (self.kernel)(&mut self.fft, &self.roots, inverse);
         if inverse {
             for x in &mut self.fft {
                 x.r /= n as f64;
@@ -465,6 +541,43 @@ fn advance_carriers(
         *q = next_q;
     }
 }
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn dot_avx2(a: &[f64], b: &[f64]) -> f64 {
+    use std::arch::x86_64::*;
+    unsafe {
+        let mut sum = _mm256_setzero_pd();
+        let end = a.len() / 4 * 4;
+        for j in (0..end).step_by(4) {
+            sum = _mm256_add_pd(
+                sum,
+                _mm256_mul_pd(
+                    _mm256_loadu_pd(a.as_ptr().add(j)),
+                    _mm256_loadu_pd(b.as_ptr().add(j)),
+                ),
+            );
+        }
+        let mut lanes = [0.; 4];
+        _mm256_storeu_pd(lanes.as_mut_ptr(), sum);
+        let mut result = lanes.iter().sum::<f64>();
+        for j in end..a.len() {
+            result += a[j] * b[j];
+        }
+        result
+    }
+}
+#[cfg(target_arch = "x86_64")]
+fn dot_simd(a: &[f64], b: &[f64]) -> f64 {
+    assert_eq!(a.len(), b.len());
+    unsafe { dot_avx2(a, b) }
+}
+fn dot_dispatch() -> fn(&[f64], &[f64]) -> f64 {
+    #[cfg(target_arch = "x86_64")]
+    if std::is_x86_feature_detected!("avx2") {
+        return dot_simd;
+    }
+    dot
+}
 fn norm(a: &[f64]) -> f64 {
     dot(a, a).sqrt()
 }
@@ -516,6 +629,9 @@ pub struct Choir {
     flight_bounds: Vec<[f64; 4]>,
     ramp_micro_reference: bool,
     last_certified_flight: bool,
+    anderson_delta_r: Vec<f64>,
+    anderson_delta_f: Vec<f64>,
+    gram_dot: fn(&[f64], &[f64]) -> f64,
 }
 impl Choir {
     fn new(
@@ -667,6 +783,9 @@ impl Choir {
             flight_bounds,
             ramp_micro_reference: false,
             last_certified_flight: false,
+            anderson_delta_r: vec![0.; 6 * size],
+            anderson_delta_f: vec![0.; 6 * size],
+            gram_dot: dot_dispatch(),
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -1291,16 +1410,32 @@ impl Choir {
             for i in 0..depth {
                 let before = (iteration - depth + i) % 4;
                 let after = (iteration - depth + i + 1) % 4;
-                for row in 0..n {
-                    let difference =
-                        self.anderson_r[after * n + row] - self.anderson_r[before * n + row];
-                    coefficients[i] += difference * self.anderson_r[slot * n + row];
-                    for j in 0..depth {
-                        let first = (iteration - depth + j) % 4;
-                        let last = (iteration - depth + j + 1) % 4;
-                        matrix[i][j] += difference
-                            * (self.anderson_r[last * n + row] - self.anderson_r[first * n + row]);
-                    }
+                let dr = &mut self.anderson_delta_r[i * n..(i + 1) * n];
+                let df = &mut self.anderson_delta_f[i * n..(i + 1) * n];
+                for (((((dr, df), xa), xb), ra), rb) in dr
+                    .iter_mut()
+                    .zip(df)
+                    .zip(&self.anderson_x[after * n..(after + 1) * n])
+                    .zip(&self.anderson_x[before * n..(before + 1) * n])
+                    .zip(&self.anderson_r[after * n..(after + 1) * n])
+                    .zip(&self.anderson_r[before * n..(before + 1) * n])
+                {
+                    *dr = *ra - *rb;
+                    *df = *xa - *xb + *ra - *rb;
+                }
+                coefficients[i] = (self.gram_dot)(
+                    &self.anderson_delta_r[i * n..(i + 1) * n],
+                    &self.anderson_r[slot * n..(slot + 1) * n],
+                );
+            }
+            for i in 0..depth {
+                for j in i..depth {
+                    let value = (self.gram_dot)(
+                        &self.anderson_delta_r[i * n..(i + 1) * n],
+                        &self.anderson_delta_r[j * n..(j + 1) * n],
+                    );
+                    matrix[i][j] = value;
+                    matrix[j][i] = value;
                 }
             }
             let ridge = (0..depth).map(|i| matrix[i][i]).fold(0f64, f64::max) * 1e-10;
@@ -1345,24 +1480,24 @@ impl Choir {
                 coefficients.fill(0.);
             }
         }
-        for j in 0..self.size {
-            let mut force = self.block_next_force[j];
-            let mut correction = self.ramp_next_correction[j];
-            for i in 0..depth {
-                let before = (iteration - depth + i) % 4;
-                let after = (iteration - depth + i + 1) % 4;
-                force -= coefficients[i]
-                    * (self.anderson_x[after * n + j] - self.anderson_x[before * n + j]
-                        + self.anderson_r[after * n + j]
-                        - self.anderson_r[before * n + j]);
-                let row = self.size + j;
-                correction -= coefficients[i]
-                    * (self.anderson_x[after * n + row] - self.anderson_x[before * n + row]
-                        + self.anderson_r[after * n + row]
-                        - self.anderson_r[before * n + row]);
+        self.ramp_end_force.copy_from_slice(&self.block_next_force);
+        self.ramp_correction
+            .copy_from_slice(&self.ramp_next_correction);
+        for i in 0..depth {
+            for (force, delta) in self
+                .ramp_end_force
+                .iter_mut()
+                .zip(&self.anderson_delta_f[i * n..i * n + self.size])
+            {
+                *force -= coefficients[i] * delta;
             }
-            self.ramp_end_force[j] = force;
-            self.ramp_correction[j] = correction;
+            for (correction, delta) in self
+                .ramp_correction
+                .iter_mut()
+                .zip(&self.anderson_delta_f[i * n + self.size..(i + 1) * n])
+            {
+                *correction -= coefficients[i] * delta;
+            }
         }
     }
     pub fn step(&mut self) -> Result<Stats, &'static str> {
@@ -1527,6 +1662,14 @@ fn main() {
         .collect();
     let mut choir = Choir::new(wires, 1. / p[4], p[5], p[6] / 3., p[7], p[8], shapes, q, v);
     choir.ramp_micro_reference = args.iter().any(|arg| arg == "--micro-reference");
+    if args.iter().any(|arg| arg == "--portable") {
+        choir.gram_dot = dot;
+        for wire in &mut choir.wires {
+            wire.plan.kernel = fft_butterflies_portable;
+            wire.plan.simd_fft = false;
+        }
+    }
+
     if args.get(2).map(String::as_str) == Some("kernel") {
         let mut gradients = vec![0.; 3 * width];
         let mut boundaries = [0.; 3];
@@ -1635,7 +1778,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -1680,5 +1823,5 @@ fn main() {
     let allocations = ALLOCATIONS.load(Ordering::Relaxed) - allocations;
     let mean = times.iter().sum::<f64>() / blocks as f64;
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft);
 }

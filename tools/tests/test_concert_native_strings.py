@@ -325,4 +325,48 @@ class NativeStringsTests(unittest.TestCase):
         np.testing.assert_allclose(reduced['q'][index],full['q'][index],rtol=1e-10,atol=0.)
         np.testing.assert_allclose(reduced['v'][index],full['v'][index],rtol=1e-10,atol=0.)
 
+    def test_refinement_recovers_real_sustained_failure_and_matches_manual_split(self):
+        f=fixture(transverse=96,rate=128000,seed=83,second_speed=0.,duration=.256)
+        path=self.folder/'real-rejected-ramp.bin';write_fixture(path,f)
+        control=subprocess.run([str(self.exe),str(path),'verify-ramp','16','--no-ramp-refinement'],capture_output=True,text=True)
+        self.assertNotEqual(control.returncode,0)
+        self.assertIn('ramp endpoint/work solve did not converge',control.stderr)
+        recovered=self.run_native(f,'verify-ramp',16)
+        manual=self.run_native(f,'verify-ramp',16,'--no-ramp-refinement','--ramp-boundaries=32632,32640')
+        self.assertEqual(recovered['ramp_rejected_attempts'],1)
+        self.assertEqual(recovered['ramp_refined_requests'],1)
+        self.assertEqual(recovered['ramp_refined_child_blocks'],2)
+        self.assertEqual(recovered['smallest_refined_block'],8)
+        self.assertEqual(recovered['maximum_ramp_attempts'],3)
+        for field in ['q','v','force_trace','heat_j','launch_work_j']:
+            np.testing.assert_array_equal(recovered[field],manual[field])
+        self.assertLess(recovered['work_relative_max'],1e-9)
+        bench=json.loads(subprocess.check_output([str(self.exe),str(path),'bench-ramp','128','16'],text=True))
+        self.assertEqual(bench['allocations'],0)
+        self.assertEqual(bench['ramp_refined_requests'],1)
+        self.assertEqual(bench['buffers_with_refinement'],1)
+
+    def test_failed_single_tick_rolls_back_accepted_prefix_and_endpoint_cache(self):
+        f=fixture(transverse=4,rate=128000,duration=.002)
+        f['launch_speeds'][:]=0.
+        root_mass=np.sqrt(f['parameters'][5]);dt=1/f['parameters'][4]
+        f['v'][-1]=root_mass;f['q'][-1]=-5*dt*root_mass
+        for flags in [[],['--prime-cache']]:
+            rollback=self.run_native(f,'rollback-ramp',*flags)
+            self.assertTrue(rollback['failed'])
+            for field in ['q_unchanged','v_unchanged','cache_unchanged','energy_unchanged','scalar_blocks_unchanged','trace_zero']:
+                self.assertTrue(rollback[field],field)
+            self.assertEqual(rollback['initial_cache_valid'],bool(flags))
+            self.assertGreater(rollback['rolled_back_children'],0)
+            self.assertLessEqual(rollback['attempts'],16+5)
+
+    def test_adaptive_fast_path_is_identical_to_unrefined_step(self):
+        for nt in [4,96]:
+            f=fixture(transverse=nt,rate=128000,second_speed=.1,second_time=1417/128000,duration=.016)
+            adaptive=self.run_native(f,'verify-ramp',16)
+            fixed=self.run_native(f,'verify-ramp',16,'--no-ramp-refinement')
+            self.assertEqual(adaptive['ramp_rejected_attempts'],0)
+            for field in ['q','v','force_trace','heat_j','launch_work_j','energy_checkpoints']:
+                np.testing.assert_array_equal(adaptive[field],fixed[field])
+
 if __name__=='__main__':unittest.main()

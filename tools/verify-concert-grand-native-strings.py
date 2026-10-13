@@ -53,6 +53,8 @@ def main():
         flags.append('--split-fft-passes')
     if parent.get('zero_axis_invariant') is False:
         flags.append('--full-transverse-solve')
+    if parent.get('adaptive_ramp') is False:
+        flags.append('--no-ramp-refinement')
     reused=None
     if args.reference_report:
         reused=json.loads(args.reference_report.read_text(encoding='utf-8'))
@@ -78,6 +80,7 @@ def main():
         correction_direction=parent.get('correction_direction','accumulated vector'),
         scalar_flight=parent.get('scalar_flight',False),
         warm_felt=parent.get('warm_felt',False),
+        adaptive_ramp=parent.get('adaptive_ramp',False),
         fused_fft_passes=parent.get('fused_fft_passes',False),
         zero_axis_invariant=parent.get('zero_axis_invariant',False),
         reference_parent_path=str(args.reference_report.resolve()) if reused else None,
@@ -133,6 +136,10 @@ def main():
                         simd_fft=native.get('simd_fft',False),
                         scalar_flight_blocks=native.get('scalar_flight_blocks',0),
                         scalar_flight_fallbacks=native.get('scalar_flight_fallbacks',0),
+                        ramp_rejected_attempts=native.get('ramp_rejected_attempts',0),
+                        ramp_refined_requests=native.get('ramp_refined_requests',0),
+                        smallest_refined_block=native.get('smallest_refined_block',0),
+                        maximum_ramp_attempts=native.get('maximum_ramp_attempts',1),
                         completed=True, blocked_state_relative=state, attack_force_relative=force,
                         accuracy_1percent_gate_passed=state <= .01 and force <= .01,
                         mechanical_work_relative_max=native['work_relative_max'],

@@ -941,6 +941,17 @@ pub struct Choir {
     warm_felt_guesses: usize,
     warm_felt_retries: usize,
     felt_iterations: usize,
+    adaptive_ramp: bool,
+    retry_q: Vec<f64>,
+    retry_v: Vec<f64>,
+    retry_force: Vec<f64>,
+    ramp_rejected_attempts: usize,
+    ramp_refined_requests: usize,
+    ramp_refined_child_blocks: usize,
+    ramp_rolled_back_child_blocks: usize,
+    smallest_refined_block: usize,
+    last_ramp_attempts: usize,
+    ramp_outer_iterations: usize,
 }
 impl Choir {
     fn new(
@@ -1118,6 +1129,17 @@ impl Choir {
             warm_felt_guesses: 0,
             warm_felt_retries: 0,
             felt_iterations: 0,
+            adaptive_ramp: true,
+            retry_q: vec![0.; size],
+            retry_v: vec![0.; size],
+            retry_force: vec![0.; size],
+            ramp_rejected_attempts: 0,
+            ramp_refined_requests: 0,
+            ramp_refined_child_blocks: 0,
+            ramp_rolled_back_child_blocks: 0,
+            smallest_refined_block: usize::MAX,
+            last_ramp_attempts: 0,
+            ramp_outer_iterations: 0,
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -1562,7 +1584,13 @@ impl Choir {
     /// A failed contact certificate or unsafe iterate returns to the full
     /// determined solver with the initial physical state, never a shortened
     /// or partially accepted trajectory.
-    fn try_scalar_flight(&mut self, frames: usize, potential0: f64, energy: f64) -> Option<Stats> {
+    fn try_scalar_flight(
+        &mut self,
+        frames: usize,
+        potential0: f64,
+        energy: f64,
+        limit: usize,
+    ) -> Option<Stats> {
         let head = self.size - 1;
         let h = frames as f64 * self.dt;
         let head0 = self.block_start_q[head] / self.mass.sqrt();
@@ -1609,7 +1637,9 @@ impl Choir {
             self.solver_x[row] = self.ramp_start_force[j];
         }
         self.solver_x[n - 1] = 0.;
-        for outer in 0..32 {
+        for outer in 0..limit {
+            self.last_outer_iterations = outer + 1;
+            self.ramp_outer_iterations += 1;
             let gamma = self.solver_x[n - 1];
             let lambda = gamma / scale;
             if !lambda.is_finite() {
@@ -1751,9 +1781,92 @@ impl Choir {
     /// The correction acts only on string coordinates, never on the hammer.
     /// It is solved jointly with the endpoint trajectory, not applied after it.
     pub fn step_ramp(&mut self, frames: usize) -> Result<Stats, &'static str> {
+        self.step_ramp_with_limit(frames, 32)
+    }
+    fn step_ramp_with_limit(&mut self, frames: usize, limit: usize) -> Result<Stats, &'static str> {
         if frames == 0 || frames > 64 {
             return Err("ramp block must contain 1..64 microsteps");
         }
+        self.last_ramp_attempts = 1;
+        let error = match self.step_ramp_once(frames, limit) {
+            Ok(stats) => return Ok(stats),
+            Err(error) => error,
+        };
+        self.ramp_rejected_attempts += 1;
+        if !self.adaptive_ramp || frames == 1 {
+            self.last_certified_flight = false;
+            self.block_trace[..frames].fill(0.);
+            return Err(error);
+        }
+        // A rejected attempt has restored q/v and has not published its
+        // endpoint cache. Snapshot only on failure: the usual path does not
+        // copy transaction storage or allocate memory.
+        self.retry_q.copy_from_slice(&self.q);
+        self.retry_v.copy_from_slice(&self.v);
+        self.retry_force.copy_from_slice(&self.endpoint_force);
+        let saved_potential = self.endpoint_potential;
+        let saved_valid = self.endpoint_valid;
+        let saved_scalar_blocks = self.scalar_flight_blocks;
+        let saved_unknowns = (self.scalar_unknowns_min, self.scalar_unknowns_max);
+        let mut trace = [0.; 64];
+        let mut stats = Stats::default();
+        let mut completed = 0;
+        let mut ceiling = frames / 2;
+        let mut children = 0;
+        let mut smallest = frames;
+        let mut all_flight = true;
+        let mut maximum_outer = self.last_outer_iterations;
+        // Ceiling decreases only on rejection. There are at most 64
+        // accepted children and six further halvings, down to one tick.
+        while completed < frames {
+            let count = ceiling.min(frames - completed);
+            self.last_ramp_attempts += 1;
+            let result = self.step_ramp_once(count, limit);
+            maximum_outer = maximum_outer.max(self.last_outer_iterations);
+            match result {
+                Ok(child) => {
+                    trace[completed..completed + count].copy_from_slice(&self.block_trace[..count]);
+                    completed += count;
+                    children += 1;
+                    smallest = smallest.min(count);
+                    stats.heat += child.heat;
+                    stats.force = stats.force.max(child.force);
+                    stats.iterations = stats.iterations.max(child.iterations);
+                    all_flight &= self.last_certified_flight;
+                }
+                Err(error) => {
+                    self.ramp_rejected_attempts += 1;
+                    if count == 1 {
+                        // No partially accepted state, endpoint or force
+                        // history is exposed when even one tick fails.
+                        self.q.copy_from_slice(&self.retry_q);
+                        self.v.copy_from_slice(&self.retry_v);
+                        self.endpoint_force.copy_from_slice(&self.retry_force);
+                        self.endpoint_potential = saved_potential;
+                        self.endpoint_valid = saved_valid;
+                        self.scalar_flight_blocks = saved_scalar_blocks;
+                        (self.scalar_unknowns_min, self.scalar_unknowns_max) = saved_unknowns;
+                        self.block_trace[..frames].fill(0.);
+                        self.last_certified_flight = false;
+                        self.last_outer_iterations = maximum_outer;
+                        self.ramp_rolled_back_child_blocks += children;
+                        return Err(error);
+                    }
+                    ceiling = count / 2;
+                }
+            }
+        }
+        self.block_trace[..frames].copy_from_slice(&trace[..frames]);
+        self.last_outer_iterations = maximum_outer;
+        self.last_certified_flight = all_flight;
+        self.ramp_refined_requests += 1;
+        self.ramp_refined_child_blocks += children;
+        self.smallest_refined_block = self.smallest_refined_block.min(smallest);
+        Ok(stats)
+    }
+    fn step_ramp_once(&mut self, frames: usize, limit: usize) -> Result<Stats, &'static str> {
+        self.last_certified_flight = false;
+        self.last_outer_iterations = 0;
         self.block_start_q.copy_from_slice(&self.q);
         self.block_start_v.copy_from_slice(&self.v);
         let potential0 = if self.use_endpoint_cache && self.endpoint_valid {
@@ -1792,7 +1905,7 @@ impl Choir {
             && self.canonical_correction
             && !self.ramp_micro_reference
         {
-            if let Some(stats) = self.try_scalar_flight(frames, potential0, energy) {
+            if let Some(stats) = self.try_scalar_flight(frames, potential0, energy, limit) {
                 return Ok(stats);
             }
             self.scalar_flight_fallbacks += 1;
@@ -1802,7 +1915,9 @@ impl Choir {
         self.ramp_end_force.copy_from_slice(&self.ramp_start_force);
         self.ramp_correction.fill(0.);
         self.felt_force_trace.fill([0.; 3]);
-        for outer in 0..32 {
+        for outer in 0..limit {
+            self.last_outer_iterations = outer + 1;
+            self.ramp_outer_iterations += 1;
             self.q.copy_from_slice(&self.block_start_q);
             self.v.copy_from_slice(&self.block_start_v);
             self.ramp_weighted_displacement.fill(0.);
@@ -2214,6 +2329,7 @@ fn main() {
     choir.canonical_correction = !args.iter().any(|arg| arg == "--legacy-correction");
     choir.use_scalar_flight = !args.iter().any(|arg| arg == "--vector-flight");
     choir.use_warm_felt = !args.iter().any(|arg| arg == "--cold-felt");
+    choir.adaptive_ramp = !args.iter().any(|arg| arg == "--no-ramp-refinement");
     choir.use_zero_axis_invariant = !args.iter().any(|arg| arg == "--full-transverse-solve");
     for wire in &mut choir.wires {
         wire.plan.fused_passes = !args.iter().any(|arg| arg == "--split-fft-passes");
@@ -2224,6 +2340,23 @@ fn main() {
             wire.plan.kernel = fft_butterflies_portable;
             wire.plan.simd_fft = false;
         }
+    }
+
+    if args.get(2).map(String::as_str) == Some("rollback-ramp") {
+        if args.iter().any(|arg| arg == "--prime-cache") {
+            choir.step_ramp(1).expect("prime endpoint cache");
+        }
+        let initial_q = choir.q.clone();
+        let initial_v = choir.v.clone();
+        let initial_force = choir.endpoint_force.clone();
+        let initial_potential = choir.endpoint_potential;
+        let initial_valid = choir.endpoint_valid;
+        let initial_energy = choir.energy();
+        let scalar_before = choir.scalar_flight_blocks;
+        let error = choir.step_ramp_with_limit(16, 1).err();
+        let energy = choir.energy();
+        println!("{{\"failed\":{},\"q_unchanged\":{},\"v_unchanged\":{},\"cache_unchanged\":{},\"energy_unchanged\":{},\"initial_cache_valid\":{},\"scalar_blocks_unchanged\":{},\"trace_zero\":{},\"rolled_back_children\":{},\"attempts\":{},\"rejected_attempts\":{}}}",error.is_some(),choir.q==initial_q,choir.v==initial_v,choir.endpoint_force==initial_force && choir.endpoint_potential==initial_potential && choir.endpoint_valid==initial_valid,energy==initial_energy,initial_valid,choir.scalar_flight_blocks==scalar_before,choir.block_trace[..16].iter().all(|x|*x==0.),choir.ramp_rolled_back_child_blocks,choir.last_ramp_attempts,choir.ramp_rejected_attempts);
+        return;
     }
 
     if args.get(2).map(String::as_str) == Some("kernel") {
@@ -2275,6 +2408,7 @@ fn main() {
         let mut work_relative_max = 0f64;
         let mut maximum_outer_iterations = 0;
         let mut certified_flight_blocks = 0;
+        let mut maximum_ramp_attempts = 0;
         let cached_before = choir.cached_initial_gradients;
         let zero_before = choir
             .wires
@@ -2282,6 +2416,18 @@ fn main() {
             .map(|w| w.plan.zero_transforms)
             .sum::<usize>();
         let total = (durations[2] * p[4]).round() as usize;
+        // Optional caller-imposed boundaries are a diagnostic for replaying
+        // an explicitly subdivided schedule, independent of failure recovery.
+        let manual_boundaries = args
+            .iter()
+            .find_map(|arg| arg.strip_prefix("--ramp-boundaries="))
+            .map(|list| {
+                list.split(',')
+                    .map(|value| value.parse::<usize>().expect("manual ramp boundary"))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        assert!(manual_boundaries.iter().all(|tick| *tick <= total));
         let mut events = Vec::new();
         let mut checkpoints = Vec::new();
         let mut force_trace = Vec::new();
@@ -2301,6 +2447,7 @@ fn main() {
             let next_event = (0..2)
                 .filter(|i| launch[*i] > 0.)
                 .map(|i| (durations[i] * p[4]).round() as usize)
+                .chain(manual_boundaries.iter().copied())
                 .filter(|tick| *tick > frame)
                 .min()
                 .unwrap_or(total);
@@ -2314,6 +2461,7 @@ fn main() {
             }
             .expect("native step");
             maximum_outer_iterations = maximum_outer_iterations.max(choir.last_outer_iterations);
+            maximum_ramp_attempts = maximum_ramp_attempts.max(choir.last_ramp_attempts);
             if ramp_mode && choir.last_certified_flight {
                 certified_flight_blocks += 1;
             }
@@ -2340,7 +2488,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{},\"adaptive_ramp\":{},\"ramp_rejected_attempts\":{},\"ramp_refined_requests\":{},\"ramp_refined_child_blocks\":{},\"smallest_refined_block\":{},\"maximum_ramp_attempts\":{},\"ramp_outer_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations,choir.adaptive_ramp,choir.ramp_rejected_attempts,choir.ramp_refined_requests,choir.ramp_refined_child_blocks,if choir.ramp_refined_requests>0 {choir.smallest_refined_block} else {0},maximum_ramp_attempts,choir.ramp_outer_iterations);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -2357,16 +2505,20 @@ fn main() {
     let mut iterations = 0;
     let mut outer_iterations = 0;
     let mut certified_flight_blocks = 0;
+    let mut maximum_ramp_attempts = 0;
     let cached_before = choir.cached_initial_gradients;
     let zero_before = choir
         .wires
         .iter()
         .map(|w| w.plan.zero_transforms)
         .sum::<usize>();
+    let mut refined_buffers = 0;
+    let mut maximum_refined_buffer_ms: f64 = 0.;
     let mut contact_buffers = 0;
     let mut contact_time_sum = 0.;
     let mut contact_time_max = 0f64;
     for _ in 0..blocks {
+        let refined_before = choir.ramp_refined_requests;
         let start = Instant::now();
         let mut completed = 0;
         let mut had_contact = false;
@@ -2386,6 +2538,7 @@ fn main() {
             had_contact |= stats.force > 0.;
             iterations = iterations.max(stats.iterations);
             outer_iterations = outer_iterations.max(choir.last_outer_iterations);
+            maximum_ramp_attempts = maximum_ramp_attempts.max(choir.last_ramp_attempts);
             if ramp_mode && choir.last_certified_flight {
                 certified_flight_blocks += 1;
             }
@@ -2393,6 +2546,10 @@ fn main() {
         }
         let elapsed = start.elapsed().as_secs_f64() * 1000.;
         times.push(elapsed);
+        if choir.ramp_refined_requests > refined_before {
+            refined_buffers += 1;
+            maximum_refined_buffer_ms = maximum_refined_buffer_ms.max(elapsed);
+        }
         if had_contact {
             contact_buffers += 1;
             contact_time_sum += elapsed;
@@ -2414,5 +2571,5 @@ fn main() {
         0.
     };
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"buffers_with_refinement\":{},\"maximum_refined_buffer_ms\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{},\"adaptive_ramp\":{},\"ramp_rejected_attempts\":{},\"ramp_refined_requests\":{},\"ramp_refined_child_blocks\":{},\"smallest_refined_block\":{},\"maximum_ramp_attempts\":{},\"ramp_outer_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,refined_buffers,maximum_refined_buffer_ms,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations,choir.adaptive_ramp,choir.ramp_rejected_attempts,choir.ramp_refined_requests,choir.ramp_refined_child_blocks,if choir.ramp_refined_requests>0 {choir.smallest_refined_block} else {0},maximum_ramp_attempts,choir.ramp_outer_iterations);
 }

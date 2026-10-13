@@ -107,6 +107,18 @@ Se conservan ese fallo y los rechazos de cache/disposición de coeficientes
 y bloques temporales mayores. Sigue refinar el bloque al fallar el solver,
 antes de aprobar duración y cerrar el instrumento completo.
 
+El [refinamiento transaccional del bloque](RESULTADOS-P7-refinamiento-transaccional.md)
+recupera el rechazo a 254,875 ms con dos hijos de 8, sin relajar tolerancias,
+y restaura todo el estado/cache si falla incluso un paso. **24 pruebas pasan**.
+C4 limpia mantiene estado largo **0,3241655%**, media **1,9533 ms**, P99
+**2,8390 ms** y máximo/ataque **3,7407 ms**; cero asignaciones, sin refinamientos.
+Con ambos ejes perturbados termina 1,024 s, pero cuesta 11,0319 ms medios y
+20,4251 ms máximos. La precisión de ese caso **no pasa**: a 256 ms, N16/N8/N4/N1
+difieren 136,99–142,23% del monolítico a 128 kHz, que también falla ledger
+(8,50e−8 frente a 1e−9). Sigue refinar/autenticar la referencia temporal y
+estudiar fuerzas/corrección de trabajo antes de ampliar aprobación o integrar
+el instrumento. Se conservan los fallos y el control sin recuperación.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

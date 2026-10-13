@@ -1,0 +1,55 @@
+{
+  "parent_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-13\\adaptive16-recovery.json",
+  "parent_sha256": "4338de3a3510d9734f2f46e99b624481e80fae813c2c69f3756cb22a08658c6a",
+  "source_sha256": {
+    "measure-concert-grand-native-strings.py": "7dbc2865c13577ac60e9fd14bbdb7d0b45a55d86009a313dcd30b0d36faebe74",
+    "concert-grand-native-strings.rs": "40347466630725882cc165a69ead668dc93d411e9a1b5178fd945a5341dd8fa2",
+    "concert_grand_native_strings.py": "4c0cae8d1155dab1a97c3ddbfa2afa6f6f08afb1e90167edbdfe7d14f78be450",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882"
+  },
+  "executable_sha256": "e214b57ace43aaf6cde27ae9ec4f390bf9c3e9d3737f330a1998775679e2e131",
+  "coefficient_sha256": "13d0fc94461bfe92268dca0c1e5407bdec85d488590332e3dc8ae86a106818c9",
+  "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-adaptive16-recovery-2026-10-13\\monolithic-reference.json",
+  "reference_sha256": "e3341bf1f1fac5e123889f863bfbb21173e37d2869f5a7e4585a7919ed948ee8",
+  "reference_work_relative_max": 8.500656613984554e-08,
+  "reference_work_1e9_gate_passed": false,
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "reference_approved": false,
+  "duration_s": 0.256,
+  "rate_hz": 128000,
+  "seed": 83,
+  "cases": [
+    {
+      "micro_block": 4,
+      "completed": true,
+      "seconds": 3.76214110001456,
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-adaptive16-finer-2026-10-13\\ramp-N4.json",
+      "result_sha256": "1f51fae7a52b2aedf7eae15e563b922220aa01968b529f77486b8e9319760abc",
+      "blocked_state_relative": 1.3836576046441607,
+      "attack_force_relative": 0.010285768622568777,
+      "state_force_1percent_gate_passed": false,
+      "mechanical_work_relative_max": 1.9606197339908232e-12,
+      "work_1e9_gate_passed": true,
+      "ramp_refined_requests": 0
+    },
+    {
+      "micro_block": 1,
+      "completed": true,
+      "seconds": 12.072588699986227,
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-adaptive16-finer-2026-10-13\\ramp-N1.json",
+      "result_sha256": "2f7024a8005d273b15a60376721fad46a8fa164cb74b47a134ece73f7d7eae90",
+      "blocked_state_relative": 1.4222998847840418,
+      "attack_force_relative": 0.006644907702037831,
+      "state_force_1percent_gate_passed": false,
+      "mechanical_work_relative_max": 1.810629921620263e-11,
+      "work_1e9_gate_passed": true,
+      "ramp_refined_requests": 0
+    }
+  ],
+  "sources_unchanged": true
+}

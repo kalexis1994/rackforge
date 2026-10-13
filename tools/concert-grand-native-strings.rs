@@ -129,17 +129,29 @@ struct CosinePlan {
     reverse: Vec<usize>,
     kernel: FftKernel,
     simd_fft: bool,
+    real_roots: Vec<Complex>,
+    zero_transforms: usize,
 }
 impl CosinePlan {
     fn new(nodes: usize) -> Self {
         assert!(nodes.is_power_of_two());
-        let n = nodes;
+        let n = nodes / 2;
         let bits = n.trailing_zeros();
         let (kernel, simd_fft) = fft_dispatch();
         Self {
             kernel,
             simd_fft,
             nodes,
+            real_roots: (0..nodes)
+                .map(|k| {
+                    let angle = -2. * std::f64::consts::PI * k as f64 / nodes as f64;
+                    Complex {
+                        r: angle.cos(),
+                        i: angle.sin(),
+                    }
+                })
+                .collect(),
+            zero_transforms: 0,
             fft: vec![Complex::default(); n],
             roots: (1..=bits)
                 .flat_map(|stage| {
@@ -183,58 +195,105 @@ impl CosinePlan {
             }
         }
     }
+    fn spectrum(&self, q: &[f64], scales: &[f64], k: usize) -> Complex {
+        let a = if k > 0 && k <= q.len() {
+            self.nodes as f64 * 0.5 * q[k - 1] * scales[k - 1]
+        } else {
+            0.
+        };
+        let mirror = self.nodes - k;
+        let b = if k > 0 && mirror <= q.len() {
+            self.nodes as f64 * 0.5 * q[mirror - 1] * scales[mirror - 1]
+        } else {
+            0.
+        };
+        let p = self.phase[k];
+        Complex {
+            r: a * p.r + b * p.i,
+            i: a * p.i - b * p.r,
+        }
+    }
     fn synthesize(&mut self, q: &[f64], scales: &[f64], out: &mut [f64]) {
         assert_eq!(q.len(), scales.len());
         assert_eq!(out.len(), self.nodes);
-        // Invert the real-input FFT reordering for DCT-II. Both spectral
-        // partners are prepared directly; no doubled even-extension FFT.
-        for k in 0..self.nodes {
-            let a = if k > 0 && k <= q.len() {
-                self.nodes as f64 * 0.5 * q[k - 1] * scales[k - 1]
-            } else {
-                0.
-            };
-            let mirror = self.nodes - k;
-            let b = if k > 0 && mirror <= q.len() {
-                self.nodes as f64 * 0.5 * q[mirror - 1] * scales[mirror - 1]
-            } else {
-                0.
-            };
-            let p = self.phase[k];
+        if q.iter().all(|x| *x == 0.) {
+            out.fill(0.);
+            self.zero_transforms += 1;
+            return;
+        }
+        // Recover the FFT of packed even/odd real values: Z=E+iO,
+        // E=(X_k+X_{k+N/2})/2, O=conj(W_k)*(X_k-X_{k+N/2})/2.
+        let m = self.nodes / 2;
+        for k in 0..m {
+            let x = self.spectrum(q, scales, k);
+            let y = self.spectrum(q, scales, k + m);
+            let w = self.real_roots[k];
+            let dr = x.r - y.r;
+            let di = x.i - y.i;
             self.fft[k] = Complex {
-                r: a * p.r + b * p.i,
-                i: a * p.i - b * p.r,
+                r: 0.5 * (x.r + y.r + w.i * dr - w.r * di),
+                i: 0.5 * (x.i + y.i + w.r * dr + w.i * di),
             };
         }
         self.transform(true);
-        for j in 0..self.nodes / 2 {
-            out[2 * j] = self.fft[j].r;
-            out[2 * j + 1] = self.fft[self.nodes - 1 - j].r;
+        for j in 0..m {
+            let a = 2 * j;
+            let b = a + 1;
+            let ia = if a < m {
+                2 * a
+            } else {
+                2 * (self.nodes - 1 - a) + 1
+            };
+            let ib = if b < m {
+                2 * b
+            } else {
+                2 * (self.nodes - 1 - b) + 1
+            };
+            out[ia] = self.fft[j].r;
+            out[ib] = self.fft[j].i;
         }
     }
     fn analyze(&mut self, values: &[f64], scales: &[f64], factor: f64, out: &mut [f64]) {
         assert_eq!(values.len(), self.nodes);
         assert_eq!(scales.len(), out.len());
-        for j in 0..self.nodes / 2 {
-            self.fft[j] = Complex {
-                r: values[2 * j],
-                i: 0.,
+        if values.iter().all(|x| *x == 0.) {
+            out.fill(0.);
+            self.zero_transforms += 1;
+            return;
+        }
+        let m = self.nodes / 2;
+        for j in 0..m {
+            let a = 2 * j;
+            let b = a + 1;
+            let ia = if a < m {
+                2 * a
+            } else {
+                2 * (self.nodes - 1 - a) + 1
             };
-            self.fft[self.nodes - 1 - j] = Complex {
-                r: values[2 * j + 1],
-                i: 0.,
+            let ib = if b < m {
+                2 * b
+            } else {
+                2 * (self.nodes - 1 - b) + 1
+            };
+            self.fft[j] = Complex {
+                r: values[ia],
+                i: values[ib],
             };
         }
         self.transform(false);
-        for (k, (value, scale)) in out.iter_mut().zip(scales).enumerate() {
-            let k = k + 1;
-            *value = 2.
-                * factor
-                * scale
-                * (self.fft[k].r * self.phase[k].r + self.fft[k].i * self.phase[k].i);
+        for (index, (value, scale)) in out.iter_mut().zip(scales).enumerate() {
+            let k = index + 1;
+            let a = self.fft[k % m];
+            let b = self.fft[(m - k % m) % m];
+            let w = self.real_roots[k];
+            let xr = 0.5 * (a.r + b.r + w.r * (a.i + b.i) + w.i * (a.r - b.r));
+            let xi = 0.5 * (a.i - b.i + w.r * (b.r - a.r) + w.i * (a.i + b.i));
+            let p = self.phase[k];
+            *value = 2. * factor * *scale * (xr * p.r + xi * p.i);
         }
     }
 }
+
 pub struct Wire {
     nt: usize,
     nl: usize,
@@ -1719,6 +1778,11 @@ fn main() {
         let mut work_relative_max = 0f64;
         let mut maximum_outer_iterations = 0;
         let mut certified_flight_blocks = 0;
+        let zero_before = choir
+            .wires
+            .iter()
+            .map(|w| w.plan.zero_transforms)
+            .sum::<usize>();
         let total = (durations[2] * p[4]).round() as usize;
         let mut events = Vec::new();
         let mut checkpoints = Vec::new();
@@ -1778,7 +1842,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -1795,6 +1859,11 @@ fn main() {
     let mut iterations = 0;
     let mut outer_iterations = 0;
     let mut certified_flight_blocks = 0;
+    let zero_before = choir
+        .wires
+        .iter()
+        .map(|w| w.plan.zero_transforms)
+        .sum::<usize>();
     for _ in 0..blocks {
         let start = Instant::now();
         let mut completed = 0;
@@ -1823,5 +1892,5 @@ fn main() {
     let allocations = ALLOCATIONS.load(Ordering::Relaxed) - allocations;
     let mean = times.iter().sum::<f64>() / blocks as f64;
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before);
 }

@@ -187,3 +187,16 @@ Se mantienen profundidad, regularización, límites y tolerancias.
 **10,6779 ms** frente a 2 ms, cero asignaciones. Error corto de estado
 0,100690%, mismo ataque y ledger. Sigue fallando CPU; no se promueve al host.
 La comparación portable/SIMD de AVF, fuerza, estado y energía pasa en 4/96.
+
+La DCT siguiente empaqueta pares reales en una FFT de N/2 complejos y
+reconstruye su espectro real. Gauss independiente y paridad portable/SIMD
+pasan de nuevo. Un vector exactamente cero devuelve exactamente cero sin
+FFT; no hay umbral de amplitud ni se quitan coordenadas. El control limpio
+es plano, por lo que su dirección horizontal permanece cero; las sondas con
+ambas direcciones perturbadas siguen calculándose completas.
+
+[FFT real N/2](medidas-P7-cuerdas-nativas-2026-10-13/vuelo16-FFT-real.json):
+media **4,9034 ms**, P99 **6,6888 ms**, máximo **10,8461 ms** a 128 kHz/16,
+128 buffers; cero asignaciones. Mismo error corto de estado y ledger.
+Se registran 117885 transformadas omitidas por cero exacto. Sigue fallando
+CPU y esta corrida no demuestra mejora de P99/máximo frente a la anterior.

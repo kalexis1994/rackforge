@@ -409,7 +409,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak
+          sudo apt-get install -y --no-install-recommends flatpak dbus
           # Ubuntu 24.04 keeps unprivileged user namespaces from processes
           # without an AppArmor profile, and flatpak-builder's bubblewrap
           # needs one for its sandbox.
@@ -441,9 +441,12 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
+      # The Flathub builder runs inside a sandbox and reaches the host's
+      # flatpak over the session bus, to install the SDK; a runner has no
+      # desktop session, so the build gets a bus of its own.
       - name: Build Linux Flatpak Standard bundle
         shell: bash
-        run: bash tools/build-linux-flatpak.sh dist/linux-flatpak/standard
+        run: dbus-run-session -- bash tools/build-linux-flatpak.sh dist/linux-flatpak/standard
 
       - name: Verify Flatpak edition contents
         shell: bash

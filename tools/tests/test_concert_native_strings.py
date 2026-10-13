@@ -70,6 +70,9 @@ class NativeStringsTests(unittest.TestCase):
         for rate,loss in [(64000,0.),(128000,.1)]:
             f=fixture(transverse=4,rate=rate,seed=83,loss=loss,second_speed=.1,duration=.016)
             native=self.run_native(f,'verify');reference=replay(f)
+            legacy=self.run_native(f,'verify','--legacy-reference-step')
+            np.testing.assert_allclose(legacy['q'],reference['q'],rtol=1e-7,atol=2e-12)
+            np.testing.assert_allclose(legacy['v'],reference['v'],rtol=1e-7,atol=2e-9)
             np.testing.assert_allclose(native['q'],reference['q'],rtol=1e-7,atol=2e-12)
             np.testing.assert_allclose(native['v'],reference['v'],rtol=1e-7,atol=2e-9)
             np.testing.assert_allclose(native['force_trace'],reference['force_trace'],rtol=1e-7,atol=2e-8)
@@ -368,5 +371,25 @@ class NativeStringsTests(unittest.TestCase):
             self.assertEqual(adaptive['ramp_rejected_attempts'],0)
             for field in ['q','v','force_trace','heat_j','launch_work_j','energy_checkpoints']:
                 np.testing.assert_array_equal(adaptive[field],fixed[field])
+
+    def test_checked_reference_closes_stiff_mixed_work_without_relaxing_residual(self):
+        f=fixture(transverse=96,rate=128000,seed=83,duration=.256,second_speed=0.)
+        checked=self.run_native(f,'verify')
+        legacy=self.run_native(f,'verify','--legacy-reference-step')
+        self.assertLess(checked['work_relative_max'],1e-9)
+        self.assertGreater(legacy['work_relative_max'],1e-9)
+        self.assertTrue(checked['checked_reference'])
+        self.assertFalse(legacy['checked_reference'])
+        self.assertGreater(checked['reference_work_rejections'],0)
+        self.assertLessEqual(checked['reference_local_work_max'],1e-14)
+        np.testing.assert_allclose(checked['force_trace'],legacy['force_trace'],rtol=1e-7,atol=2e-8)
+
+    def test_reference_work_check_leaves_ramp_state_and_cache_identical(self):
+        f=fixture(transverse=96,rate=128000,seed=83,duration=.006)
+        checked=self.run_native(f,'verify-ramp',16)
+        legacy=self.run_native(f,'verify-ramp',16,'--legacy-reference-step')
+        for field in ['q','v','heat_j','force_trace','energy_checkpoints','endpoint_nonlinear_force']:
+            np.testing.assert_array_equal(checked[field],legacy[field])
+        self.assertEqual(checked['reference_work_rejections'],0)
 
 if __name__=='__main__':unittest.main()

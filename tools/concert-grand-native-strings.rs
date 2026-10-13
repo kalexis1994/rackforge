@@ -442,13 +442,17 @@ impl Wire {
         }
     }
     pub fn nonlinear_potential(&mut self, q: &[f64], bridge: f64) -> f64 {
-        self.fields(q, bridge, 0);
+        self.nonlinear_potential_slot(q, bridge, 0)
+    }
+    fn nonlinear_potential_slot(&mut self, q: &[f64], bridge: f64, slot: usize) -> f64 {
+        self.fields(q, bridge, slot);
         let n = self.nodes;
+        let start = slot * 3 * n;
         let mut sum = 0.;
         for j in 0..n {
-            let u = self.fields[j];
-            let v = self.fields[n + j];
-            let w = self.fields[2 * n + j];
+            let u = self.fields[start + j];
+            let v = self.fields[start + n + j];
+            let w = self.fields[start + 2 * n + j];
             let eta = 0.5 * (v * v + w * w);
             sum += (u + 0.5 * eta) * eta;
         }
@@ -952,6 +956,9 @@ pub struct Choir {
     smallest_refined_block: usize,
     last_ramp_attempts: usize,
     ramp_outer_iterations: usize,
+    checked_reference: bool,
+    reference_work_rejections: usize,
+    reference_local_work_max: f64,
 }
 impl Choir {
     fn new(
@@ -1140,6 +1147,9 @@ impl Choir {
             smallest_refined_block: usize::MAX,
             last_ramp_attempts: 0,
             ramp_outer_iterations: 0,
+            checked_reference: true,
+            reference_work_rejections: 0,
+            reference_local_work_max: 0.,
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -2163,9 +2173,16 @@ impl Choir {
     }
     pub fn step(&mut self) -> Result<Stats, &'static str> {
         self.endpoint_valid = false;
-        for i in 0..3 {
-            self.wires[i].fields(&self.q[i * self.width..(i + 1) * self.width], 0., 0);
-        }
+        // energy() prepares slot zero at the physical old state. Candidate
+        // work checks use slot one so Newton's cached old fields remain valid.
+        let energy0 = if self.checked_reference {
+            self.energy()
+        } else {
+            for i in 0..3 {
+                self.wires[i].fields(&self.q[i * self.width..(i + 1) * self.width], 0., 0);
+            }
+            0.
+        };
         for j in 0..self.size {
             self.linear[j] = self.c[j] * self.q[j] + self.s[j] * self.v[j];
         }
@@ -2194,14 +2211,51 @@ impl Choir {
                 return Err("nonfinite string residual");
             }
             if residual_norm < 2e-14 * scale {
-                for j in 0..self.size {
-                    let v = -self.omega2[j] * self.s[j] * self.q[j] + self.c[j] * self.v[j]
-                        - self.s[j] * self.gradient[j];
-                    self.q[j] = self.candidate[j];
-                    self.v[j] = v;
+                if !self.checked_reference {
+                    for j in 0..self.size {
+                        let v = -self.omega2[j] * self.s[j] * self.q[j] + self.c[j] * self.v[j]
+                            - self.s[j] * self.gradient[j];
+                        self.q[j] = self.candidate[j];
+                        self.v[j] = v;
+                    }
+                    stats.iterations = iteration + 1;
+                    return Ok(stats);
                 }
-                stats.iterations = iteration + 1;
-                return Ok(stats);
+                for j in 0..self.size {
+                    self.trial[j] = self.linear[j] - self.gain[j] * self.gradient[j];
+                    self.update[j] = -self.omega2[j] * self.s[j] * self.q[j]
+                        + self.c[j] * self.v[j]
+                        - self.s[j] * self.gradient[j];
+                }
+                let mut energy1 = 0.5 * dot(&self.update, &self.update)
+                    + 0.5
+                        * self
+                            .trial
+                            .iter()
+                            .zip(&self.omega2)
+                            .map(|(q, w)| q * q * w)
+                            .sum::<f64>();
+                for i in 0..3 {
+                    energy1 += self.wires[i].nonlinear_potential_slot(
+                        &self.trial[i * self.width..(i + 1) * self.width],
+                        0.,
+                        1,
+                    );
+                    energy1 += self.stiffness / (self.exponent + 1.)
+                        * self
+                            .compression(&self.trial, i)
+                            .max(0.)
+                            .powf(self.exponent + 1.);
+                }
+                let local_work = (energy1 + stats.heat - energy0).abs() / energy0.abs().max(1e-30);
+                if local_work <= 1e-14 {
+                    self.reference_local_work_max = self.reference_local_work_max.max(local_work);
+                    self.q.copy_from_slice(&self.trial);
+                    self.v.copy_from_slice(&self.update);
+                    stats.iterations = iteration + 1;
+                    return Ok(stats);
+                }
+                self.reference_work_rejections += 1;
             }
             let root = jac.map(|v| v.max(0.).sqrt());
             let mut matrix = [[0.; 3]; 3];
@@ -2330,6 +2384,7 @@ fn main() {
     choir.use_scalar_flight = !args.iter().any(|arg| arg == "--vector-flight");
     choir.use_warm_felt = !args.iter().any(|arg| arg == "--cold-felt");
     choir.adaptive_ramp = !args.iter().any(|arg| arg == "--no-ramp-refinement");
+    choir.checked_reference = !args.iter().any(|arg| arg == "--legacy-reference-step");
     choir.use_zero_axis_invariant = !args.iter().any(|arg| arg == "--full-transverse-solve");
     for wire in &mut choir.wires {
         wire.plan.fused_passes = !args.iter().any(|arg| arg == "--split-fft-passes");
@@ -2488,7 +2543,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{},\"adaptive_ramp\":{},\"ramp_rejected_attempts\":{},\"ramp_refined_requests\":{},\"ramp_refined_child_blocks\":{},\"smallest_refined_block\":{},\"maximum_ramp_attempts\":{},\"ramp_outer_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations,choir.adaptive_ramp,choir.ramp_rejected_attempts,choir.ramp_refined_requests,choir.ramp_refined_child_blocks,if choir.ramp_refined_requests>0 {choir.smallest_refined_block} else {0},maximum_ramp_attempts,choir.ramp_outer_iterations);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{},\"adaptive_ramp\":{},\"ramp_rejected_attempts\":{},\"ramp_refined_requests\":{},\"ramp_refined_child_blocks\":{},\"smallest_refined_block\":{},\"maximum_ramp_attempts\":{},\"ramp_outer_iterations\":{},\"checked_reference\":{},\"reference_work_rejections\":{},\"reference_local_work_max\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations,choir.adaptive_ramp,choir.ramp_rejected_attempts,choir.ramp_refined_requests,choir.ramp_refined_child_blocks,if choir.ramp_refined_requests>0 {choir.smallest_refined_block} else {0},maximum_ramp_attempts,choir.ramp_outer_iterations,choir.checked_reference,choir.reference_work_rejections,choir.reference_local_work_max);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -2571,5 +2626,5 @@ fn main() {
         0.
     };
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"buffers_with_refinement\":{},\"maximum_refined_buffer_ms\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{},\"adaptive_ramp\":{},\"ramp_rejected_attempts\":{},\"ramp_refined_requests\":{},\"ramp_refined_child_blocks\":{},\"smallest_refined_block\":{},\"maximum_ramp_attempts\":{},\"ramp_outer_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,refined_buffers,maximum_refined_buffer_ms,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations,choir.adaptive_ramp,choir.ramp_rejected_attempts,choir.ramp_refined_requests,choir.ramp_refined_child_blocks,if choir.ramp_refined_requests>0 {choir.smallest_refined_block} else {0},maximum_ramp_attempts,choir.ramp_outer_iterations);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"fused_fft_passes\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"buffers_with_refinement\":{},\"maximum_refined_buffer_ms\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"scalar_unknowns_min\":{},\"scalar_unknowns_max\":{},\"zero_axis_invariant\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{},\"adaptive_ramp\":{},\"ramp_rejected_attempts\":{},\"ramp_refined_requests\":{},\"ramp_refined_child_blocks\":{},\"smallest_refined_block\":{},\"maximum_ramp_attempts\":{},\"ramp_outer_iterations\":{},\"checked_reference\":{},\"reference_work_rejections\":{},\"reference_local_work_max\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fused_passes,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,refined_buffers,maximum_refined_buffer_ms,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,if choir.scalar_unknowns_max>0 {choir.scalar_unknowns_min} else {0},choir.scalar_unknowns_max,choir.use_zero_axis_invariant,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations,choir.adaptive_ramp,choir.ramp_rejected_attempts,choir.ramp_refined_requests,choir.ramp_refined_child_blocks,if choir.ramp_refined_requests>0 {choir.smallest_refined_block} else {0},maximum_ramp_attempts,choir.ramp_outer_iterations,choir.checked_reference,choir.reference_work_rejections,choir.reference_local_work_max);
 }

@@ -119,6 +119,19 @@ difieren 136,99–142,23% del monolítico a 128 kHz, que también falla ledger
 estudiar fuerzas/corrección de trabajo antes de ampliar aprobación o integrar
 el instrumento. Se conservan los fallos y el control sin recuperación.
 
+La [referencia coherente y el refinamiento del reloj](RESULTADOS-P7-referencia-tiempo.md)
+publican posición/velocidad con el mismo portador y comprueban trabajo local.
+Ledger mixto de 256 ms **8,50e−8→5,30e−11**, sin relajar el residuo; **26 pruebas
+pasan**, control legacy exacto. En 6 ms mixtos, el monolítico 4,096→8,192 MHz
+cambia **0,4264%** y pasa trabajo/estado/fuerza. N1 a 8,192 MHz difiere
+**0,02954%**, pero N16 **28,6562%**: la interpolación temporal sigue fallando.
+C4 limpia N16/128 kHz frente a la referencia fina pasa **0,1036664%** a 6 ms;
+contra la nueva referencia de 128 kHz conserva **0,3241655%** a 250 ms.
+Media **1,9295 ms**, P99 **2,2641 ms**, ataque **3,6341 ms**, cero asignaciones;
+CPU aún falla. Sigue representar las fuerzas con sus fases rápidas antes de
+ampliar aprobación o integrar el instrumento; referencia fina validada sólo
+en la ventana corta, sin retirar modos ni actualizar fábrica.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

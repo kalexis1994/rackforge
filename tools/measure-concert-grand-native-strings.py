@@ -31,10 +31,11 @@ def main():
     parser.add_argument('--vector-flight',action='store_true')
     parser.add_argument('--cold-felt',action='store_true')
     parser.add_argument('--no-ramp-refinement',action='store_true')
+    parser.add_argument('--legacy-reference-step',action='store_true')
     parser.add_argument('--split-fft-passes',action='store_true')
     parser.add_argument('--full-transverse-solve',action='store_true')
     args=parser.parse_args()
-    flags=(['--portable'] if args.portable else [])+(['--uncondensed'] if args.uncondensed else [])+(['--legacy-correction'] if args.legacy_correction else [])+(['--vector-flight'] if args.vector_flight else [])+(['--cold-felt'] if args.cold_felt else [])+(['--split-fft-passes'] if args.split_fft_passes else [])+(['--full-transverse-solve'] if args.full_transverse_solve else [])+(['--no-ramp-refinement'] if args.no_ramp_refinement else [])
+    flags=(['--portable'] if args.portable else [])+(['--uncondensed'] if args.uncondensed else [])+(['--legacy-correction'] if args.legacy_correction else [])+(['--vector-flight'] if args.vector_flight else [])+(['--cold-felt'] if args.cold_felt else [])+(['--split-fft-passes'] if args.split_fft_passes else [])+(['--full-transverse-solve'] if args.full_transverse_solve else [])+(['--no-ramp-refinement'] if args.no_ramp_refinement else [])+(['--legacy-reference-step'] if args.legacy_reference_step else [])
     if args.local.exists() or args.report.exists() or not 8<=args.buffers<=2048 or not 1<=args.micro_block<=64:
         raise ValueError('new native string measurement paths and valid buffer count required')
     root=Path(__file__).resolve().parent.parent
@@ -53,6 +54,7 @@ def main():
         scalar_flight=args.ramp and not(args.vector_flight or args.uncondensed or args.legacy_correction),
         warm_felt=args.ramp and not args.cold_felt,
         adaptive_ramp=args.ramp and not args.no_ramp_refinement,
+        checked_reference=not args.legacy_reference_step,
         fused_fft_passes=not args.split_fft_passes,zero_axis_invariant=args.ramp and not args.full_transverse_solve,
         correction_direction='accumulated vector' if args.legacy_correction else 'parallel to string displacement',
         fixed_bridge=True,moving_body_attached=False,pressure_included=False,pedals_included=False,

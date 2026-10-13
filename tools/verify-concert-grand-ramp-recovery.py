@@ -39,6 +39,8 @@ def main():
             and parent['nonlinear_micro_block'] == 16
             and parent['correction_direction'] == 'parallel to string displacement'):
         raise ValueError('determined adaptive N16 measurement required')
+    if not parent.get('checked_reference',False):
+        raise ValueError('work-checked reference required')
     if parent.get('math_backend') != 'prepared CPU dispatch':
         raise ValueError('dispatch measurement required; portable is checked separately')
     exe = Path(parent['executable_path'])
@@ -56,7 +58,7 @@ def main():
         executable_sha256=digest(exe), control_executable_sha256=digest(old_exe),
         fixed_bridge=True, moving_body_attached=False, pressure_included=False,
         pedals_included=False, full_piano_realtime=False, global_physics_approved=False,
-        seed=83, rate_hz=128000, transverse=96, axial=192, micro_block=16,
+        checked_reference=True, seed=83, rate_hz=128000, transverse=96, axial=192, micro_block=16,
         duration_s=.256, restrike_speed_m_s=0., mechanical_coordinates=1153,
         rejected_frame=32624, manual_boundaries=[32632, 32640], cases=[], benchmarks=[],
     )
@@ -127,7 +129,8 @@ def main():
                           / np.linalg.norm(reference['force_trace']))
             state = change(recovered, reference)
             record.update(blocked_state_relative=state, attack_force_relative=force,
-                          accuracy_1percent_gate_passed=state <= .01 and force <= .01,
+                          accuracy_1percent_gate_passed=state <= .01 and force <= .01 and reference['work_relative_max'] <= 1e-9,
+                          reference_work_1e9_gate_passed=reference['work_relative_max'] <= 1e-9,
                           reference_work_relative_max=reference['work_relative_max'])
             print('mixed sustained temporal error', state, 'force', force, flush=True)
             finer_case, finer = run('finer-N8', exe, path, 'verify-ramp', 8)

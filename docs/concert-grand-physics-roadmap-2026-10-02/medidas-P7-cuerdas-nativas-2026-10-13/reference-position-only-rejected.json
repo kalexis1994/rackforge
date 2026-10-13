@@ -1,0 +1,23 @@
+{
+  "base_commit": "39c5ceaf19768b6e9c60f5b15530a7a700ec1bb4",
+  "hypothesis": "publish the composed position with the composed velocity, retaining the old Newton residual threshold",
+  "candidate_source_sha256": "cb8f78f6c086c846acecb52379f0cb05f0a4bccabb34844da914f6667aba8270",
+  "candidate_executable_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-coherent-reference-probe-2026-10-13\\coherent.exe",
+  "candidate_executable_sha256": "4767a54cc7915141966e6d997e267e11d03c116bb02789adc8e9bb21c6ec0e6f",
+  "patch_sha256": "6cac78b553295ec109297c3a8ce38256fe8d5a01bc2d4c784ec76a04b1c02080",
+  "parent_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-13\\adaptive16-recovery.json",
+  "parent_sha256": "4338de3a3510d9734f2f46e99b624481e80fae813c2c69f3756cb22a08658c6a",
+  "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-adaptive16-recovery-2026-10-13\\monolithic-reference.json",
+  "reference_sha256": "e3341bf1f1fac5e123889f863bfbb21173e37d2869f5a7e4585a7919ed948ee8",
+  "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-coherent-reference-probe-2026-10-13\\coherent-128000.json",
+  "result_sha256": "7a575e7f888982a89479415029f49b1e3c34ffef6f9772d3eb79e80d46815d0f",
+  "duration_s": 0.256,
+  "rate_hz": 128000,
+  "seed": 83,
+  "old_work_relative_max": 8.500656613984554e-08,
+  "candidate_work_relative_max": 6.031146699210376e-09,
+  "work_1e9_gate_passed": false,
+  "selected": false,
+  "reason": "Composed position alone improves energy closure but still fails the fixed 1e-9 ledger gate. Require accepted-step work in addition to position residual.",
+  "global_physics_approved": false
+}

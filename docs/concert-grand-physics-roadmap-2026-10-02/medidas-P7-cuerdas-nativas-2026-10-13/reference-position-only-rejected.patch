@@ -1,0 +1,11 @@
+--- a/tools/concert-grand-native-strings.rs
++++ b/tools/concert-grand-native-strings.rs
+@@ -2197,7 +2197,7 @@
+                 for j in 0..self.size {
+                     let v = -self.omega2[j] * self.s[j] * self.q[j] + self.c[j] * self.v[j]
+                         - self.s[j] * self.gradient[j];
+-                    self.q[j] = self.candidate[j];
++                    self.q[j] = self.linear[j] - self.gain[j] * self.gradient[j];
+                     self.v[j] = v;
+                 }
+                 stats.iterations = iteration + 1;

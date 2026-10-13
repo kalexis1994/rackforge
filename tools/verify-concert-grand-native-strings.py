@@ -55,9 +55,13 @@ def main():
         flags.append('--full-transverse-solve')
     if parent.get('adaptive_ramp') is False:
         flags.append('--no-ramp-refinement')
+    if parent.get('checked_reference',False) is False:
+        flags.append('--legacy-reference-step')
     reused=None
     if args.reference_report:
         reused=json.loads(args.reference_report.read_text(encoding='utf-8'))
+        if reused.get('checked_reference',False)!=parent.get('checked_reference',False):
+            raise ValueError('reference step changed: recompute instead of reusing the legacy reference')
         for name,sha in parent['source_sha256'].items():
             if name not in {'measure-concert-grand-native-strings.py','concert-grand-native-strings.rs'}:
                 if reused['source_sha256'].get(name)!=sha:
@@ -81,6 +85,7 @@ def main():
         scalar_flight=parent.get('scalar_flight',False),
         warm_felt=parent.get('warm_felt',False),
         adaptive_ramp=parent.get('adaptive_ramp',False),
+        checked_reference=parent.get('checked_reference',False),
         fused_fft_passes=parent.get('fused_fft_passes',False),
         zero_axis_invariant=parent.get('zero_axis_invariant',False),
         reference_parent_path=str(args.reference_report.resolve()) if reused else None,
@@ -141,10 +146,11 @@ def main():
                         smallest_refined_block=native.get('smallest_refined_block',0),
                         maximum_ramp_attempts=native.get('maximum_ramp_attempts',1),
                         completed=True, blocked_state_relative=state, attack_force_relative=force,
-                        accuracy_1percent_gate_passed=state <= .01 and force <= .01,
+                        accuracy_1percent_gate_passed=state <= .01 and force <= .01 and reference['work_relative_max'] <= 1e-9,
                         mechanical_work_relative_max=native['work_relative_max'],
                         mechanical_work_1e9_gate_passed=native['work_relative_max'] <= 1e-9,
                         reference_work_relative_max=reference['work_relative_max'],
+                        reference_work_1e9_gate_passed=reference['work_relative_max'] <= 1e-9,
                         launch_work_j=native['launch_work_j'], felt_heat_j=native['heat_j'],
                         maximum_outer_iterations=native['maximum_outer_iterations'],
                         note='Force trace covers first 6 ms; state/work cover the full 250 ms and live restrike.',

@@ -63,6 +63,16 @@ contacto o pedales nativos integrados ni instrumento tocable**. Sigue esa
 integración conservativa y su costo completo antes del ejecutable MIDI;
 no se instala una variante ni se modifica el paquete de fábrica.
 
+El [coro no lineal nativo a puente fijo](RESULTADOS-P7-cuerdas-nativas.md)
+ya conserva tres cuerdas 96/192, contacto compartido y reiteración viva.
+Composición exacta de portadores, Newton reducido y bucles contiguos bajan
+el máximo de 148,95 ms a 5,96 ms por 256 frames a 44,1 kHz; aún falla plazo,
+sin cuerpo/presión. El bloque rápido pasa estado a 6 ms pero **falla a 250 ms**:
+12,01% a 44,1 kHz y 5,86% a 128 kHz. Con 16 pasos a 128 kHz el estado largo
+pasa 0,324%, pero el máximo cuesta 14,70 ms frente a 2 ms. Diez pruebas pasan,
+ledger largo <8e−13; eso no aprueba la trayectoria rechazada. Sigue resolver
+temporal/costo antes del cierre con inercia compartida y del host tocable.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

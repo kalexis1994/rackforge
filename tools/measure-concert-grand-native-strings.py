@@ -22,8 +22,10 @@ def main():
     parser.add_argument('--rates',type=int,nargs='+',default=[44100,48000])
     parser.add_argument('--buffers',type=int,default=64)
     parser.add_argument('--replay',action='store_true')
+    parser.add_argument('--micro-block',type=int,default=1)
+    parser.add_argument('--ramp',action='store_true')
     args=parser.parse_args()
-    if args.local.exists() or args.report.exists() or not 8<=args.buffers<=2048:
+    if args.local.exists() or args.report.exists() or not 8<=args.buffers<=2048 or not 1<=args.micro_block<=64:
         raise ValueError('new native string measurement paths and valid buffer count required')
     root=Path(__file__).resolve().parent.parent
     names=[Path(__file__).name,'concert-grand-native-strings.rs','concert_grand_native_strings.py',
@@ -37,6 +39,7 @@ def main():
     record=dict(stage='native fixed-bridge nonlinear choir measured',source_sha256=source,
         executable_path=str(exe.resolve()),executable_sha256=digest(exe),cases=[],
         fixed_bridge=True,moving_body_attached=False,pressure_included=False,pedals_included=False,
+        nonlinear_micro_block=args.micro_block,work_checked_at_nonlinear_block_boundaries=True,ramped_nonlinearity=args.ramp,
         full_piano_realtime=False,global_physics_approved=False,factory_updated=False)
     def save():
         record['seconds']=time.perf_counter()-begin
@@ -51,10 +54,21 @@ def main():
                 case=dict(transverse=nt,axial=2*nt,nodes=f['nodes'],rate_hz=rate,note=60,velocity=84,
                     coefficient_path=str(path.resolve()),coefficient_sha256=digest(path),mechanical_coordinates=len(f['q']))
                 try:
-                    native=json.loads(subprocess.check_output([str(exe),str(path),'verify'],text=True,stderr=subprocess.STDOUT))
+                    mode=['verify-ramp',str(args.micro_block)] if args.ramp else (['verify'] if args.micro_block==1 else ['verify-block',str(args.micro_block)])
+                    native=json.loads(subprocess.check_output([str(exe),str(path),*mode],text=True,stderr=subprocess.STDOUT))
                     case.update(mechanical_work_relative_max=native['work_relative_max'],felt_heat_j=native['heat_j'],
                         force_peak_n=native['force_peak_n'],maximum_iterations=native['maximum_iterations'],
                         mechanical_work_1e9_gate_passed=native['work_relative_max']<=1e-9)
+                    if args.micro_block>1:
+                        baseline=json.loads(subprocess.check_output([str(exe),str(path),'verify'],text=True,stderr=subprocess.STDOUT))
+                        omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+                        expected=np.r_[omega*np.asarray(baseline['q'])[:-1],baseline['v']]
+                        actual=np.r_[omega*np.asarray(native['q'])[:-1],native['v']]
+                        state=float(np.linalg.norm(actual-expected)/np.linalg.norm(expected))
+                        force=float(np.linalg.norm(np.asarray(native['force_trace'])-baseline['force_trace'])/np.linalg.norm(baseline['force_trace']))
+                        case.update(blocked_state_relative=state,blocked_force_relative=force,
+                            blocked_accuracy_1percent_gate_passed=state<=.01 and force<=.01,
+                            nonlinear_outer_iterations=native['maximum_outer_iterations'])
                     if args.replay:
                         reference=replay(f)
                         omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
@@ -65,7 +79,8 @@ def main():
                         case.update(native_python_state_relative=state,native_python_force_relative=force,
                             native_python_parity_1e8_gate_passed=state<=1e-8 and force<=1e-8,
                             python_mechanical_work_relative=reference['work_relative'])
-                    bench=json.loads(subprocess.check_output([str(exe),str(path),'bench',str(args.buffers)],text=True,stderr=subprocess.STDOUT))
+                    mode=['bench-ramp',str(args.buffers),str(args.micro_block)] if args.ramp else (['bench',str(args.buffers)] if args.micro_block==1 else ['bench-block',str(args.buffers),str(args.micro_block)])
+                    bench=json.loads(subprocess.check_output([str(exe),str(path),*mode],text=True,stderr=subprocess.STDOUT))
                     bench['isolated_full_buffer_budget_passed']=bench['max_ms']<=bench['deadline_ms'] and bench['allocations']==0
                     case['benchmark']=bench
                     print('native string result',nt,rate,'P99',bench['p99_ms'],'max',bench['max_ms'],'work',case['mechanical_work_relative_max'],flush=True)

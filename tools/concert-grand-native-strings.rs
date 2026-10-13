@@ -39,7 +39,7 @@ struct CosinePlan {
 impl CosinePlan {
     fn new(nodes: usize) -> Self {
         assert!(nodes.is_power_of_two());
-        let n = 2 * nodes;
+        let n = nodes;
         let bits = n.trailing_zeros();
         Self {
             nodes,
@@ -110,36 +110,50 @@ impl CosinePlan {
     fn synthesize(&mut self, q: &[f64], scales: &[f64], out: &mut [f64]) {
         assert_eq!(q.len(), scales.len());
         assert_eq!(out.len(), self.nodes);
-        self.fft.fill(Complex::default());
-        for (k, (q, s)) in q.iter().zip(scales).enumerate() {
-            let k = k + 1;
-            let a = self.nodes as f64 * q * s;
+        // Invert the real-input FFT reordering for DCT-II. Both spectral
+        // partners are prepared directly; no doubled even-extension FFT.
+        for k in 0..self.nodes {
+            let a = if k > 0 && k <= q.len() {
+                self.nodes as f64 * 0.5 * q[k - 1] * scales[k - 1]
+            } else {
+                0.
+            };
+            let mirror = self.nodes - k;
+            let b = if k > 0 && mirror <= q.len() {
+                self.nodes as f64 * 0.5 * q[mirror - 1] * scales[mirror - 1]
+            } else {
+                0.
+            };
             let p = self.phase[k];
             self.fft[k] = Complex {
-                r: a * p.r,
-                i: a * p.i,
-            };
-            self.fft[2 * self.nodes - k] = Complex {
-                r: a * p.r,
-                i: -a * p.i,
+                r: a * p.r + b * p.i,
+                i: a * p.i - b * p.r,
             };
         }
         self.transform(true);
-        for (x, v) in out.iter_mut().zip(&self.fft) {
-            *x = v.r;
+        for j in 0..self.nodes / 2 {
+            out[2 * j] = self.fft[j].r;
+            out[2 * j + 1] = self.fft[self.nodes - 1 - j].r;
         }
     }
     fn analyze(&mut self, values: &[f64], scales: &[f64], factor: f64, out: &mut [f64]) {
         assert_eq!(values.len(), self.nodes);
         assert_eq!(scales.len(), out.len());
-        for (j, x) in values.iter().enumerate() {
-            self.fft[j] = Complex { r: *x, i: 0. };
-            self.fft[2 * self.nodes - 1 - j] = Complex { r: *x, i: 0. };
+        for j in 0..self.nodes / 2 {
+            self.fft[j] = Complex {
+                r: values[2 * j],
+                i: 0.,
+            };
+            self.fft[self.nodes - 1 - j] = Complex {
+                r: values[2 * j + 1],
+                i: 0.,
+            };
         }
         self.transform(false);
         for (k, (value, scale)) in out.iter_mut().zip(scales).enumerate() {
             let k = k + 1;
-            *value = factor
+            *value = 2.
+                * factor
                 * scale
                 * (self.fft[k].r * self.phase[k].r + self.fft[k].i * self.phase[k].i);
         }
@@ -267,6 +281,37 @@ impl Wire {
         }
         self.ea * self.length / n as f64 * sum
     }
+    fn point_nonlinearity(&mut self, q: &[f64], out: &mut [f64]) -> f64 {
+        self.fields(q, 0., 0);
+        let n = self.nodes;
+        let mut energy = 0.;
+        for j in 0..n {
+            let u = self.fields[j];
+            let v = self.fields[n + j];
+            let w = self.fields[2 * n + j];
+            let eta = 0.5 * (v * v + w * w);
+            self.products[j] = eta;
+            self.products[n + j] = (u + eta) * v;
+            self.products[2 * n + j] = (u + eta) * w;
+            energy += (u + 0.5 * eta) * eta;
+        }
+        let factor = self.ea * self.length / (2 * n) as f64;
+        self.plan
+            .analyze(&self.products[..n], &self.ku, factor, &mut out[..self.nl]);
+        self.plan.analyze(
+            &self.products[n..2 * n],
+            &self.kv,
+            factor,
+            &mut out[self.nl..self.nl + self.nt],
+        );
+        self.plan.analyze(
+            &self.products[2 * n..],
+            &self.kv,
+            factor,
+            &mut out[self.nl + self.nt..],
+        );
+        self.ea * self.length / n as f64 * energy
+    }
     pub fn nonlinear_avf(
         &mut self,
         a: &[f64],
@@ -279,6 +324,9 @@ impl Wire {
         assert_eq!(b.len(), self.size());
         assert_eq!(out.len(), self.size());
         self.fields(a, bridge0, 0);
+        self.avf_after_old_fields(b, bridge1, out)
+    }
+    fn avf_after_old_fields(&mut self, b: &[f64], bridge1: f64, out: &mut [f64]) -> f64 {
         self.fields(b, bridge1, 1);
         let n = self.nodes;
         let product = |x0: f64, x1: f64, y0: f64, y1: f64| {
@@ -371,6 +419,52 @@ fn felt(a: f64, b: f64, k: f64, p: f64, rate_loss: f64, dt: f64) -> Contact {
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(a, b)| a * b).sum()
 }
+// Contiguous slices let LLVM vectorize carriers; avoid gathering every
+// coordinate through an index array inside the implicit microtrajectory.
+fn held_linear(
+    q: &[f64],
+    v: &[f64],
+    c: &[f64],
+    s: &[f64],
+    gain: &[f64],
+    force: &[f64],
+    out: &mut [f64],
+) {
+    for ((((((out, q), v), c), s), gain), force) in out
+        .iter_mut()
+        .zip(q)
+        .zip(v)
+        .zip(c)
+        .zip(s)
+        .zip(gain)
+        .zip(force)
+    {
+        *out = *c * *q + *s * *v - *gain * *force;
+    }
+}
+fn advance_carriers(
+    q: &mut [f64],
+    v: &mut [f64],
+    c: &[f64],
+    s: &[f64],
+    gain: &[f64],
+    omega2: &[f64],
+    force: &[f64],
+) {
+    for ((((((q, v), c), s), gain), omega2), force) in q
+        .iter_mut()
+        .zip(v)
+        .zip(c)
+        .zip(s)
+        .zip(gain)
+        .zip(omega2)
+        .zip(force)
+    {
+        let next_q = *c * *q + *s * *v - *gain * *force;
+        *v = -*omega2 * *s * *q + *c * *v - *s * *force;
+        *q = next_q;
+    }
+}
 fn norm(a: &[f64]) -> f64 {
     dot(a, a).sqrt()
 }
@@ -403,6 +497,22 @@ pub struct Choir {
     trial: Vec<f64>,
     residual: Vec<f64>,
     update: Vec<f64>,
+    block_start_q: Vec<f64>,
+    block_start_v: Vec<f64>,
+    block_force: Vec<f64>,
+    block_next_force: Vec<f64>,
+    block_trace: Vec<f64>,
+    contact_mobility: [[f64; 3]; 3],
+    last_outer_iterations: usize,
+    ramp_start_force: Vec<f64>,
+    ramp_end_force: Vec<f64>,
+    ramp_correction: Vec<f64>,
+    ramp_next_correction: Vec<f64>,
+    ramp_weighted_displacement: Vec<f64>,
+    anderson_x: Vec<f64>,
+    anderson_r: Vec<f64>,
+    free_indices: Vec<usize>,
+    ramp_transfer: Vec<[f64; 10]>,
 }
 impl Choir {
     fn new(
@@ -438,8 +548,8 @@ impl Choir {
             .flat_map(|w| w.omega2.iter().copied())
             .collect::<Vec<_>>();
         omega2.push(0.);
-        let c = omega2.iter().map(|w| (w.sqrt() * dt).cos()).collect();
-        let s = omega2
+        let c: Vec<f64> = omega2.iter().map(|w| (w.sqrt() * dt).cos()).collect();
+        let s: Vec<f64> = omega2
             .iter()
             .map(|w| {
                 if *w == 0. {
@@ -449,7 +559,7 @@ impl Choir {
                 }
             })
             .collect();
-        let gain = omega2
+        let gain: Vec<f64> = omega2
             .iter()
             .map(|w| {
                 if *w == 0. {
@@ -459,6 +569,48 @@ impl Choir {
                 }
             })
             .collect();
+        let mut contact_mobility = [[gain[size - 1] / mass; 3]; 3];
+        for i in 0..3 {
+            let nt = wires[i].nt;
+            let start = i * width + wires[i].nl;
+            contact_mobility[i][i] += (0..nt)
+                .map(|j| gain[start + j] * shapes[i * nt + j].powi(2))
+                .sum::<f64>();
+        }
+        let contact_indices = (0..size)
+            .filter(|j| {
+                *j == size - 1
+                    || (*j % width >= wires[0].nl && *j % width < wires[0].nl + wires[0].nt)
+            })
+            .collect::<Vec<_>>();
+        let free_indices = (0..size - 1)
+            .filter(|j| !contact_indices.contains(j))
+            .collect::<Vec<_>>();
+        // Exact composition of the original microstep map. No division by
+        // modal resonance or sin(theta): near-aliasing modes remain defined.
+        // Entries: C,S,qa,qb,va,vb, sumC,sumS,sumQa,sumQb. Sums exclude
+        // the endpoint, as required by discrete summation by parts.
+        let mut ramp_transfer = vec![[0.; 10]; 65 * size];
+        for &j in &free_indices {
+            let (mut cj, mut sj, mut qa, mut qb, mut va, mut vb) = (1., 0., 0., 0., 0., 0.);
+            let (mut sc, mut ss, mut sa, mut sb) = (0., 0., 0., 0.);
+            for frame in 0..64 {
+                let nq_a = c[j] * qa + s[j] * va - gain[j];
+                let nq_b = c[j] * qb + s[j] * vb - gain[j] * frame as f64;
+                va = -omega2[j] * s[j] * qa + c[j] * va - s[j];
+                vb = -omega2[j] * s[j] * qb + c[j] * vb - s[j] * frame as f64;
+                qa = nq_a;
+                qb = nq_b;
+                let nc = c[j] * cj - omega2[j] * s[j] * sj;
+                sj = s[j] * cj + c[j] * sj;
+                cj = nc;
+                ramp_transfer[(frame + 1) * size + j] = [cj, sj, qa, qb, va, vb, sc, ss, sa, sb];
+                sc += cj;
+                ss += sj;
+                sa += qa;
+                sb += qb;
+            }
+        }
         Self {
             wires,
             width,
@@ -482,6 +634,22 @@ impl Choir {
             trial: vec![0.; size],
             residual: vec![0.; size],
             update: vec![0.; size],
+            block_start_q: vec![0.; size],
+            block_start_v: vec![0.; size],
+            block_force: vec![0.; size],
+            block_next_force: vec![0.; size],
+            block_trace: vec![0.; 64],
+            contact_mobility,
+            last_outer_iterations: 0,
+            ramp_start_force: vec![0.; size],
+            ramp_end_force: vec![0.; size],
+            ramp_correction: vec![0.; size],
+            ramp_next_correction: vec![0.; size],
+            ramp_weighted_displacement: vec![0.; size],
+            anderson_x: vec![0.; 8 * size],
+            anderson_r: vec![0.; 8 * size],
+            free_indices,
+            ramp_transfer,
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -557,10 +725,8 @@ impl Choir {
         };
         gradient.fill(0.);
         for i in 0..3 {
-            self.wires[i].nonlinear_avf(
-                &self.q[i * self.width..(i + 1) * self.width],
+            self.wires[i].avf_after_old_fields(
                 &candidate[i * self.width..(i + 1) * self.width],
-                0.,
                 0.,
                 &mut gradient[i * self.width..(i + 1) * self.width],
             );
@@ -584,7 +750,533 @@ impl Choir {
             },
         )
     }
+    /// Three-dimensional felt solve with a constant nonlinear string force.
+    /// Every accepted microstep retains the original felt divided work/loss.
+    fn contact_with_held_nonlinearity(
+        &mut self,
+        contact_only: bool,
+    ) -> Result<Stats, &'static str> {
+        if contact_only {
+            for i in 0..3 {
+                let start = i * self.width + self.wires[i].nl;
+                let end = start + self.wires[i].nt;
+                held_linear(
+                    &self.q[start..end],
+                    &self.v[start..end],
+                    &self.c[start..end],
+                    &self.s[start..end],
+                    &self.gain[start..end],
+                    &self.block_force[start..end],
+                    &mut self.linear[start..end],
+                );
+            }
+            let j = self.size - 1;
+            self.linear[j] =
+                self.c[j] * self.q[j] + self.s[j] * self.v[j] - self.gain[j] * self.block_force[j];
+        } else {
+            held_linear(
+                &self.q,
+                &self.v,
+                &self.c,
+                &self.s,
+                &self.gain,
+                &self.block_force,
+                &mut self.linear,
+            );
+        }
+        let old = [
+            self.compression(&self.q, 0),
+            self.compression(&self.q, 1),
+            self.compression(&self.q, 2),
+        ];
+        let free = [
+            self.compression(&self.linear, 0),
+            self.compression(&self.linear, 1),
+            self.compression(&self.linear, 2),
+        ];
+        let mut forces = [0.; 3];
+        let mut cached: Option<[Contact; 3]> = None;
+        for iteration in 0..24 {
+            let contacts = if let Some(contacts) = cached.take() {
+                contacts
+            } else {
+                let mut contacts = [Contact::default(); 3];
+                for i in 0..3 {
+                    let next = free[i] - dot(&self.contact_mobility[i], &forces);
+                    contacts[i] = felt(
+                        old[i],
+                        next,
+                        self.stiffness,
+                        self.exponent,
+                        self.rate_loss,
+                        self.dt,
+                    );
+                }
+                contacts
+            };
+            let residual = [
+                forces[0] - contacts[0].force,
+                forces[1] - contacts[1].force,
+                forces[2] - contacts[2].force,
+            ];
+            let norm_residual = norm(&residual);
+            let scale = norm(&forces)
+                .max(
+                    contacts
+                        .iter()
+                        .map(|c| c.force * c.force)
+                        .sum::<f64>()
+                        .sqrt(),
+                )
+                .max(1e-12);
+            if !norm_residual.is_finite() {
+                return Err("nonfinite reduced felt residual");
+            }
+            if norm_residual <= 2e-13 * scale {
+                if !contact_only {
+                    self.gradient.copy_from_slice(&self.block_force);
+                }
+                for i in 0..3 {
+                    let nt = self.wires[i].nt;
+                    let start = i * self.width + self.wires[i].nl;
+                    let end = start + nt;
+                    for ((g, f), shape) in self.gradient[start..end]
+                        .iter_mut()
+                        .zip(&self.block_force[start..end])
+                        .zip(&self.shapes[i * nt..(i + 1) * nt])
+                    {
+                        *g = *f + *shape * forces[i];
+                    }
+                    if contact_only {
+                        advance_carriers(
+                            &mut self.q[start..end],
+                            &mut self.v[start..end],
+                            &self.c[start..end],
+                            &self.s[start..end],
+                            &self.gain[start..end],
+                            &self.omega2[start..end],
+                            &self.gradient[start..end],
+                        );
+                    }
+                }
+                let head = self.size - 1;
+                self.gradient[head] = self.block_force[head];
+                for force in forces {
+                    self.gradient[head] += force / self.mass.sqrt();
+                }
+                if contact_only {
+                    let j = head;
+                    let q = self.c[j] * self.q[j] + self.s[j] * self.v[j]
+                        - self.gain[j] * self.gradient[j];
+                    self.v[j] = -self.omega2[j] * self.s[j] * self.q[j] + self.c[j] * self.v[j]
+                        - self.s[j] * self.gradient[j];
+                    self.q[j] = q;
+                } else {
+                    advance_carriers(
+                        &mut self.q,
+                        &mut self.v,
+                        &self.c,
+                        &self.s,
+                        &self.gain,
+                        &self.omega2,
+                        &self.gradient,
+                    );
+                }
+                return Ok(Stats {
+                    heat: contacts.iter().map(|c| c.heat).sum(),
+                    force: forces.iter().sum(),
+                    iterations: iteration + 1,
+                });
+            }
+            let mut matrix = [[0.; 3]; 3];
+            for i in 0..3 {
+                for j in 0..3 {
+                    matrix[i][j] = contacts[i].jacobian * self.contact_mobility[i][j]
+                        + if i == j { 1. } else { 0. };
+                }
+            }
+            let mut update = residual;
+            for column in 0..3 {
+                let pivot = (column..3)
+                    .max_by(|i, j| {
+                        matrix[*i][column]
+                            .abs()
+                            .total_cmp(&matrix[*j][column].abs())
+                    })
+                    .unwrap();
+                matrix.swap(column, pivot);
+                update.swap(column, pivot);
+                if matrix[column][column].abs() < 1e-30 {
+                    return Err("singular reduced felt tangent");
+                }
+                for row in column + 1..3 {
+                    let fraction = matrix[row][column] / matrix[column][column];
+                    for j in column..3 {
+                        matrix[row][j] -= fraction * matrix[column][j];
+                    }
+                    update[row] -= fraction * update[column];
+                }
+            }
+            for i in (0..3).rev() {
+                update[i] = (update[i] - (i + 1..3).map(|j| matrix[i][j] * update[j]).sum::<f64>())
+                    / matrix[i][i];
+            }
+            let mut accepted = false;
+            for power in 0..14 {
+                let fraction = 2f64.powi(-power);
+                let trial = [
+                    forces[0] - fraction * update[0],
+                    forces[1] - fraction * update[1],
+                    forces[2] - fraction * update[2],
+                ];
+                let mut trial_residual = [0.; 3];
+                let mut trial_contacts = [Contact::default(); 3];
+                for i in 0..3 {
+                    let next = free[i] - dot(&self.contact_mobility[i], &trial);
+                    trial_contacts[i] = felt(
+                        old[i],
+                        next,
+                        self.stiffness,
+                        self.exponent,
+                        self.rate_loss,
+                        self.dt,
+                    );
+                    trial_residual[i] = trial[i] - trial_contacts[i].force;
+                }
+                if norm(&trial_residual) < norm_residual {
+                    forces = trial;
+                    cached = Some(trial_contacts);
+                    accepted = true;
+                    break;
+                }
+            }
+            if !accepted {
+                return Err("reduced felt line search failed");
+            }
+        }
+        Err("reduced felt solve did not converge")
+    }
+    /// Hold only the nonlinear string gradient over a short implicit block.
+    /// Linear carriers and felt remain at the microclock. Global string work
+    /// closes at block boundaries; events must terminate a block first.
+    pub fn step_block(&mut self, frames: usize) -> Result<Stats, &'static str> {
+        if frames == 0 || frames > 64 {
+            return Err("block must contain 1..64 microsteps");
+        }
+        self.block_start_q.copy_from_slice(&self.q);
+        self.block_start_v.copy_from_slice(&self.v);
+        let energy = self.energy().max(1e-30);
+        self.block_force.fill(0.);
+        for i in 0..3 {
+            self.wires[i].avf_after_old_fields(
+                &self.block_start_q[i * self.width..(i + 1) * self.width],
+                0.,
+                &mut self.block_force[i * self.width..(i + 1) * self.width],
+            );
+        }
+        for outer in 0..32 {
+            self.q.copy_from_slice(&self.block_start_q);
+            self.v.copy_from_slice(&self.block_start_v);
+            let mut stats = Stats::default();
+            for frame in 0..frames {
+                let micro = match self.contact_with_held_nonlinearity(false) {
+                    Ok(v) => v,
+                    Err(error) => {
+                        self.q.copy_from_slice(&self.block_start_q);
+                        self.v.copy_from_slice(&self.block_start_v);
+                        return Err(error);
+                    }
+                };
+                stats.heat += micro.heat;
+                stats.force = stats.force.max(micro.force);
+                stats.iterations = stats.iterations.max(micro.iterations);
+                self.block_trace[frame] = micro.force;
+            }
+            self.block_next_force.fill(0.);
+            for i in 0..3 {
+                self.wires[i].avf_after_old_fields(
+                    &self.q[i * self.width..(i + 1) * self.width],
+                    0.,
+                    &mut self.block_next_force[i * self.width..(i + 1) * self.width],
+                );
+            }
+            let mut difference = 0.;
+            let mut work_residual = 0.;
+            for j in 0..self.size {
+                let delta = self.block_next_force[j] - self.block_force[j];
+                difference += delta * delta;
+                work_residual += delta * (self.q[j] - self.block_start_q[j]);
+            }
+            let force_scale = norm(&self.block_next_force)
+                .max(norm(&self.block_force))
+                .max(1e-30);
+            if difference.sqrt() <= 1e-11 * force_scale && work_residual.abs() <= 1e-13 * energy {
+                self.last_outer_iterations = outer + 1;
+                return Ok(stats);
+            }
+            self.block_force.copy_from_slice(&self.block_next_force);
+        }
+        self.q.copy_from_slice(&self.block_start_q);
+        self.v.copy_from_slice(&self.block_start_v);
+        Err("nonlinear block failed to converge; shorten block")
+    }
+    /// Endpoint force interpolation plus an explicit discrete-work correction.
+    /// The correction acts only on string coordinates, never on the hammer.
+    /// It is solved jointly with the endpoint trajectory, not applied after it.
+    pub fn step_ramp(&mut self, frames: usize) -> Result<Stats, &'static str> {
+        if frames == 0 || frames > 64 {
+            return Err("ramp block must contain 1..64 microsteps");
+        }
+        self.block_start_q.copy_from_slice(&self.q);
+        self.block_start_v.copy_from_slice(&self.v);
+        self.ramp_start_force.fill(0.);
+        let mut potential0 = 0.;
+        for i in 0..3 {
+            potential0 += self.wires[i].point_nonlinearity(
+                &self.q[i * self.width..(i + 1) * self.width],
+                &mut self.ramp_start_force[i * self.width..(i + 1) * self.width],
+            );
+        }
+        let mut energy = 0.5 * dot(&self.v, &self.v)
+            + 0.5
+                * self
+                    .q
+                    .iter()
+                    .zip(&self.omega2)
+                    .map(|(q, w)| q * q * w)
+                    .sum::<f64>()
+            + potential0;
+        for i in 0..3 {
+            energy += self.stiffness / (self.exponent + 1.)
+                * self
+                    .compression(&self.q, i)
+                    .max(0.)
+                    .powf(self.exponent + 1.);
+        }
+        self.ramp_end_force.copy_from_slice(&self.ramp_start_force);
+        self.ramp_correction.fill(0.);
+        for outer in 0..32 {
+            self.q.copy_from_slice(&self.block_start_q);
+            self.v.copy_from_slice(&self.block_start_v);
+            self.ramp_weighted_displacement.fill(0.);
+            let mut work = 0.;
+            let mut stats = Stats::default();
+            for frame in 0..frames {
+                let alpha = (frame as f64 + 0.5) / frames as f64;
+                for i in 0..3 {
+                    let start = i * self.width + self.wires[i].nl;
+                    let end = start + self.wires[i].nt;
+                    for (((f, g0), g1), correction) in self.block_force[start..end]
+                        .iter_mut()
+                        .zip(&self.ramp_start_force[start..end])
+                        .zip(&self.ramp_end_force[start..end])
+                        .zip(&self.ramp_correction[start..end])
+                    {
+                        *f = (1. - alpha) * *g0 + alpha * *g1 + *correction;
+                    }
+                    self.candidate[start..end].copy_from_slice(&self.q[start..end]);
+                }
+                let head = self.size - 1;
+                self.block_force[head] = 0.;
+                self.candidate[head] = self.q[head];
+                let micro = match self.contact_with_held_nonlinearity(true) {
+                    Ok(v) => v,
+                    Err(error) => {
+                        self.q.copy_from_slice(&self.block_start_q);
+                        self.v.copy_from_slice(&self.block_start_v);
+                        return Err(error);
+                    }
+                };
+                for i in 0..3 {
+                    let start = i * self.width + self.wires[i].nl;
+                    let end = start + self.wires[i].nt;
+                    for (((q, old), f), weighted) in self.q[start..end]
+                        .iter()
+                        .zip(&self.candidate[start..end])
+                        .zip(&self.block_force[start..end])
+                        .zip(&mut self.ramp_weighted_displacement[start..end])
+                    {
+                        let displacement = *q - *old;
+                        work += *f * displacement;
+                        *weighted += alpha * displacement;
+                    }
+                }
+                stats.heat += micro.heat;
+                stats.force = stats.force.max(micro.force);
+                stats.iterations = stats.iterations.max(micro.iterations);
+                self.block_trace[frame] = micro.force;
+            }
+            // Non-contact coordinates are independent linear oscillators
+            // under the same ramp used in the microsteps. Compose them once.
+            // Discrete summation by parts gives both force work and the
+            // weighted displacement used by the endpoint correction.
+            for &j in &self.free_indices {
+                let slope = (self.ramp_end_force[j] - self.ramp_start_force[j]) / frames as f64;
+                let first = self.ramp_start_force[j] + 0.5 * slope + self.ramp_correction[j];
+                let t = self.ramp_transfer[frames * self.size + j];
+                let q0 = self.block_start_q[j];
+                let v0 = self.block_start_v[j];
+                let q1 = t[0] * q0 + t[1] * v0 + t[2] * first + t[3] * slope;
+                let v1 = -self.omega2[j] * t[1] * q0 + t[0] * v0 + t[4] * first + t[5] * slope;
+                let sum = t[6] * q0 + t[7] * v0 + t[8] * first + t[9] * slope;
+                work += (first + slope * (frames - 1) as f64) * q1 - first * q0 - slope * sum;
+                self.ramp_weighted_displacement[j] = (1. - 0.5 / frames as f64) * q1
+                    - 0.5 / frames as f64 * q0
+                    - sum / frames as f64;
+                self.q[j] = q1;
+                self.v[j] = v1;
+            }
+            self.block_next_force.fill(0.);
+            let mut potential1 = 0.;
+            for i in 0..3 {
+                potential1 += self.wires[i].point_nonlinearity(
+                    &self.q[i * self.width..(i + 1) * self.width],
+                    &mut self.block_next_force[i * self.width..(i + 1) * self.width],
+                );
+            }
+            let work_residual = potential1 - potential0 - work;
+            let mut shifted_work = work_residual;
+            let mut force_difference = 0.;
+            let mut displacement2 = 0.;
+            for j in 0..self.size - 1 {
+                let difference = self.block_next_force[j] - self.ramp_end_force[j];
+                force_difference += difference * difference;
+                shifted_work -= difference * self.ramp_weighted_displacement[j];
+                displacement2 += (self.q[j] - self.block_start_q[j]).powi(2);
+            }
+            self.ramp_next_correction
+                .copy_from_slice(&self.ramp_correction);
+            if displacement2 > 1e-40 {
+                for j in 0..self.size - 1 {
+                    self.ramp_next_correction[j] +=
+                        shifted_work * (self.q[j] - self.block_start_q[j]) / displacement2;
+                }
+            } else if shifted_work.abs() > 1e-13 * energy.max(1e-30) {
+                self.q.copy_from_slice(&self.block_start_q);
+                self.v.copy_from_slice(&self.block_start_v);
+                return Err("degenerate ramp work correction; shorten block");
+            }
+            let force_scale = norm(&self.block_next_force)
+                .max(norm(&self.ramp_end_force))
+                .max(norm(&self.ramp_next_correction))
+                .max(1e-30);
+            let correction_difference = self
+                .ramp_next_correction
+                .iter()
+                .zip(&self.ramp_correction)
+                .map(|(a, b)| (a - b).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if force_difference.sqrt() <= 1e-11 * force_scale
+                && correction_difference <= 1e-11 * force_scale
+                && work_residual.abs() <= 1e-13 * energy.max(1e-30)
+            {
+                self.last_outer_iterations = outer + 1;
+                return Ok(stats);
+            }
+            self.accelerate_ramp_fixed_point(outer);
+        }
+        self.q.copy_from_slice(&self.block_start_q);
+        self.v.copy_from_slice(&self.block_start_v);
+        Err("ramp endpoint/work solve did not converge; shorten block")
+    }
+    /// Depth-three Anderson acceleration changes the solver, not its target
+    /// force/work equations or convergence tolerances. Storage is prepared.
+    fn accelerate_ramp_fixed_point(&mut self, iteration: usize) {
+        let n = 2 * self.size;
+        let slot = iteration % 4;
+        for j in 0..self.size {
+            self.anderson_x[slot * n + j] = self.ramp_end_force[j];
+            self.anderson_x[slot * n + self.size + j] = self.ramp_correction[j];
+            self.anderson_r[slot * n + j] = self.block_next_force[j] - self.ramp_end_force[j];
+            self.anderson_r[slot * n + self.size + j] =
+                self.ramp_next_correction[j] - self.ramp_correction[j];
+        }
+        let depth = iteration.min(3);
+        let mut coefficients = [0.; 3];
+        let mut matrix = [[0.; 3]; 3];
+        if depth > 0 {
+            for i in 0..depth {
+                let before = (iteration - depth + i) % 4;
+                let after = (iteration - depth + i + 1) % 4;
+                for row in 0..n {
+                    let difference =
+                        self.anderson_r[after * n + row] - self.anderson_r[before * n + row];
+                    coefficients[i] += difference * self.anderson_r[slot * n + row];
+                    for j in 0..depth {
+                        let first = (iteration - depth + j) % 4;
+                        let last = (iteration - depth + j + 1) % 4;
+                        matrix[i][j] += difference
+                            * (self.anderson_r[last * n + row] - self.anderson_r[first * n + row]);
+                    }
+                }
+            }
+            let ridge = (0..depth).map(|i| matrix[i][i]).fold(0f64, f64::max) * 1e-10;
+            let mut valid = ridge > 0. && ridge.is_finite();
+            for i in 0..depth {
+                matrix[i][i] += ridge;
+            }
+            for column in 0..depth {
+                let pivot = (column..depth)
+                    .max_by(|i, j| {
+                        matrix[*i][column]
+                            .abs()
+                            .total_cmp(&matrix[*j][column].abs())
+                    })
+                    .unwrap();
+                matrix.swap(column, pivot);
+                coefficients.swap(column, pivot);
+                if !matrix[column][column].is_finite() || matrix[column][column].abs() < 1e-300 {
+                    valid = false;
+                    break;
+                }
+                for row in column + 1..depth {
+                    let fraction = matrix[row][column] / matrix[column][column];
+                    for j in column..depth {
+                        matrix[row][j] -= fraction * matrix[column][j];
+                    }
+                    coefficients[row] -= fraction * coefficients[column];
+                }
+            }
+            if valid {
+                for i in (0..depth).rev() {
+                    coefficients[i] = (coefficients[i]
+                        - (i + 1..depth)
+                            .map(|j| matrix[i][j] * coefficients[j])
+                            .sum::<f64>())
+                        / matrix[i][i];
+                }
+                valid = coefficients[..depth].iter().all(|v| v.is_finite())
+                    && coefficients[..depth].iter().map(|v| v.abs()).sum::<f64>() <= 8.;
+            }
+            if !valid {
+                coefficients.fill(0.);
+            }
+        }
+        for j in 0..self.size {
+            let mut force = self.block_next_force[j];
+            let mut correction = self.ramp_next_correction[j];
+            for i in 0..depth {
+                let before = (iteration - depth + i) % 4;
+                let after = (iteration - depth + i + 1) % 4;
+                force -= coefficients[i]
+                    * (self.anderson_x[after * n + j] - self.anderson_x[before * n + j]
+                        + self.anderson_r[after * n + j]
+                        - self.anderson_r[before * n + j]);
+                let row = self.size + j;
+                correction -= coefficients[i]
+                    * (self.anderson_x[after * n + row] - self.anderson_x[before * n + row]
+                        + self.anderson_r[after * n + row]
+                        - self.anderson_r[before * n + row]);
+            }
+            self.ramp_end_force[j] = force;
+            self.ramp_correction[j] = correction;
+        }
+    }
     pub fn step(&mut self) -> Result<Stats, &'static str> {
+        for i in 0..3 {
+            self.wires[i].fields(&self.q[i * self.width..(i + 1) * self.width], 0., 0);
+        }
         for j in 0..self.size {
             self.linear[j] = self.c[j] * self.q[j] + self.s[j] * self.v[j];
         }
@@ -764,18 +1456,38 @@ fn main() {
         println!("{{\"gradient\":{:?},\"boundary_gradient\":{:?},\"potential0\":{:?},\"potential1\":{:?},\"cross_mass\":{:?},\"lift_mass\":{}}}",gradients,boundaries,potentials0,potentials1,choir.wires[0].cross,choir.wires[0].lift_mass);
         return;
     }
-    if args.get(2).map(String::as_str) == Some("verify") {
+    let ramp_mode = args
+        .get(2)
+        .is_some_and(|v| v == "verify-ramp" || v == "bench-ramp");
+    let block_mode = ramp_mode
+        || args
+            .get(2)
+            .is_some_and(|v| v == "verify-block" || v == "bench-block");
+    let micro_block = if block_mode {
+        args.get(if args[2].starts_with("verify") { 3 } else { 4 })
+            .map(|v| v.parse::<usize>().expect("microsteps per nonlinear block"))
+            .unwrap_or(16)
+    } else {
+        1
+    };
+    assert!((1..=64).contains(&micro_block));
+    if args
+        .get(2)
+        .is_some_and(|v| v == "verify" || v == "verify-block" || v == "verify-ramp")
+    {
         let initial = choir.energy();
         let mut heat = 0.;
         let mut work = 0.;
         let mut peak = 0f64;
         let mut maximum_iterations = 0;
         let mut work_relative_max = 0f64;
+        let mut maximum_outer_iterations = 0;
         let total = (durations[2] * p[4]).round() as usize;
         let mut events = Vec::new();
         let mut checkpoints = Vec::new();
         let mut force_trace = Vec::new();
-        for frame in 0..total {
+        let mut frame = 0;
+        while frame < total {
             for event in 0..3 {
                 if frame == (durations[event] * p[4]).round() as usize && launch[event] > 0. {
                     let before = choir.q[..size - 1].to_vec();
@@ -787,7 +1499,22 @@ fn main() {
                     events.push(w);
                 }
             }
-            let stats = choir.step().expect("native step");
+            let next_event = (0..2)
+                .filter(|i| launch[*i] > 0.)
+                .map(|i| (durations[i] * p[4]).round() as usize)
+                .filter(|tick| *tick > frame)
+                .min()
+                .unwrap_or(total);
+            let count = micro_block.min(total - frame).min(next_event - frame);
+            let stats = if ramp_mode {
+                choir.step_ramp(count)
+            } else if block_mode {
+                choir.step_block(count)
+            } else {
+                choir.step()
+            }
+            .expect("native step");
+            maximum_outer_iterations = maximum_outer_iterations.max(choir.last_outer_iterations);
             heat += stats.heat;
             peak = peak.max(stats.force);
             maximum_iterations = maximum_iterations.max(stats.iterations);
@@ -796,19 +1523,29 @@ fn main() {
             work_relative_max = work_relative_max.max(
                 (energy + heat - initial - work).abs() / initial.abs().max(work.abs()).max(1e-30),
             );
-            if frame < ((0.006 * p[4]).round() as usize) {
-                force_trace.push(stats.force);
+            for offset in 0..count {
+                if frame + offset < ((0.006 * p[4]).round() as usize) {
+                    force_trace.push(if block_mode {
+                        choir.block_trace[offset]
+                    } else {
+                        stats.force
+                    });
+                }
             }
             if frame % ((p[4] * 0.001).round() as usize).max(1) == 0 {
                 checkpoints.push(energy);
             }
+            frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
-    let blocks = args.get(3).map(|v|v.parse::<usize>().expect("benchmark buffer count")).unwrap_or(512);
+    let blocks = args
+        .get(3)
+        .map(|v| v.parse::<usize>().expect("benchmark buffer count"))
+        .unwrap_or(512);
     assert!((8..=2048).contains(&blocks));
     let frames = 256;
     let mut times = Vec::with_capacity(blocks);
@@ -816,17 +1553,31 @@ fn main() {
     let allocations = ALLOCATIONS.load(Ordering::Relaxed);
     let mut peak = 0f64;
     let mut iterations = 0;
+    let mut outer_iterations = 0;
     for _ in 0..blocks {
         let start = Instant::now();
-        for _ in 0..frames {
-            let stats = black_box(choir.step().expect("benchmark step"));
+        let mut completed = 0;
+        while completed < frames {
+            let count = micro_block.min(frames - completed);
+            let stats = black_box(
+                if ramp_mode {
+                    choir.step_ramp(count)
+                } else if block_mode {
+                    choir.step_block(count)
+                } else {
+                    choir.step()
+                }
+                .expect("benchmark step"),
+            );
             peak = peak.max(stats.force);
             iterations = iterations.max(stats.iterations);
+            outer_iterations = outer_iterations.max(choir.last_outer_iterations);
+            completed += count;
         }
         times.push(start.elapsed().as_secs_f64() * 1000.);
     }
     let allocations = ALLOCATIONS.load(Ordering::Relaxed) - allocations;
     let mean = times.iter().sum::<f64>() / blocks as f64;
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations);
 }

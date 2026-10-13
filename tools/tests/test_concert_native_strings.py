@@ -16,15 +16,43 @@ class NativeStringsTests(unittest.TestCase):
         cls.folder=Path(cls.temp.name);cls.exe=cls.folder/'strings.exe'
         root=Path(__file__).resolve().parents[2]
         subprocess.run(['rustc','--edition=2021','-O',str(root/'tools/concert-grand-native-strings.rs'),'-o',str(cls.exe)],check=True)
+        # Independent reference composes every carrier at every microstep,
+        # rather than using the prepared block maps/summation by parts.
+        source=(root/'tools/concert-grand-native-strings.rs').read_text()
+        start=source.index('    pub fn step_ramp(')
+        end=source.index('    /// Depth-three Anderson',start)
+        ramp=source[start:end]
+        first=ramp.index('                for i in 0..3 {',ramp.index('for frame in 0..frames'))
+        last=ramp.index('                let micro =',first)
+        ramp=ramp[:first]+"""                for j in 0..self.size {
+                    self.block_force[j]=(1.-alpha)*self.ramp_start_force[j]+alpha*self.ramp_end_force[j]+self.ramp_correction[j];
+                }
+                self.candidate.copy_from_slice(&self.q);
+"""+ramp[last:]
+        first=ramp.index('                for i in 0..3 {',ramp.index('let micro ='))
+        last=ramp.index('                stats.heat',first)
+        ramp=ramp[:first]+"""                for j in 0..self.size {
+                    let displacement=self.q[j]-self.candidate[j];
+                    work+=self.block_force[j]*displacement;
+                    self.ramp_weighted_displacement[j]+=alpha*displacement;
+                }
+"""+ramp[last:]
+        ramp=ramp.replace('self.contact_with_held_nonlinearity(true)','self.contact_with_held_nonlinearity(false)')
+        ramp=ramp.replace('for &j in &self.free_indices {','for &j in &self.free_indices[..0] {')
+        reference=cls.folder/'micro-reference.rs'
+        reference.write_text(source[:start]+ramp+source[end:],encoding='utf-8')
+        cls.micro_exe=cls.folder/'micro-reference.exe'
+        subprocess.run(['rustc','--edition=2021','-O',str(reference),'-o',str(cls.micro_exe)],check=True)
+
 
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def run_native(self,f,mode):
+    def run_native(self,f,mode,*extra,exe=None):
         path=self.folder/f'{f["transverse"]}-{f["parameters"][4]}-{mode}-{len(list(self.folder.iterdir()))}.bin'
         write_fixture(path,f)
-        return json.loads(subprocess.check_output([str(self.exe),str(path),mode],text=True))
+        return json.loads(subprocess.check_output([str(exe or self.exe),str(path),mode,*map(str,extra)],text=True))
 
     def test_fft_avf_and_boundary_work_against_independent_gauss(self):
         for nt in [4,12,48,96]:
@@ -106,6 +134,38 @@ class NativeStringsTests(unittest.TestCase):
             errors.append(np.linalg.norm(metric(q,v)-target)/np.linalg.norm(target))
         self.assertTrue(errors[0]>3*errors[1] and errors[1]>3*errors[2],errors)
         self.assertLess(errors[-1],1e-4)
+
+    def test_nonlinear_block_one_reproduces_monolithic_contact(self):
+        f=fixture(transverse=4,rate=128000,seed=83,second_speed=.1,duration=.016)
+        original=self.run_native(f,'verify')
+        blocked=self.run_native(f,'verify-block',1)
+        np.testing.assert_allclose(blocked['q'],original['q'],rtol=1e-7,atol=2e-12)
+        np.testing.assert_allclose(blocked['v'],original['v'],rtol=1e-7,atol=2e-9)
+        np.testing.assert_allclose(blocked['force_trace'],original['force_trace'],rtol=1e-7,atol=2e-8)
+        self.assertLess(blocked['work_relative_max'],1e-9)
+
+    def test_nonlinear_blocks_preserve_work_and_end_at_unaligned_restrike(self):
+        f=fixture(transverse=4,rate=128000,seed=83,second_speed=.1,second_time=1417/128000,duration=.016)
+        for frames in [8,16,32]:
+            blocked=self.run_native(f,'verify-block',frames)
+            self.assertLess(blocked['work_relative_max'],1e-9)
+            self.assertLess(blocked['launch_work_j'][1],0.)
+            self.assertEqual(len(blocked['force_trace']),768)
+
+
+    def test_ramp_composes_every_carrier_and_preserves_unaligned_restrike(self):
+        f=fixture(transverse=4,rate=128000,seed=83,second_speed=.1,second_time=1417/128000,duration=.016)
+        for frames in [1,16,64]:
+            native=self.run_native(f,'verify-ramp',frames)
+            micro=self.run_native(f,'verify-ramp',frames,exe=self.micro_exe)
+            np.testing.assert_allclose(native['q'],micro['q'],rtol=2e-8,atol=2e-12)
+            np.testing.assert_allclose(native['v'],micro['v'],rtol=2e-8,atol=2e-9)
+            np.testing.assert_allclose(native['force_trace'],micro['force_trace'],rtol=2e-8,atol=2e-8)
+            np.testing.assert_allclose(native['heat_j'],micro['heat_j'],rtol=2e-9,atol=1e-12)
+            self.assertLess(native['work_relative_max'],1e-9)
+            self.assertLess(native['launch_work_j'][1],0.)
+            self.assertEqual(len(native['force_trace']),768)
+
 
 
 if __name__=='__main__':unittest.main()

@@ -15,9 +15,10 @@
 ssh_config.example text eol=lf
 REVISION export-subst
 
-# Frozen P7 measurements authenticate these existing source bytes, including
-# their original CRLF endings. Keep the measured files reproducible in Git.
+# Frozen P7 measurements authenticate exact source/report bytes, including
+# original CRLF endings. Keep the measured files reproducible in Git.
 tools/concert-grand-avx2-body.rs -text
 tools/concert-grand-ilp-body.rs -text
 tools/measure-concert-grand-ilp-body.py -text
 tools/concert_grand_realtime_pressure.py -text
+docs/concert-grand-physics-roadmap-2026-10-02/medidas-P7-cuerdas-nativas-2026-10-13/*.json -text whitespace=cr-at-eol

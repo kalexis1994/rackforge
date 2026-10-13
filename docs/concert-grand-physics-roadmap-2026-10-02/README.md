@@ -132,6 +132,16 @@ CPU aún falla. Sigue representar las fuerzas con sus fases rápidas antes de
 ampliar aprobación o integrar el instrumento; referencia fina validada sólo
 en la ventana corta, sin retirar modos ni actualizar fábrica.
 
+La [convolución de fuerzas cuadráticas con las fases modales](RESULTADOS-P7-fases-cuadraticas.md)
+integra analíticamente esa parte del gradiente sobre portadores libres, con
+los 96/192 modos y ambos ejes. En C3/C4/C5, error frente a Gauss temporal
+refinado **1,88–3,84e−11**; el control afín de extremos difiere **96–108 %**
+de esta respuesta forzada, sin ser un error de la nota completa. **30 pruebas
+pasan**. Primera contracción: 82.656 términos, 7,95 MB, cero asignaciones,
+C4 media **4,891 ms**, máximo **8,505 ms** frente a 2 ms: rechazada para CPU.
+Sirve de control para optimizar la contracción; todavía no es un paso no
+lineal conservativo ni sustituye el motor o la referencia existentes.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

@@ -691,6 +691,11 @@ pub struct Choir {
     anderson_delta_r: Vec<f64>,
     anderson_delta_f: Vec<f64>,
     gram_dot: fn(&[f64], &[f64]) -> f64,
+    endpoint_force: Vec<f64>,
+    endpoint_potential: f64,
+    endpoint_valid: bool,
+    use_endpoint_cache: bool,
+    cached_initial_gradients: usize,
 }
 impl Choir {
     fn new(
@@ -845,6 +850,11 @@ impl Choir {
             anderson_delta_r: vec![0.; 6 * size],
             anderson_delta_f: vec![0.; 6 * size],
             gram_dot: dot_dispatch(),
+            endpoint_force: vec![0.; size],
+            endpoint_potential: 0.,
+            endpoint_valid: false,
+            use_endpoint_cache: true,
+            cached_initial_gradients: 0,
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -1155,6 +1165,7 @@ impl Choir {
     /// Linear carriers and felt remain at the microclock. Global string work
     /// closes at block boundaries; events must terminate a block first.
     pub fn step_block(&mut self, frames: usize) -> Result<Stats, &'static str> {
+        self.endpoint_valid = false;
         if frames == 0 || frames > 64 {
             return Err("block must contain 1..64 microsteps");
         }
@@ -1260,14 +1271,21 @@ impl Choir {
         }
         self.block_start_q.copy_from_slice(&self.q);
         self.block_start_v.copy_from_slice(&self.v);
-        self.ramp_start_force.fill(0.);
-        let mut potential0 = 0.;
-        for i in 0..3 {
-            potential0 += self.wires[i].point_nonlinearity(
-                &self.q[i * self.width..(i + 1) * self.width],
-                &mut self.ramp_start_force[i * self.width..(i + 1) * self.width],
-            );
-        }
+        let potential0 = if self.use_endpoint_cache && self.endpoint_valid {
+            self.ramp_start_force.copy_from_slice(&self.endpoint_force);
+            self.cached_initial_gradients += 1;
+            self.endpoint_potential
+        } else {
+            self.ramp_start_force.fill(0.);
+            let mut potential = 0.;
+            for i in 0..3 {
+                potential += self.wires[i].point_nonlinearity(
+                    &self.q[i * self.width..(i + 1) * self.width],
+                    &mut self.ramp_start_force[i * self.width..(i + 1) * self.width],
+                );
+            }
+            potential
+        };
         let mut energy = 0.5 * dot(&self.v, &self.v)
             + 0.5
                 * self
@@ -1442,6 +1460,9 @@ impl Choir {
             {
                 self.last_outer_iterations = outer + 1;
                 self.last_certified_flight = certified_flight;
+                self.endpoint_force.copy_from_slice(&self.block_next_force);
+                self.endpoint_potential = potential1;
+                self.endpoint_valid = true;
                 return Ok(stats);
             }
             self.accelerate_ramp_fixed_point(outer);
@@ -1560,6 +1581,7 @@ impl Choir {
         }
     }
     pub fn step(&mut self) -> Result<Stats, &'static str> {
+        self.endpoint_valid = false;
         for i in 0..3 {
             self.wires[i].fields(&self.q[i * self.width..(i + 1) * self.width], 0., 0);
         }
@@ -1721,6 +1743,7 @@ fn main() {
         .collect();
     let mut choir = Choir::new(wires, 1. / p[4], p[5], p[6] / 3., p[7], p[8], shapes, q, v);
     choir.ramp_micro_reference = args.iter().any(|arg| arg == "--micro-reference");
+    choir.use_endpoint_cache = !args.iter().any(|arg| arg == "--uncached");
     if args.iter().any(|arg| arg == "--portable") {
         choir.gram_dot = dot;
         for wire in &mut choir.wires {
@@ -1778,6 +1801,7 @@ fn main() {
         let mut work_relative_max = 0f64;
         let mut maximum_outer_iterations = 0;
         let mut certified_flight_blocks = 0;
+        let cached_before = choir.cached_initial_gradients;
         let zero_before = choir
             .wires
             .iter()
@@ -1842,7 +1866,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -1859,14 +1883,19 @@ fn main() {
     let mut iterations = 0;
     let mut outer_iterations = 0;
     let mut certified_flight_blocks = 0;
+    let cached_before = choir.cached_initial_gradients;
     let zero_before = choir
         .wires
         .iter()
         .map(|w| w.plan.zero_transforms)
         .sum::<usize>();
+    let mut contact_buffers = 0;
+    let mut contact_time_sum = 0.;
+    let mut contact_time_max = 0f64;
     for _ in 0..blocks {
         let start = Instant::now();
         let mut completed = 0;
+        let mut had_contact = false;
         while completed < frames {
             let count = micro_block.min(frames - completed);
             let stats = black_box(
@@ -1880,6 +1909,7 @@ fn main() {
                 .expect("benchmark step"),
             );
             peak = peak.max(stats.force);
+            had_contact |= stats.force > 0.;
             iterations = iterations.max(stats.iterations);
             outer_iterations = outer_iterations.max(choir.last_outer_iterations);
             if ramp_mode && choir.last_certified_flight {
@@ -1887,10 +1917,28 @@ fn main() {
             }
             completed += count;
         }
-        times.push(start.elapsed().as_secs_f64() * 1000.);
+        let elapsed = start.elapsed().as_secs_f64() * 1000.;
+        times.push(elapsed);
+        if had_contact {
+            contact_buffers += 1;
+            contact_time_sum += elapsed;
+            contact_time_max = contact_time_max.max(elapsed);
+        }
     }
     let allocations = ALLOCATIONS.load(Ordering::Relaxed) - allocations;
     let mean = times.iter().sum::<f64>() / blocks as f64;
+    let first_buffer_ms = times[0];
+    let worst_buffer_index = times
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .unwrap()
+        .0;
+    let mean_contact_ms = if contact_buffers > 0 {
+        contact_time_sum / contact_buffers as f64
+    } else {
+        0.
+    };
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max);
 }

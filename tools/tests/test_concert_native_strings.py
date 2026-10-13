@@ -189,5 +189,18 @@ class NativeStringsTests(unittest.TestCase):
             self.assertLess(portable['work_relative_max'],1e-9)
 
 
+    def test_endpoint_cache_survives_head_only_restrike_and_matches_uncached(self):
+        for nt,duration in [(4,.016),(96,.006)]:
+            f=fixture(transverse=nt,rate=128000,seed=83,second_speed=.1,second_time=1417/128000,duration=duration)
+            cached=self.run_native(f,'verify-ramp',16)
+            uncached=self.run_native(f,'verify-ramp',16,'--uncached')
+            self.assertGreater(cached['cached_initial_gradients'],0)
+            self.assertEqual(uncached['cached_initial_gradients'],0)
+            for field in ['q','v','force_trace','launch_work_j','energy_checkpoints']:
+                np.testing.assert_array_equal(cached[field],uncached[field])
+            self.assertEqual(cached['heat_j'],uncached['heat_j'])
+            self.assertEqual(cached['work_relative_max'],uncached['work_relative_max'])
+
+
 
 if __name__=='__main__':unittest.main()

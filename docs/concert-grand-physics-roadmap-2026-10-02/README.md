@@ -73,6 +73,16 @@ pasa 0,324%, pero el máximo cuesta 14,70 ms frente a 2 ms. Diez pruebas pasan,
 ledger largo <8e−13; eso no aprueba la trayectoria rechazada. Sigue resolver
 temporal/costo antes del cierre con inercia compartida y del host tocable.
 
+La [continuación de vuelo/kernels](RESULTADOS-P7-vuelo-kernels.md) compone
+también el movimiento vertical sólo con ausencia de contacto certificada,
+usa FFT real N/2, kernels SIMD/portable y reutiliza gradientes de extremos
+aceptados. A 128 kHz/16 conserva estado largo **0,324171%**, ledger <7e−13;
+14 pruebas pasan. SIMD: media **4,7170 ms**, P99 **5,7415 ms**, máximo/primer
+ataque **10,3108 ms** frente a 2 ms; portable máximo **15,1163 ms**. Ambos
+siguen fallando CPU sin cuerpo/presión. Se registra el costo del ataque
+sin excluirlo y se reutiliza la referencia larga autenticada del mismo
+fixture. No hay todavía motor integrado tocable.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

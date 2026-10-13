@@ -409,7 +409,10 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          # elfutils carries eu-strip, which flatpak-builder splits the debug
+          # symbols out with.
+          sudo apt-get install -y --no-install-recommends \
+            flatpak flatpak-builder elfutils
           # Ubuntu 24.04 keeps unprivileged user namespaces from processes
           # without an AppArmor profile, and flatpak-builder's bubblewrap
           # needs one for its sandbox.

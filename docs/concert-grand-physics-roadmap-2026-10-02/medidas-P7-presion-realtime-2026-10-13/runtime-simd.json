@@ -1,0 +1,140 @@
+{
+  "stage": "frozen body and pressure portable SIMD replay and timing",
+  "parent_report_sha256": "17660d48dfac599462ce816e86dab2d808b3b434b8f7fb8c17f4976359fd81a9",
+  "body_report_sha256": "56cc42e6177589de2ddd2fc1b1fa55cade96c3e25a8fac565a9583df254d6f25",
+  "source_sha256": {
+    "remeasure-concert-grand-pressure-runtime.py": "860efae3d2bca68eac7f5582163138451e25286fc91187348145818433e34909",
+    "concert-grand-pressure-body.rs": "9c1b9f6cbbae93015dbd35e33303812b6c554340c13e775a127b7aadf9cfda31",
+    "concert_grand_realtime_pressure.py": "add57798cba9ae20dc0db3df656c4150189f6a8952986e0e7bc15a83720193d8"
+  },
+  "native_executable_sha256": "c15847ca2d9e394c874562a7fda236f66bfff3b150f43eee7aa28c92bd2fe970",
+  "rates": [
+    {
+      "rate_hz": 44100,
+      "coefficient_sha256": "43ce363c3ce369c89613a5fdebca767e225107ac69d7106c4394168f18f417b9",
+      "verification": [
+        {
+          "kernel": "simd",
+          "pressure_relative": 3.661948625638677e-15,
+          "state_ports_and_work_passed": true
+        },
+        {
+          "kernel": "scalar",
+          "pressure_relative": 3.661948625638677e-15,
+          "state_ports_and_work_passed": true
+        }
+      ],
+      "benchmarks": [
+        {
+          "rate_hz": 44100,
+          "frames": 256,
+          "buffers": 2048,
+          "deadline_ms": 5.804988662131519,
+          "mean_ms": 0.749788623046877,
+          "p99_ms": 1.0065,
+          "max_ms": 1.3121,
+          "allocations": 0,
+          "pressure_peak_pa": 2.3873756235218364,
+          "kernel": "simd",
+          "p99_deadline_fraction": 0.17338535156249998,
+          "body_and_pressure_20percent_budget_passed": true
+        },
+        {
+          "rate_hz": 44100,
+          "frames": 256,
+          "buffers": 2048,
+          "deadline_ms": 5.804988662131519,
+          "mean_ms": 1.0307222167968777,
+          "p99_ms": 1.2635,
+          "max_ms": 1.7799999999999998,
+          "allocations": 0,
+          "pressure_peak_pa": 2.3873756235218364,
+          "kernel": "scalar",
+          "p99_deadline_fraction": 0.2176576171875,
+          "body_and_pressure_20percent_budget_passed": false
+        },
+        {
+          "rate_hz": 44100,
+          "frames": 256,
+          "buffers": 2048,
+          "deadline_ms": 5.804988662131519,
+          "mean_ms": 0.7852062499999993,
+          "p99_ms": 0.9737,
+          "max_ms": 1.1589,
+          "allocations": 0,
+          "pressure_peak_pa": 2.3873756235218364,
+          "kernel": "simd-repeat",
+          "p99_deadline_fraction": 0.1677350390625,
+          "body_and_pressure_20percent_budget_passed": true
+        }
+      ]
+    },
+    {
+      "rate_hz": 48000,
+      "coefficient_sha256": "4899691294d16d88148d2a8915e1b06d3a09cb3ca6a151a176aba5671c73e810",
+      "verification": [
+        {
+          "kernel": "simd",
+          "pressure_relative": 4.301780087826806e-15,
+          "state_ports_and_work_passed": true
+        },
+        {
+          "kernel": "scalar",
+          "pressure_relative": 4.301780087826806e-15,
+          "state_ports_and_work_passed": true
+        }
+      ],
+      "benchmarks": [
+        {
+          "rate_hz": 48000,
+          "frames": 256,
+          "buffers": 2048,
+          "deadline_ms": 5.333333333333333,
+          "mean_ms": 0.7558579589843742,
+          "p99_ms": 0.9688,
+          "max_ms": 1.2469,
+          "allocations": 0,
+          "pressure_peak_pa": 1.6114638199542244,
+          "kernel": "simd",
+          "p99_deadline_fraction": 0.18165,
+          "body_and_pressure_20percent_budget_passed": true
+        },
+        {
+          "rate_hz": 48000,
+          "frames": 256,
+          "buffers": 2048,
+          "deadline_ms": 5.333333333333333,
+          "mean_ms": 1.0256556640624979,
+          "p99_ms": 1.256,
+          "max_ms": 1.5694000000000001,
+          "allocations": 0,
+          "pressure_peak_pa": 1.6114638199542244,
+          "kernel": "scalar",
+          "p99_deadline_fraction": 0.23550000000000001,
+          "body_and_pressure_20percent_budget_passed": false
+        },
+        {
+          "rate_hz": 48000,
+          "frames": 256,
+          "buffers": 2048,
+          "deadline_ms": 5.333333333333333,
+          "mean_ms": 0.7733813476562497,
+          "p99_ms": 1.292,
+          "max_ms": 3.8219,
+          "allocations": 0,
+          "pressure_peak_pa": 1.6114638199542244,
+          "kernel": "simd-repeat",
+          "p99_deadline_fraction": 0.24225000000000002,
+          "body_and_pressure_20percent_budget_passed": false
+        }
+      ]
+    }
+  ],
+  "coefficients_unchanged": true,
+  "pressure_included": true,
+  "strings_included": false,
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "factory_updated": false,
+  "scope": "Host-specific body/pressure benchmark, 88 force/velocity ports, 256 frames, 2048 buffers. No host callback, live strings/contact/pedals or whole-piano timing."
+}

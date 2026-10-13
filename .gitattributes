@@ -20,3 +20,4 @@ REVISION export-subst
 tools/concert-grand-avx2-body.rs -text
 tools/concert-grand-ilp-body.rs -text
 tools/measure-concert-grand-ilp-body.py -text
+tools/concert_grand_realtime_pressure.py -text

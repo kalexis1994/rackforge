@@ -1,0 +1,45 @@
+{
+  "stage": "residual selection and weighted variable replay verified",
+  "verifier_sha256": "7b444dc562b938893ab0a11c4e7d38186f43ad089f1be0a3d852823151a65253",
+  "reports_sha256": {
+    "maestro": "d2dada5c6ec424d93df429d4a58b5ec88c29c42b4f93ee958a9e9344866bbc54",
+    "acoplado-4-woodbury": "f764626da087c068cd190fd3762c4e83a03dc36a09e77c7f3b51a1000269662f",
+    "almacenamiento-4-directo": "0c19471680970c4254d02f428e23de09178bc55e0d0de60180cb8377fe65bbac",
+    "presion-almacenamiento-4": "349d1db8846e3bec47f964550c1f7209ccda6e84703fee1f671556e757fdae71",
+    "conjunto-161": "f2ba44c86f403156b1738ebb36db342e57aa7a274700005c28b0171081a6f183",
+    "variable-161": "2b8ae687cc328b9c4cc6be36700d58073b7858add7f3240af6461ba1aa147502",
+    "presion-conjunto-161-refit": "be54847de7f8ad1f07ecb440aeb9c9f47e359dd3fa7ddca5bde08d6ca5efd0a6",
+    "variable-161-observador-completo": "8280e9ece1ab13ca7feaef6c78cac3b2f6a3fc286e0df1d8dc3cfea566148efc",
+    "residual-161": "56cc42e6177589de2ddd2fc1b1fa55cade96c3e25a8fac565a9583df254d6f25",
+    "residual-161-observador-completo": "a0e8482f201961f93d851a78b8df0c64f725c1f8c8a8c512eb2a6314b7e66a8d",
+    "runtime-residual-161": "18c6bc5434736b09bbb90afee584d2753e058e60374baf306c79beb7d46115f2"
+  },
+  "baseline_training_residuals_replayed": true,
+  "selection_and_importance_reconstructed": true,
+  "storage_complement_relative": 4.3312473902881077e-16,
+  "static_and_high_relative": [
+    3.5133483162308883e-09,
+    1.3515420291797743e-15
+  ],
+  "minimum_loss_eigenvalue": 5.986599663335122,
+  "weighted_inner_stationarity_relative": [
+    4.2463850687608895e-14,
+    3.39976204318631e-14
+  ],
+  "mobility": {
+    "rms": 0.046723887823367394,
+    "worst": 0.1311685368475226
+  },
+  "pressure": {
+    "rms": 0.059334289303171035,
+    "worst": 0.11577853566174252
+  },
+  "all_training_pressure": {
+    "rms": 0.05781596641700933,
+    "worst": 0.09151610012927125
+  },
+  "native_recorded_controls": 2,
+  "gates_recomputed": true,
+  "full_piano_realtime": false,
+  "scope": "Unscaled harmonic replay, training-only selection/normal equations and recorded native work. No original-air time, sampled pressure or whole-piano certificate."
+}

@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-12. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-13. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -47,6 +47,21 @@ etapa de cobertura estructural.
 ## Orden y estado
 
 ### Prioridad actual: destilar el maestro a un instrumento realtime
+
+El usuario pide avanzar hacia una prueba tocable. El
+[cuerpo con presión estéreo nativa](RESULTADOS-P7-presion-realtime.md)
+ya conserva los 161 modos, las pérdidas y los puertos recíprocos; conversión
+digital máxima **0,2988/0,2947 %** a 44,1/48 kHz. Once pruebas unitarias y
+replay independiente mediante exponencial real pasan. El consumidor final,
+con presión incluida y cero asignaciones, mide P99 **0,9935/1,0198 ms**;
+la repetición conserva **0,9811/1,1387 ms**, fallando reserva a 48 kHz.
+La ruta portable también falla reserva. Fidelidad al maestro sigue fallando:
+presión ~5,780 % RMS y movilidad máxima ~13,45/13,23 %. Se impone presión
+cero ante carga estática y primer momento nulo. La interfaz de movilidad
+media ya permite preparar el cierre de puertos, pero **no hay aún cuerdas,
+contacto o pedales nativos integrados ni instrumento tocable**. Sigue esa
+integración conservativa y su costo completo antes del ejecutable MIDI;
+no se instala una variante ni se modifica el paquete de fábrica.
 
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)

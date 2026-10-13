@@ -1,0 +1,41 @@
+{
+  "stage": "real held-state pressure and mobility replay verified",
+  "verifier_sha256": "51c0493c2d7ceca7528f3a2c51628f76391ed2669302eb47f5dedb90b4205f64",
+  "runtime_report_sha256": "e9524b0eb42ec73f34553bfa97b6dcfb5928215a2da9c9587fe6b894e13e4bb0",
+  "pressure_report_sha256": "73c307dc8d6af183fd1d73311f9e7b0e516412f9f549d681f5d486654d41c9be",
+  "rates": [
+    {
+      "rate_hz": 44100,
+      "dc_pressure_relative": 1.9410499330134586e-09,
+      "first_order_pressure_relative": 1.8769205577296415e-17,
+      "real_exponential_pressure": {
+        "rms": 0.05780424570201577,
+        "worst": 0.09144771740814683
+      },
+      "real_exponential_mobility": {
+        "rms": 0.04746019223501618,
+        "worst": 0.13449507408912173
+      },
+      "training_validation_disjoint": true
+    },
+    {
+      "rate_hz": 48000,
+      "dc_pressure_relative": 2.303256350915591e-09,
+      "first_order_pressure_relative": 1.9056939477004884e-17,
+      "real_exponential_pressure": {
+        "rms": 0.05780290464520542,
+        "worst": 0.09146840516023749
+      },
+      "real_exponential_mobility": {
+        "rms": 0.047243156882883434,
+        "worst": 0.13226738330180182
+      },
+      "training_validation_disjoint": true
+    }
+  ],
+  "native_recorded_controls": 4,
+  "gates_recomputed": true,
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "scope": "Real augmented exponential against complex-pole harmonic realization; causal FIR, double DC zero, held-out teachers and recorded CPU gates. No original-air transient, live strings/contact/pedals or host callback."
+}

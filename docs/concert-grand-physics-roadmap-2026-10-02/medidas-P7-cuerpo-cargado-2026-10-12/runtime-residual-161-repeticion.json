@@ -1,0 +1,55 @@
+{
+  "stage": "native loaded diagnostic retimed after fit completion",
+  "producer_sha256": "e8fff15a309d01ffd33796cd178b8dabacb76213ddbad8d0f688f612d7b990cc",
+  "parent_report_sha256": "18c6bc5434736b09bbb90afee584d2753e058e60374baf306c79beb7d46115f2",
+  "native_executable_sha256": "d42c6b47dc315965dc385c688bb9cb52100d90116f1ed253aae0cd27004741a9",
+  "mapping_sha256": "ab5e2f83681ee30e87f7df96306818958a55bbe8848bbe4fbe9075a24e89f6f9",
+  "rates": [
+    {
+      "coefficient_sha256": "68017f3b12334f9c93236be4df8e1a4f8b0a4de54ff3b4c0c25ac27179c0f4f5",
+      "benchmark": {
+        "resonators": 180,
+        "latent_ports": 20,
+        "external_ports": 88,
+        "rate_hz": 44100,
+        "frames_per_buffer": 256,
+        "buffers": 2048,
+        "deadline_ms": 5.804988662131519,
+        "mean_ms": 0.8554732421875008,
+        "p50_ms": 0.8074,
+        "p95_ms": 1.1446,
+        "p99_ms": 1.3432,
+        "max_ms": 1.885,
+        "callback_allocations": 0,
+        "checksum": 8.299657640310418e-08,
+        "p99_deadline_fraction": 0.2313871875,
+        "observed_body_budget_passed": false
+      }
+    },
+    {
+      "coefficient_sha256": "908ef7655ec6e6836f249f594fc8a79c765c1267f097fcfdd1a828f8abc4039e",
+      "benchmark": {
+        "resonators": 180,
+        "latent_ports": 20,
+        "external_ports": 88,
+        "rate_hz": 48000,
+        "frames_per_buffer": 256,
+        "buffers": 2048,
+        "deadline_ms": 5.333333333333333,
+        "mean_ms": 0.8919114746093748,
+        "p50_ms": 0.8043,
+        "p95_ms": 1.2702,
+        "p99_ms": 1.5005000000000002,
+        "max_ms": 4.0697,
+        "callback_allocations": 0,
+        "checksum": 5.064855662884385e-08,
+        "p99_deadline_fraction": 0.28134375000000006,
+        "observed_body_budget_passed": false
+      }
+    }
+  ],
+  "body_20percent_budget_passed_both_rates": false,
+  "no_fit_running_in_this_task": true,
+  "full_piano_realtime": false,
+  "scope": "Timing only; inherited native/Python/work controls on byte-identical coefficients. Pressure excluded; no CPU isolation or host realtime guarantee."
+}

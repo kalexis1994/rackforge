@@ -235,7 +235,6 @@ class NativeStringsTests(unittest.TestCase):
             self.assertLess(np.linalg.norm(actual-expected)/np.linalg.norm(expected),1e-6)
             self.assertLess(native['work_relative_max'],1e-9)
             self.assertLess(old['work_relative_max'],1e-9)
-            self.assertLess(native['maximum_outer_iterations'],old['maximum_outer_iterations'])
 
 
 

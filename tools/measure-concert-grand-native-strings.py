@@ -27,8 +27,9 @@ def main():
     parser.add_argument('--portable',action='store_true')
     parser.add_argument('--uncondensed',action='store_true')
     parser.add_argument('--compare-uncondensed',action='store_true')
+    parser.add_argument('--legacy-correction',action='store_true')
     args=parser.parse_args()
-    flags=(['--portable'] if args.portable else [])+(['--uncondensed'] if args.uncondensed else [])
+    flags=(['--portable'] if args.portable else [])+(['--uncondensed'] if args.uncondensed else [])+(['--legacy-correction'] if args.legacy_correction else [])
     if args.local.exists() or args.report.exists() or not 8<=args.buffers<=2048 or not 1<=args.micro_block<=64:
         raise ValueError('new native string measurement paths and valid buffer count required')
     root=Path(__file__).resolve().parent.parent
@@ -44,6 +45,7 @@ def main():
         executable_path=str(exe.resolve()),executable_sha256=digest(exe),cases=[],
         math_backend='portable' if args.portable else 'prepared CPU dispatch',
         condensed_axial=args.ramp and not args.uncondensed,
+        correction_direction='accumulated vector' if args.legacy_correction else 'parallel to string displacement',
         fixed_bridge=True,moving_body_attached=False,pressure_included=False,pedals_included=False,
         nonlinear_micro_block=args.micro_block,work_checked_at_nonlinear_block_boundaries=True,ramped_nonlinearity=args.ramp,
         full_piano_realtime=False,global_physics_approved=False,factory_updated=False)

@@ -799,6 +799,7 @@ pub struct Choir {
     cached_initial_gradients: usize,
     ramp_coordinate_work: Vec<f64>,
     use_condensed_axial: bool,
+    canonical_correction: bool,
 }
 impl Choir {
     fn new(
@@ -960,6 +961,7 @@ impl Choir {
             cached_initial_gradients: 0,
             ramp_coordinate_work: vec![0.; size],
             use_condensed_axial: true,
+            canonical_correction: true,
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -1506,6 +1508,11 @@ impl Choir {
                 } else {
                     self.free_indices[index]
                 };
+                // Axial coordinates will be composed once with their
+                // directly determined endpoint force. They do not drive felt.
+                if self.use_condensed_axial && j % self.width < self.wires[0].nl {
+                    continue;
+                }
                 let slope = (self.ramp_end_force[j] - self.ramp_start_force[j]) / frames as f64;
                 let first = self.ramp_start_force[j] + 0.5 * slope + self.ramp_correction[j];
                 let t = self.ramp_transfer[frames * self.size + j];
@@ -1572,14 +1579,30 @@ impl Choir {
             self.ramp_next_correction
                 .copy_from_slice(&self.ramp_correction);
             if displacement2 > 1e-40 {
-                for j in 0..self.size - 1 {
-                    self.ramp_next_correction[j] +=
-                        shifted_work * (self.q[j] - self.block_start_q[j]) / displacement2;
+                if self.canonical_correction {
+                    // A single work equation otherwise leaves an arbitrary
+                    // orthogonal component depending on the iteration path.
+                    let projection = (0..self.size - 1)
+                        .map(|j| self.ramp_correction[j] * (self.q[j] - self.block_start_q[j]))
+                        .sum::<f64>();
+                    let magnitude = (projection + shifted_work) / displacement2;
+                    for j in 0..self.size - 1 {
+                        self.ramp_next_correction[j] =
+                            magnitude * (self.q[j] - self.block_start_q[j]);
+                    }
+                    self.ramp_next_correction[self.size - 1] = 0.;
+                } else {
+                    for j in 0..self.size - 1 {
+                        self.ramp_next_correction[j] +=
+                            shifted_work * (self.q[j] - self.block_start_q[j]) / displacement2;
+                    }
                 }
             } else if shifted_work.abs() > 1e-13 * energy.max(1e-30) {
                 self.q.copy_from_slice(&self.block_start_q);
                 self.v.copy_from_slice(&self.block_start_v);
                 return Err("degenerate ramp work correction; shorten block");
+            } else if self.canonical_correction {
+                self.ramp_next_correction.fill(0.);
             }
             let force_scale = norm(&self.block_next_force)
                 .max(norm(&self.ramp_end_force))
@@ -1883,6 +1906,7 @@ fn main() {
     choir.ramp_micro_reference = args.iter().any(|arg| arg == "--micro-reference");
     choir.use_endpoint_cache = !args.iter().any(|arg| arg == "--uncached");
     choir.use_condensed_axial = !args.iter().any(|arg| arg == "--uncondensed");
+    choir.canonical_correction = !args.iter().any(|arg| arg == "--legacy-correction");
     if args.iter().any(|arg| arg == "--portable") {
         choir.gram_dot = dot;
         for wire in &mut choir.wires {
@@ -2005,7 +2029,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -2079,5 +2103,5 @@ fn main() {
         0.
     };
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction);
 }

@@ -46,3 +46,20 @@ Cambiar el camino de iteración puede cambiar ese componente y la trayectoria.
 Sigue definir una corrección paralela al desplazamiento de las cuerdas para
 que ambas rutas resuelvan un paso determinado, conservando el rechazo y el
 control monolítico. El contacto y la cabeza quedan fuera de esa corrección.
+
+## Corrección determinada
+
+Se fija `c = lambda (q_end - q_start)` sobre las cuerdas. La corrección se
+proyecta completa en esa dirección durante la solución, en lugar de
+acumular incrementos que dejan una componente perpendicular indeterminada.
+Las rutas con/sin eliminación axial vuelven a pasar la equivalencia ≤1e−6
+en ambos controles perturbados, manteniendo los límites de fuerza/trabajo.
+La referencia por micro-pasos y Gauss independiente también pasan.
+`--legacy-correction` conserva el algoritmo rechazado para diagnóstico.
+La comparación de equivalencia es entre las dos rutas del nuevo paso
+determinado; no se presenta como identidad con el paso anterior ambiguo.
+
+[Primer costo con dirección determinada](medidas-P7-cuerdas-nativas-2026-10-13/axial16-canonical-vector.json)
+conserva el ataque y el fallo de presupuesto de 2 ms. Todavía se itera un
+vector de corrección completo. Sigue aprovechar su único coeficiente
+escalar en el vuelo certificado, sin dejar de verificar el contacto fino.

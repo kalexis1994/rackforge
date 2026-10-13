@@ -19,9 +19,20 @@ class PhaseForcesTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):cls.temp.cleanup()
 
-    def native(self,f,frames=16):
+    def native(self,f,frames=16,*flags):
         path=self.folder/f'fixture-{len(list(self.folder.iterdir()))}.bin';write_fixture(path,f)
-        return json.loads(subprocess.check_output([str(self.exe),str(path),str(frames),'8'],text=True))
+        return json.loads(subprocess.check_output([str(self.exe),str(path),str(frames),'8',*flags],text=True))
+
+    def test_simd_matches_portable_without_changing_physical_terms(self):
+        for nt in [4,96]:
+            f=fixture(transverse=nt,seed=83)
+            native=self.native(f);portable=self.native(f,16,'--portable')
+            omega=np.asarray(native['omega'])
+            self.assertLess(relative(response_metric(native,omega),response_metric(portable,omega)),1e-13)
+            self.assertFalse(portable['simd'])
+            for key in ['prepared_terms','prepared_bytes','endpoint_quadratic_gradient']:
+                self.assertEqual(native[key],portable[key])
+            self.assertEqual(native['allocations'],0);self.assertEqual(portable['allocations'],0)
 
     def test_harmonic_response_handles_zero_signed_and_resonant_frequencies(self):
         points,weights=roots_legendre(1024)

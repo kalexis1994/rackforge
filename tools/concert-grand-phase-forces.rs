@@ -107,6 +107,7 @@ pub struct PhaseQuadratic {
     axial: Vec<Term>,
     transverse: Vec<Term>,
     amplitudes: Vec<f64>,
+    simd: bool,
 }
 impl PhaseQuadratic {
     pub fn new(
@@ -167,6 +168,16 @@ impl PhaseQuadratic {
                 }
             }
         }
+        // Transverse terms share the axial left carrier across both axes.
+        // Store [q_cc,q_cs,v_cc,v_cs] and [q_sc,q_ss,v_sc,v_ss] so SIMD
+        // can contract the left carrier once, then apply each right axis.
+        for term in &mut transverse {
+            let r = term.response;
+            term.response = [
+                [r[0][0], r[0][1], r[1][0], r[1][1]],
+                [r[0][2], r[0][3], r[1][2], r[1][3]],
+            ];
+        }
         let size = omega.len();
         Self {
             nt,
@@ -174,6 +185,16 @@ impl PhaseQuadratic {
             axial,
             transverse,
             amplitudes: vec![0.; size],
+            simd: {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    std::arch::is_x86_feature_detected!("avx2")
+                }
+                #[cfg(not(target_arch = "x86_64"))]
+                {
+                    false
+                }
+            },
         }
     }
     pub fn terms(&self) -> usize {
@@ -195,6 +216,12 @@ impl PhaseQuadratic {
         for i in 0..size {
             self.amplitudes[i] = v[i] / self.omega[i];
         }
+        #[cfg(target_arch = "x86_64")]
+        if self.simd {
+            // CPU dispatch is prepared in new(), never inferred from inputs.
+            unsafe { self.contract_avx2(q, dq, dv) };
+            return;
+        }
         let products = |left: usize, right: usize| {
             [
                 q[left] * q[right],
@@ -212,10 +239,93 @@ impl PhaseQuadratic {
             dv[term.output] -= dot4(&term.response[1], &combined);
         }
         for term in &self.transverse {
+            // Restore the original expanded order for the portable control.
+            let rq = [
+                term.response[0][0],
+                term.response[0][1],
+                term.response[1][0],
+                term.response[1][1],
+            ];
+            let rv = [
+                term.response[0][2],
+                term.response[0][3],
+                term.response[1][2],
+                term.response[1][3],
+            ];
             for axis in [0, self.nt] {
                 let a = products(term.left, term.right + axis);
-                dq[term.output + axis] -= dot4(&term.response[0], &a);
-                dv[term.output + axis] -= dot4(&term.response[1], &a);
+                dq[term.output + axis] -= dot4(&rq, &a);
+                dv[term.output + axis] -= dot4(&rv, &a);
+            }
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    unsafe fn contract_avx2(&self, q: &[f64], dq: &mut [f64], dv: &mut [f64]) {
+        use std::arch::x86_64::*;
+        #[target_feature(enable = "avx2")]
+        unsafe fn pair(qi: f64, bi: f64, qj: f64, bj: f64) -> __m256d {
+            _mm256_mul_pd(_mm256_set_pd(bi, bi, qi, qi), _mm256_set_pd(bj, qj, bj, qj))
+        }
+        #[target_feature(enable = "avx2")]
+        unsafe fn responses(term: &Term, products: __m256d) -> [f64; 2] {
+            unsafe {
+                let q = _mm256_mul_pd(_mm256_loadu_pd(term.response[0].as_ptr()), products);
+                let v = _mm256_mul_pd(_mm256_loadu_pd(term.response[1].as_ptr()), products);
+                // Pairwise sums may round differently from the scalar oracle.
+                // Both products cover exactly four doubles without overread.
+                let pairs = _mm256_hadd_pd(q, v);
+                let total = _mm_add_pd(
+                    _mm256_castpd256_pd128(pairs),
+                    _mm256_extractf128_pd(pairs, 1),
+                );
+                let mut result = [0.; 2];
+                _mm_storeu_pd(result.as_mut_ptr(), total);
+                result
+            }
+        }
+        unsafe {
+            for term in &self.axial {
+                let a = pair(
+                    q[term.left],
+                    self.amplitudes[term.left],
+                    q[term.right],
+                    self.amplitudes[term.right],
+                );
+                let b = pair(
+                    q[term.left + self.nt],
+                    self.amplitudes[term.left + self.nt],
+                    q[term.right + self.nt],
+                    self.amplitudes[term.right + self.nt],
+                );
+                let result = responses(term, _mm256_add_pd(a, b));
+                dq[term.output] -= result[0];
+                dv[term.output] -= result[1];
+            }
+            for term in &self.transverse {
+                let factors = _mm256_add_pd(
+                    _mm256_mul_pd(
+                        _mm256_loadu_pd(term.response[0].as_ptr()),
+                        _mm256_set1_pd(q[term.left]),
+                    ),
+                    _mm256_mul_pd(
+                        _mm256_loadu_pd(term.response[1].as_ptr()),
+                        _mm256_set1_pd(self.amplitudes[term.left]),
+                    ),
+                );
+                for axis in [0, self.nt] {
+                    let qj = q[term.right + axis];
+                    let bj = self.amplitudes[term.right + axis];
+                    let products = _mm256_mul_pd(factors, _mm256_set_pd(bj, qj, bj, qj));
+                    let total = _mm_hadd_pd(
+                        _mm256_castpd256_pd128(products),
+                        _mm256_extractf128_pd(products, 1),
+                    );
+                    let mut result = [0.; 2];
+                    _mm_storeu_pd(result.as_mut_ptr(), total);
+                    dq[term.output + axis] -= result[0];
+                    dv[term.output + axis] -= result[1];
+                }
             }
         }
     }
@@ -331,6 +441,11 @@ fn main() {
         })
         .collect::<Vec<_>>();
     let preparation_ms = start.elapsed().as_secs_f64() * 1000.;
+    if args.iter().any(|arg| arg == "--portable") {
+        for plan in &mut plans {
+            plan.simd = false;
+        }
+    }
     let mut dq = vec![0.; 3 * width];
     let mut dv = dq.clone();
     apply_choir(&mut plans, q, v, &mut dq, &mut dv);
@@ -372,5 +487,5 @@ fn main() {
             &mut end_force[i * width..(i + 1) * width],
         );
     }
-    println!("{{\"dq\":{:?},\"dv\":{:?},\"endpoint_quadratic_gradient\":{:?},\"omega\":{:?},\"prepared_terms\":{},\"prepared_bytes\":{},\"preparation_ms\":{},\"block_seconds\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"allocations\":{},\"nonlinear_step\":false}}", dq,dv,end_force,plans.iter().flat_map(|p|p.omega.iter()).collect::<Vec<_>>(),plans.iter().map(|p|p.terms()).sum::<usize>(),plans.iter().map(|p|p.prepared_bytes()).sum::<usize>(),preparation_ms,h,frames,buffers,mean,times[buffers*99/100],times[buffers-1],allocations);
+    println!("{{\"dq\":{:?},\"dv\":{:?},\"endpoint_quadratic_gradient\":{:?},\"omega\":{:?},\"prepared_terms\":{},\"prepared_bytes\":{},\"preparation_ms\":{},\"block_seconds\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"allocations\":{},\"simd\":{},\"nonlinear_step\":false}}", dq,dv,end_force,plans.iter().flat_map(|p|p.omega.iter()).collect::<Vec<_>>(),plans.iter().map(|p|p.terms()).sum::<usize>(),plans.iter().map(|p|p.prepared_bytes()).sum::<usize>(),preparation_ms,h,frames,buffers,mean,times[buffers*99/100],times[buffers-1],allocations,plans[0].simd);
 }

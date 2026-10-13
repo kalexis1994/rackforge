@@ -73,6 +73,38 @@ sin avanzar dinámica ni resolver ninguna iteración. Cero asignaciones medidas.
 ni modifica sus gates. La tabla exacta sirve como control de nuevas
 factorizaciones; no se selecciona como solver rápido ni se instala.
 
+## Contracción SIMD y reutilización entre ejes
+
+La versión inicial queda en **60a6b662**, con fuentes, medidas y rechazo CPU.
+La [medición posterior](medidas-P7-cuerdas-nativas-2026-10-13/phase-forces-simd.json)
+autentica ese control mediante los bytes de fuentes en Git y SHA256 de sus
+ejecutables, fixtures y resultados. Los archivos anteriores se conservan.
+
+La ruta nueva prepara el despacho AVX2 una vez, con fallback portable.
+Contrae los cuatro productos de fase en paralelo. En cada término transversal
+se calcula una sola vez la contracción con el portador axial izquierdo y
+se reutiliza para los ejes vertical y horizontal. Sólo cambia el orden de
+operaciones; términos, tablas, estados físicos y respuesta analítica se
+conservan. Las cargas SIMD son de cuatro doubles dentro de cada fila;
+no requieren alineación ni leen fuera de ella.
+
+El control portable conserva el orden expandido original y reproduce
+**exactamente** los arrays `delta q/delta v` de 60a6b662 en las tres geometrías.
+AVX2 difiere **1,13–1,71e−16** de ese control en la métrica de respuesta;
+ambas rutas siguen pasando la cuadratura independiente. Cero asignaciones.
+
+| Geometría | AVX2 media / P99 / máximo, ms | Portable contemporáneo media / P99 / máximo, ms | Aceleración de media |
+|---|---:|---:|---:|
+| C3 | 3,723 / 5,916 / 9,342 | 4,784 / 5,226 / 6,368 | 1,285× |
+| C4 | 3,788 / 6,013 / 9,908 | 4,781 / 5,217 / 6,624 | 1,262× |
+| C5 | 3,657 / 4,292 / 5,742 | 4,783 / 5,138 / 5,819 | 1,308× |
+
+512 buffers por ruta, mismo estado mixto y bloque de 125 microsegundos.
+La media baja **20,8–23,5 %** frente al control portable contemporáneo;
+el máximo no mejora uniformemente y C4 empeora frente al ensayo inicial.
+**Ambas rutas siguen fallando 2 ms**, incluso sin iteraciones/contacto.
+No atribuir estas medidas al tiempo del motor vigente ni sustituir sus gates.
+
 ## Validación y siguiente paso
 
 30 pruebas pasan: cuatro nuevas de convolución, resonancia/signo/cero,
@@ -81,7 +113,13 @@ las 26 existentes siguen pasando. Los fuentes del motor anterior y sus
 medidas permanecen autenticados. Los datos grandes siguen en `local/`;
 no se genera audio ni otra copia de fuentes o calibración.
 
-Sigue reducir la contracción sin modificar la respuesta y luego evaluar
+Después de SIMD pasan las cinco pruebas del componente, incluida la paridad
+SIMD/portable a 4 y 96 modos. Las 26 pruebas del motor/cuerpo pasaron en la
+corrida previa; sus fuentes no cambian durante esta continuación. La suite
+acumulada contiene 31 pruebas. No se vuelve a integrar la referencia larga.
+
+Sigue reducir tablas y contracción con una factorización temporal controlada,
+sin retirar coordenadas físicas, y luego evaluar
 una representación temporal acoplada que incluya fuerza cúbica y trabajo.
 El límite CPU de esta etapa no acredita el presupuesto completo: faltan
 iteraciones, contacto, cuerpo/presión, pedales y polifonía. Global falso.

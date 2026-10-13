@@ -141,6 +141,12 @@ pasan**. Primera contracción: 82.656 términos, 7,95 MB, cero asignaciones,
 C4 media **4,891 ms**, máximo **8,505 ms** frente a 2 ms: rechazada para CPU.
 Sirve de control para optimizar la contracción; todavía no es un paso no
 lineal conservativo ni sustituye el motor o la referencia existentes.
+La continuación SIMD comparte el factor axial entre ejes: C4 media
+**3,788 ms** frente a **4,781 ms** portable contemporáneo, cambio de respuesta
+**1,38e−16**; cinco pruebas del componente pasan. El control portable reproduce
+los arrays originales exactamente. Máximo C4 **9,908 ms**: sigue fallando CPU
+sin contacto/iteraciones. Sigue factorizar tablas/fuerzas antes de acoplar
+la trayectoria no lineal, sin ampliar aprobación del instrumento.
 
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)

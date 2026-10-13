@@ -914,6 +914,12 @@ pub struct Choir {
     use_scalar_flight: bool,
     scalar_flight_blocks: usize,
     scalar_flight_fallbacks: usize,
+    felt_force_trace: Vec<[f64; 3]>,
+    last_contact_forces: [f64; 3],
+    use_warm_felt: bool,
+    warm_felt_guesses: usize,
+    warm_felt_retries: usize,
+    felt_iterations: usize,
 }
 impl Choir {
     fn new(
@@ -1085,6 +1091,12 @@ impl Choir {
             use_scalar_flight: true,
             scalar_flight_blocks: 0,
             scalar_flight_fallbacks: 0,
+            felt_force_trace: vec![[0.; 3]; 64],
+            last_contact_forces: [0.; 3],
+            use_warm_felt: true,
+            warm_felt_guesses: 0,
+            warm_felt_retries: 0,
+            felt_iterations: 0,
         }
     }
     fn compression(&self, q: &[f64], wire: usize) -> f64 {
@@ -1190,6 +1202,7 @@ impl Choir {
     fn contact_with_held_nonlinearity(
         &mut self,
         contact_only: bool,
+        initial_forces: [f64; 3],
     ) -> Result<Stats, &'static str> {
         if contact_only {
             for i in 0..3 {
@@ -1229,9 +1242,10 @@ impl Choir {
             self.compression(&self.linear, 1),
             self.compression(&self.linear, 2),
         ];
-        let mut forces = [0.; 3];
+        let mut forces = initial_forces;
         let mut cached: Option<[Contact; 3]> = None;
         for iteration in 0..24 {
+            self.felt_iterations += 1;
             let contacts = if let Some(contacts) = cached.take() {
                 contacts
             } else {
@@ -1317,6 +1331,7 @@ impl Choir {
                         &self.gradient,
                     );
                 }
+                self.last_contact_forces = forces;
                 return Ok(Stats {
                     heat: contacts.iter().map(|c| c.heat).sum(),
                     force: forces.iter().sum(),
@@ -1391,6 +1406,35 @@ impl Choir {
         }
         Err("reduced felt solve did not converge")
     }
+    /// Reuse the last iteration's solution at the same microtick solely
+    /// as Newton's initial guess. Every force/heat is solved again. Failed
+    /// warm solves retry from zero before any physical state is accepted.
+    fn contact_in_block(
+        &mut self,
+        frame: usize,
+        contact_only: bool,
+    ) -> Result<Stats, &'static str> {
+        let initial = if self.use_warm_felt {
+            self.felt_force_trace[frame]
+        } else {
+            [0.; 3]
+        };
+        let warm = initial.iter().any(|force| *force != 0.);
+        if warm {
+            self.warm_felt_guesses += 1;
+        }
+        let result = self.contact_with_held_nonlinearity(contact_only, initial);
+        let result = if result.is_err() && warm {
+            self.warm_felt_retries += 1;
+            self.contact_with_held_nonlinearity(contact_only, [0.; 3])
+        } else {
+            result
+        };
+        if result.is_ok() {
+            self.felt_force_trace[frame] = self.last_contact_forces;
+        }
+        result
+    }
     /// Hold only the nonlinear string gradient over a short implicit block.
     /// Linear carriers and felt remain at the microclock. Global string work
     /// closes at block boundaries; events must terminate a block first.
@@ -1415,7 +1459,7 @@ impl Choir {
             self.v.copy_from_slice(&self.block_start_v);
             let mut stats = Stats::default();
             for frame in 0..frames {
-                let micro = match self.contact_with_held_nonlinearity(false) {
+                let micro = match self.contact_with_held_nonlinearity(false, [0.; 3]) {
                     Ok(v) => v,
                     Err(error) => {
                         self.q.copy_from_slice(&self.block_start_q);
@@ -1513,10 +1557,7 @@ impl Choir {
                 + t[2] * self.ramp_start_force[j];
             displacement_scale2 += (q - self.block_start_q[j]).powi(2);
         }
-        let scale = displacement_scale2
-            .sqrt()
-            .max(h * self.block_start_v[head].abs())
-            .max(1e-12);
+        let scale = displacement_scale2.sqrt().max(1e-12);
         let n = self.transverse_indices.len() + 1;
         for (row, &j) in self.transverse_indices.iter().enumerate() {
             self.solver_x[row] = self.ramp_start_force[j];
@@ -1712,6 +1753,7 @@ impl Choir {
         }
         self.ramp_end_force.copy_from_slice(&self.ramp_start_force);
         self.ramp_correction.fill(0.);
+        self.felt_force_trace.fill([0.; 3]);
         for outer in 0..32 {
             self.q.copy_from_slice(&self.block_start_q);
             self.v.copy_from_slice(&self.block_start_v);
@@ -1753,15 +1795,14 @@ impl Choir {
                     let head = self.size - 1;
                     self.block_force[head] = 0.;
                     self.candidate[head] = self.q[head];
-                    let micro =
-                        match self.contact_with_held_nonlinearity(!self.ramp_micro_reference) {
-                            Ok(v) => v,
-                            Err(error) => {
-                                self.q.copy_from_slice(&self.block_start_q);
-                                self.v.copy_from_slice(&self.block_start_v);
-                                return Err(error);
-                            }
-                        };
+                    let micro = match self.contact_in_block(frame, !self.ramp_micro_reference) {
+                        Ok(v) => v,
+                        Err(error) => {
+                            self.q.copy_from_slice(&self.block_start_q);
+                            self.v.copy_from_slice(&self.block_start_v);
+                            return Err(error);
+                        }
+                    };
                     for i in 0..3 {
                         let start = if self.ramp_micro_reference {
                             i * self.width
@@ -2124,6 +2165,7 @@ fn main() {
     choir.use_condensed_axial = !args.iter().any(|arg| arg == "--uncondensed");
     choir.canonical_correction = !args.iter().any(|arg| arg == "--legacy-correction");
     choir.use_scalar_flight = !args.iter().any(|arg| arg == "--vector-flight");
+    choir.use_warm_felt = !args.iter().any(|arg| arg == "--cold-felt");
     if args.iter().any(|arg| arg == "--portable") {
         choir.gram_dot = dot;
         for wire in &mut choir.wires {
@@ -2246,7 +2288,7 @@ fn main() {
             frame += count;
         }
         let energy = choir.energy();
-        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks);
+        println!("{{\"q\":{:?},\"v\":{:?},\"heat_j\":{},\"launch_work_j\":{:?},\"energy_j\":{},\"work_relative_max\":{},\"force_peak_n\":{},\"maximum_iterations\":{},\"force_trace\":{:?},\"energy_checkpoints\":{:?},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"condensed_axial\":{},\"endpoint_nonlinear_force\":{:?},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",choir.q,choir.v,heat,events,energy,work_relative_max,peak,maximum_iterations,force_trace,checkpoints,micro_block,maximum_outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,ramp_mode && choir.use_condensed_axial,choir.endpoint_force,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
         return;
     }
     choir.launch(launch[0]).expect("cold launch");
@@ -2320,5 +2362,5 @@ fn main() {
         0.
     };
     times.sort_by(f64::total_cmp);
-    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks);
+    println!("{{\"rate_hz\":{},\"transverse\":{},\"axial\":{},\"nodes\":{},\"frames\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"deadline_ms\":{},\"allocations\":{},\"peak_force_n\":{},\"maximum_iterations\":{},\"micro_block\":{},\"maximum_outer_iterations\":{},\"certified_flight_blocks\":{},\"micro_reference\":{},\"simd_fft\":{},\"real_fft_complex_size\":{},\"exact_zero_transforms\":{},\"cached_initial_gradients\":{},\"first_buffer_ms\":{},\"worst_buffer_index\":{},\"buffers_with_contact\":{},\"mean_contact_buffer_ms\":{},\"max_contact_buffer_ms\":{},\"condensed_axial\":{},\"canonical_correction\":{},\"scalar_flight_blocks\":{},\"scalar_flight_fallbacks\":{},\"warm_felt_guesses\":{},\"warm_felt_retries\":{},\"felt_newton_iterations\":{}}}",p[4],nt,nl,nodes,frames,blocks,mean,times[blocks*99/100],times[blocks-1],frames as f64/p[4]*1000.,allocations,peak,iterations,micro_block,outer_iterations,certified_flight_blocks,choir.ramp_micro_reference,choir.wires[0].plan.simd_fft,choir.wires[0].plan.fft.len(),choir.wires.iter().map(|w|w.plan.zero_transforms).sum::<usize>()-zero_before,choir.cached_initial_gradients-cached_before,first_buffer_ms,worst_buffer_index,contact_buffers,mean_contact_ms,contact_time_max,ramp_mode && choir.use_condensed_axial,ramp_mode && choir.canonical_correction,choir.scalar_flight_blocks,choir.scalar_flight_fallbacks,choir.warm_felt_guesses,choir.warm_felt_retries,choir.felt_iterations);
 }

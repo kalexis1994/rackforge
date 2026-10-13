@@ -86,3 +86,66 @@ campos excitados también pasa ≤1e−6 contra la corrección vectorial.
 No se afirma mejora de tiempo respecto al primer costo vectorial; sigue
 calcular/escalar el vuelo sin trabajo redundante y reducir el costo de
 resolver nuevamente el contacto durante el ataque.
+
+## Contacto reutilizado y cierre de la etapa
+
+Se guarda la solución de las tres fuerzas de contacto en cada microinstante
+de la iteración no lineal anterior. Sólo se usa como punto inicial de Newton:
+se vuelven a resolver fuerza y calor con las mismas tolerancias. La traza
+se vacía al iniciar cada bloque; si falla una solución iniciada con esa
+traza, se reintenta desde cero antes de aceptar estado físico. `--cold-felt`
+conserva el control. El vuelo escalar usa ahora la norma del desplazamiento
+previsto de las cuerdas como escala; la cabeza queda fuera de esa corrección.
+
+Mediciones consecutivas, sin ejecutar las pruebas simultáneamente: C4,
+intensidad 84, tres cuerdas 96/192, 256 micro-pasos a 128 kHz, bloques de 16.
+El plazo por buffer es **2 ms**. Se incluyen el primer ataque y todos los
+buffers; no se descuentan los retornos al solver completo.
+
+| Ruta | Buffers | Media ms | P99 ms | Máximo ms | Primer ataque ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| [Anterior](medidas-P7-cuerdas-nativas-2026-10-13/vuelo16-final.json) | 512 | 4,7170 | 5,7415 | 10,3108 | 10,3108 |
+| [Final, escalar y contacto reutilizado](medidas-P7-cuerdas-nativas-2026-10-13/axial16-final.json) | 512 | 2,2314 | 3,7293 | 3,9336 | 3,7293 |
+| [Control vectorial](medidas-P7-cuerdas-nativas-2026-10-13/axial16-vector-control.json) | 512 | 2,1953 | 3,0317 | 3,9194 | 3,9194 |
+| [Contacto desde cero](medidas-P7-cuerdas-nativas-2026-10-13/axial16-cold-felt-control.json) | 128 | 2,2171 | 3,6298 | 4,3500 | 4,3500 |
+| [Portable](medidas-P7-cuerdas-nativas-2026-10-13/axial16-final-portable.json) | 128 | 2,3830 | 3,8126 | 4,1625 | 4,1625 |
+
+La media final baja **52,7%** frente al precedente, y el primer ataque
+**63,8%**. Aun así, todas las rutas **fallan el plazo de 2 ms**. El máximo
+final ocurre en el buffer 239, después del ataque. La ruta escalar no
+demuestra ventaja de tiempo sobre el control vectorial: su media difiere
+aproximadamente 1,6%, y los tiempos tienen variación entre corridas.
+
+Contacto reutilizado: **1750** iteraciones de Newton frente a **2543** desde
+cero, reducción **31,2%**, con 538 puntos iniciales reutilizados y cero
+reintentos. Ambas corridas contienen un único buffer con contacto, aunque
+tengan distinta duración total. Esta reducción de iteraciones no demuestra
+por sí sola una mejora del tiempo completo del callback. La ruta final
+acepta 8177 vuelos escalares de 8192 bloques y usa 15 retornos al solver
+completo; máximo de cuatro iteraciones externas y **cero asignaciones**.
+
+Pasan **18 pruebas** de cuerdas y presión. Incluyen fuerzas axiales contra
+Gauss independiente, equivalencia determinada con/sin eliminación axial,
+vuelo escalar/vectorial con ambos campos excitados, trayectoria/fuerza del
+contacto reutilizado contra inicio desde cero, rechazo de vuelos con impacto
+futuro y conservación del cache entre bloques. Los límites de equivalencia
+siguen en 1e−6 y el control de contacto en 1e−8.
+
+[Control final de 250 ms con reiteración viva a 125 ms](medidas-P7-cuerdas-nativas-2026-10-13/axial16-final-reiteracion250ms.json):
+error de estado **0,3241655%**, ledger máximo **2,6324e−12**, ambos pasan.
+El control corto da **0,1006955%** de estado, **0,0004888%** de fuerza y
+ledger **1,4955e−14**. La fuerza registrada cubre los primeros 6 ms; estado
+y trabajo cubren los 250 ms. Se reutiliza la referencia monolítica anterior
+autenticada, con los mismos coeficientes y eventos; no se vuelve a integrar.
+Informes conservan hashes de fuentes, ejecutable, coeficientes y referencia.
+
+Se mantienen las **1153 coordenadas mecánicas**, sin retirar modos ni
+cambiar el potencial constitutivo. La dirección de la corrección de trabajo
+sí determina un paso numérico nuevo, documentado arriba: no se afirma
+identidad con el paso ambiguo anterior. El primer candidato rechazado queda
+conservado. Son ensayos de un coro a puente fijo: cuerpo móvil, presión,
+pedales y polifonía aún deben integrarse y medirse. No prueban tiempo real
+del piano ni duración de render de La Campanella. Sigue reducir el costo
+de evaluación de campos y validar cualquier aumento del bloque temporal
+antes del cierre de puertos con la inercia completa. Sin WAV, aprobación
+global ni actualización del paquete de fábrica.

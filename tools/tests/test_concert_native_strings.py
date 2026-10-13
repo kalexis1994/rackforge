@@ -259,5 +259,22 @@ class NativeStringsTests(unittest.TestCase):
         self.assertEqual(native['heat_j'],0.)
 
 
+    def test_warm_felt_solves_same_force_and_work_from_previous_iterate(self):
+        for nt in [4,96]:
+            f=fixture(transverse=nt,rate=128000,seed=83,duration=.006)
+            warm=self.run_native(f,'verify-ramp',16)
+            cold=self.run_native(f,'verify-ramp',16,'--cold-felt')
+            self.assertGreater(warm['warm_felt_guesses'],0)
+            self.assertEqual(cold['warm_felt_guesses'],0)
+            self.assertLess(warm['felt_newton_iterations'],cold['felt_newton_iterations'])
+            omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+            target=np.r_[omega*np.asarray(cold['q'])[:-1],cold['v']]
+            actual=np.r_[omega*np.asarray(warm['q'])[:-1],warm['v']]
+            self.assertLess(np.linalg.norm(actual-target)/np.linalg.norm(target),1e-8)
+            np.testing.assert_allclose(warm['force_trace'],cold['force_trace'],rtol=1e-8,atol=2e-8)
+            self.assertLess(warm['work_relative_max'],1e-9)
+            self.assertLess(cold['work_relative_max'],1e-9)
+
+
 
 if __name__=='__main__':unittest.main()

@@ -47,6 +47,8 @@ def main():
         flags.append('--legacy-correction')
     if parent.get('scalar_flight') is False:
         flags.append('--vector-flight')
+    if parent.get('warm_felt') is False:
+        flags.append('--cold-felt')
     reused=None
     if args.reference_report:
         reused=json.loads(args.reference_report.read_text(encoding='utf-8'))
@@ -71,6 +73,7 @@ def main():
         condensed_axial=parent.get('condensed_axial',False),
         correction_direction=parent.get('correction_direction','accumulated vector'),
         scalar_flight=parent.get('scalar_flight',False),
+        warm_felt=parent.get('warm_felt',False),
         reference_parent_path=str(args.reference_report.resolve()) if reused else None,
         reference_parent_sha256=digest(args.reference_report) if reused else None,
         cases=[],

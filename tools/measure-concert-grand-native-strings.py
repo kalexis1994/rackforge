@@ -29,8 +29,9 @@ def main():
     parser.add_argument('--compare-uncondensed',action='store_true')
     parser.add_argument('--legacy-correction',action='store_true')
     parser.add_argument('--vector-flight',action='store_true')
+    parser.add_argument('--cold-felt',action='store_true')
     args=parser.parse_args()
-    flags=(['--portable'] if args.portable else [])+(['--uncondensed'] if args.uncondensed else [])+(['--legacy-correction'] if args.legacy_correction else [])+(['--vector-flight'] if args.vector_flight else [])
+    flags=(['--portable'] if args.portable else [])+(['--uncondensed'] if args.uncondensed else [])+(['--legacy-correction'] if args.legacy_correction else [])+(['--vector-flight'] if args.vector_flight else [])+(['--cold-felt'] if args.cold_felt else [])
     if args.local.exists() or args.report.exists() or not 8<=args.buffers<=2048 or not 1<=args.micro_block<=64:
         raise ValueError('new native string measurement paths and valid buffer count required')
     root=Path(__file__).resolve().parent.parent
@@ -47,6 +48,7 @@ def main():
         math_backend='portable' if args.portable else 'prepared CPU dispatch',
         condensed_axial=args.ramp and not args.uncondensed,
         scalar_flight=args.ramp and not(args.vector_flight or args.uncondensed or args.legacy_correction),
+        warm_felt=args.ramp and not args.cold_felt,
         correction_direction='accumulated vector' if args.legacy_correction else 'parallel to string displacement',
         fixed_bridge=True,moving_body_attached=False,pressure_included=False,pedals_included=False,
         nonlinear_micro_block=args.micro_block,work_checked_at_nonlinear_block_boundaries=True,ramped_nonlinearity=args.ramp,

@@ -83,6 +83,17 @@ siguen fallando CPU sin cuerpo/presión. Se registra el costo del ataque
 sin excluirlo y se reutiliza la referencia larga autenticada del mismo
 fixture. No hay todavía motor integrado tocable.
 
+La [eliminación dinámica de incógnitas axiales](RESULTADOS-P7-axial-endpoint.md)
+conserva las 1153 coordenadas del coro y determina la dirección de la
+corrección de trabajo; el candidato ambiguo rechazado queda registrado.
+Contacto reutilizado y vuelo escalar: media **2,2314 ms**, P99 **3,7293 ms**,
+máximo **3,9336 ms**, primer ataque **3,7293 ms**; cero asignaciones.
+El control vectorial mide media 2,1953 ms: no se demuestra ventaja del vuelo
+escalar. **18 pruebas pasan**; estado a 250 ms con reiteración **0,3241655%**,
+ledger <3e−12. Todas las rutas siguen fallando los **2 ms** a 128 kHz/16,
+sin cuerpo/presión/pedales ni polifonía. Sigue reducir costo de campos y
+validar el bloque temporal antes de integrar el instrumento completo.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

@@ -309,3 +309,10 @@ El beneficio pequeño refuerza la necesidad de un cambio temporal más amplio:
 representar la respuesta transversal dentro del bloque y reducir el reloj
 necesario. La validación sigue limitada a este sostenido de 6 ms, sin contacto,
 cuerpo, presión, pedales o polifonía. No se integra ni instala en fábrica.
+
+La continuación del problema temporal se documenta en
+[colocación en el marco de interacción](RESULTADOS-P7-colocacion-interaccion.md).
+Representa ahora la evolución no lineal completa en nodos internos y pasa
+estado/energía a relojes menores; conserva este método como control congelado.
+Su media mejora 6,71–6,86× con igual duración física por buffer, pero todavía
+falla CPU y no amplía la aprobación al instrumento completo.

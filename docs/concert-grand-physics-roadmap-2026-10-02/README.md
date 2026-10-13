@@ -200,6 +200,19 @@ Presupuesto **0,125 ms** sigue rechazado. La
 conserva los dos ensayos; sigue reducir el reloj con una representación
 transversal interna antes de integración en el instrumento.
 
+La [colocación en el marco de interacción](RESULTADOS-P7-colocacion-interaccion.md)
+resuelve ahora el gradiente completo en los nodos temporales, con propagación
+lineal exacta de todos los modos. En C4 mixto/6 ms pasa estado y energía desde
+128 kHz/orden24 (**0,053051 %**); 256 kHz/16 da **0,040580 %**, y 512 kHz/8
+**0,044801 %**. El caso 128 kHz/16 se conserva rechazado: **23,275 %** pese a
+cerrar energía. Hay refinamiento de orden/reloj y control sin proyección
+energética. CPU se compara con **igual duración física** de 0,125 ms por
+buffer: control **636,447 ms**, nuevo 512 kHz/8 **92,823/94,812 ms** de media,
+mejora **6,86/6,71×**, cero asignaciones. Máximos **95,330/109,137 ms** aún
+fallan ampliamente el plazo. Pasan 20 pruebas actuales de fase/trayectoria;
+suite acumulada 46. Es un nuevo control experimental por flag, validado sólo
+en este sostenido; siguen costo/duración e integración antes del host tocable.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

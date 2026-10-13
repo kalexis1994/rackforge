@@ -1,0 +1,961 @@
+{
+  "stage": "full nonlinear gradient at interaction collocation nodes",
+  "source_sha256": {
+    "measure-concert-grand-native-strings.py": "cf5da1c3225751639e1fc7985a4892662edf18e4e777b4e175879e2e58b2a5a2",
+    "concert-grand-native-strings.rs": "52a26480a3943a6721c561f13b9a8b59ec1bd8946be2d28d3ba5ba5783366d79",
+    "concert_grand_native_strings.py": "4c0cae8d1155dab1a97c3ddbfa2afa6f6f08afb1e90167edbdfe7d14f78be450",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "concert-grand-phase-forces.rs": "bc0b26414bf85003642575a64062901779a7f25cb3884cea196e313a1d05be8c",
+    "concert-grand-phase-trajectory.rs": "4b7cedc2d1afbcb150f71111b77b9c869ec2cea4c88b53e1a41580d4bb665c63",
+    "measure-concert-grand-phase-trajectory.py": "22b26a4b6b57e1baf530c77153ba742e1ef1e27d220cfaf6fad697529d587324",
+    "concert_grand_phase_forces.py": "02854406da8aa6516c311fac97445be44dcf2d23fcebc3eb8dff82b5c4d902c8",
+    "tests/test_concert_phase_trajectory.py": "bc3aa507bd7c507f5990bdab05e30ad8f44231005de15c57e828c4a791f5eb22",
+    "measure-concert-grand-phase-wire-roots.py": "bd33932a33f428ba9fae756286c8c397cef93bce6f84c24505ffb47a94c977f2",
+    "audit-concert-grand-phase-wire-energy.py": "1af89c60a2addb47f1f112bdc2247c39b4f77104a5679d803240a099e18608ac",
+    "measure-concert-grand-axial-waveform.py": "a18c063e45fa1eed0735c64a12a3a4f63ea486cc15ac43cd7c4ee8a715029d60",
+    "concert-grand-collocation.rs": "a78b52f4457cc3a2c0b4dd3543afeb37ea16964d90d655b729e3df4e7cf3165e",
+    "measure-concert-grand-collocation.py": "443cd40761a9e90bc5ab8fd73f02e7b90930fd5ad89bd5276ff8abfc0565bc1f"
+  },
+  "reference_ref": "aff59a7e",
+  "reference_sources_authenticated_from_git": true,
+  "reference_report_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-13\\phase-transverse-gradient.json",
+  "reference_report_sha256": "31a1f10d2c6637097e2975524f967a7c428f6e040b788ba8448351b6af38cb84",
+  "reference_reintegrated": false,
+  "baseline_case": {
+    "label": "optimized-trajectory",
+    "command": [
+      "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\trajectory.exe",
+      "local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+      "verify",
+      "1",
+      "8"
+    ],
+    "elapsed_s": 28.996189899975434,
+    "executable_sha256": "064710cb77b09ae34fc83ba2701556beecddd30e037a12e3b46b4c9ea4782487",
+    "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\coast-input.bin",
+    "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+    "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\optimized-trajectory.json",
+    "result_sha256": "53e642a2dde12846f31f86891514dd7391cd794048e44bddd9f4bca251467695",
+    "completed": true,
+    "failure": null,
+    "work_relative_max": 1.1024233188834219e-10,
+    "raw_local_work_relative_max": 1.1669637860576816e-06,
+    "numerical_lambda_abs_max": 8.582022290078065e-07,
+    "midpoint_residual_relative_max": 2.7581560118347462e-12,
+    "maximum_iterations": 4,
+    "allocations": 0,
+    "known_prepared_bytes": 16321032,
+    "per_wire_energy_constraint": true,
+    "initial_wire_energy_j": [
+      0.1311418515209339,
+      0.1725064981878933,
+      0.15842084830444134
+    ],
+    "final_wire_energy_j": [
+      0.1311418514965685,
+      0.17250649818081554,
+      0.1584208482849451
+    ],
+    "wire_energy_relative": [
+      1.8579422438415195e-10,
+      4.1028918464295536e-11,
+      1.2306611261112137e-10
+    ],
+    "maximum_wire_energy_relative": 1.8579422438415195e-10,
+    "per_wire_1e9_gate_passed": true,
+    "total_work_1e9_gate_passed": true,
+    "state_relative": 0.006387405822234104,
+    "baseline_state_relative": 0.0,
+    "baseline_1e11_gate_passed": true,
+    "frozen_baseline_arrays_and_work_equal": true,
+    "scoped_coast_state_and_energy_passed": true
+  },
+  "baseline_executable_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\trajectory.exe",
+  "baseline_executable_sha256": "064710cb77b09ae34fc83ba2701556beecddd30e037a12e3b46b4c9ea4782487",
+  "executable_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+  "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+  "teacher_cases": [
+    {
+      "label": "teacher-8192000",
+      "command": [
+        "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-checked16-final-2026-10-13\\native-strings.exe",
+        "local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-8192000.bin",
+        "verify"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-8192000.bin",
+      "coefficient_sha256": "dd1314547e5a7b6d57b6a35e42ac20275277a6df56588ea062eec5b517e205e0",
+      "elapsed_s": 8.20455010002479,
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\teacher-8192000.json",
+      "result_sha256": "35d9449baefb17314f0999c59e632afe52d5321ec5ccefeb410b00eb49f8c1a7",
+      "completed": true,
+      "work_relative_max": 1.0463846742071121e-13,
+      "maximum_iterations": 4,
+      "work_1e9_gate_passed": true,
+      "rate_hz": 8192000,
+      "force_peak_n": 0,
+      "checked_reference": true,
+      "reference_local_work_max": 9.97128908831154e-15
+    },
+    {
+      "label": "teacher-16384000",
+      "command": [
+        "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-checked16-final-2026-10-13\\native-strings.exe",
+        "local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-16384000.bin",
+        "verify"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\coast-16384000.bin",
+      "coefficient_sha256": "4407cc5595458584bc44573145799349419978bf9b65ece6bfe849de4bfef868",
+      "elapsed_s": 13.388942599995062,
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\teacher-16384000.json",
+      "result_sha256": "339df4414ea6f2258f5e4b4bf1fbb88a50b38f424fd2553138abb84ea4b086e2",
+      "completed": true,
+      "work_relative_max": 8.972958819348933e-13,
+      "maximum_iterations": 3,
+      "work_1e9_gate_passed": true,
+      "rate_hz": 16384000,
+      "force_peak_n": 0,
+      "checked_reference": true,
+      "reference_local_work_max": 3.7242164064748625e-15
+    }
+  ],
+  "reference_pair_passed": true,
+  "reference_state_refinement_relative": 0.0011846656607777905,
+  "note": 60,
+  "seed": 83,
+  "transverse": 96,
+  "axial": 192,
+  "duration_s": 0.006,
+  "contact_included": false,
+  "pressure_included": false,
+  "pedals_included": false,
+  "physical_dissipation": false,
+  "full_piano_realtime": false,
+  "global_physics_approved": false,
+  "factory_updated": false,
+  "heat_j": 0.0,
+  "cases": [
+    {
+      "label": "preserved-phase-control",
+      "rate_hz": 2048000,
+      "order": 8,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\preserved-phase-control.bin",
+        "verify",
+        "1",
+        "8"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\preserved-phase-control.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\preserved-phase-control.json",
+      "result_sha256": "f668d8977d4dbcc533c82c9a2a5e4c970a0bde090e49d9f6dced5294b129879b",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 28.8086363,
+      "work_relative_max": 1.1024233188834219e-10,
+      "raw_local_work_relative_max": 1.1669637860576816e-06,
+      "numerical_lambda_abs_max": 8.582022290078065e-07,
+      "midpoint_residual_relative_max": 2.7581560118347462e-12,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16321032,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418514965685,
+        0.17250649818081554,
+        0.1584208482849451
+      ],
+      "wire_energy_relative": [
+        1.8579422438415195e-10,
+        4.1028918464295536e-11,
+        1.2306611261112137e-10
+      ],
+      "maximum_wire_energy_relative": 1.8579422438415195e-10,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.006387405822234104,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": true,
+      "frozen_phase_arrays_and_work_equal": true
+    },
+    {
+      "label": "collocation-128000-O16",
+      "rate_hz": 128000,
+      "order": 16,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-128000-O16.bin",
+        "verify",
+        "1",
+        "16",
+        "--collocation"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-128000-O16.bin",
+      "coefficient_sha256": "29b7bd1c96841155984f468d0e783be1c049942da2b9e12be17d8b34b137d231",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-128000-O16.json",
+      "result_sha256": "880927c33995baa6caed925500b459a95e63f439b391dfc0cf4ba97cfecff76f",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 2.7485361,
+      "work_relative_max": 2.979373125182136e-13,
+      "raw_local_work_relative_max": 0.000252977223158244,
+      "numerical_lambda_abs_max": 0.00015878680653448637,
+      "midpoint_residual_relative_max": 9.973982528389558e-12,
+      "maximum_iterations": 8,
+      "allocations": 0,
+      "known_prepared_bytes": 3538944,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.13114185152096502,
+        0.1725064981879455,
+        0.1584208483044947
+      ],
+      "wire_energy_relative": [
+        2.3725454463446663e-13,
+        3.026450497889825e-13,
+        3.3691254957986524e-13
+      ],
+      "maximum_wire_energy_relative": 3.3691254957986524e-13,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.23274959493672512,
+      "state_1percent_gate_passed": false,
+      "scoped_coast_state_and_energy_passed": false
+    },
+    {
+      "label": "collocation-128000-O24",
+      "rate_hz": 128000,
+      "order": 24,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-128000-O24.bin",
+        "verify",
+        "1",
+        "24",
+        "--collocation"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-128000-O24.bin",
+      "coefficient_sha256": "29b7bd1c96841155984f468d0e783be1c049942da2b9e12be17d8b34b137d231",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-128000-O24.json",
+      "result_sha256": "ff51a765732f7b13a826ec246b528859de6ff7efa473d3b7bfcd05eb190db5a1",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 4.4016383,
+      "work_relative_max": 1.0968417997142299e-13,
+      "raw_local_work_relative_max": 7.313912086054682e-08,
+      "numerical_lambda_abs_max": 5.40585433780353e-08,
+      "midpoint_residual_relative_max": 2.450643563263502e-12,
+      "maximum_iterations": 8,
+      "allocations": 0,
+      "known_prepared_bytes": 7077888,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.13114185152094018,
+        0.17250649818792435,
+        0.15842084830445427
+      ],
+      "wire_energy_relative": [
+        4.7831870729160986e-14,
+        1.8004242993826232e-13,
+        8.164391477078378e-14
+      ],
+      "maximum_wire_energy_relative": 1.8004242993826232e-13,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.0005305093200661604,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": true
+    },
+    {
+      "label": "collocation-128000-O32",
+      "rate_hz": 128000,
+      "order": 32,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-128000-O32.bin",
+        "verify",
+        "1",
+        "32",
+        "--collocation"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-128000-O32.bin",
+      "coefficient_sha256": "29b7bd1c96841155984f468d0e783be1c049942da2b9e12be17d8b34b137d231",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-128000-O32.json",
+      "result_sha256": "23abb9702e88fd47765f1fb95d6b743a1c703cbb26ffc5844c8ee3c3fa82fcaa",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 6.4619403,
+      "work_relative_max": 3.4046546115992633e-13,
+      "raw_local_work_relative_max": 1.6886318003045661e-12,
+      "numerical_lambda_abs_max": 1.7849707821393935e-12,
+      "midpoint_residual_relative_max": 2.846494563772256e-12,
+      "maximum_iterations": 8,
+      "allocations": 0,
+      "known_prepared_bytes": 11796480,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.13114185152104754,
+        0.17250649818802793,
+        0.15842084830435044
+      ],
+      "wire_energy_relative": [
+        8.664764547132082e-13,
+        7.805056547189549e-13,
+        5.737850233354439e-13
+      ],
+      "maximum_wire_energy_relative": 8.664764547132082e-13,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.0004055327178716592,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": true
+    },
+    {
+      "label": "collocation-256000-O16",
+      "rate_hz": 256000,
+      "order": 16,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-256000-O16.bin",
+        "verify",
+        "1",
+        "16",
+        "--collocation"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-256000-O16.bin",
+      "coefficient_sha256": "7c1e9c4778aec8bf3178b3c1d8b1784c8547f2d58f841db6f069facd0f7acd7c",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-256000-O16.json",
+      "result_sha256": "e2da650403cb357e36302c687ee09b7d1301186e9ca954324983c377e5ea0d70",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 4.714918,
+      "work_relative_max": 5.706460622828687e-14,
+      "raw_local_work_relative_max": 2.3749195874493676e-10,
+      "numerical_lambda_abs_max": 1.9346698961948817e-10,
+      "midpoint_residual_relative_max": 9.994852562553974e-12,
+      "maximum_iterations": 7,
+      "allocations": 0,
+      "known_prepared_bytes": 3538944,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418515209344,
+        0.17250649818789415,
+        0.15842084830442793
+      ],
+      "wire_energy_relative": [
+        3.809618022676538e-15,
+        4.987770623848197e-15,
+        8.46223408461128e-14
+      ],
+      "maximum_wire_energy_relative": 8.46223408461128e-14,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.0004057996711849589,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": true
+    },
+    {
+      "label": "collocation-256000-O24",
+      "rate_hz": 256000,
+      "order": 24,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-256000-O24.bin",
+        "verify",
+        "1",
+        "24",
+        "--collocation"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-256000-O24.bin",
+      "coefficient_sha256": "7c1e9c4778aec8bf3178b3c1d8b1784c8547f2d58f841db6f069facd0f7acd7c",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-256000-O24.json",
+      "result_sha256": "89a686ed632568455a4f210d590041876bc999d20c038dcdedf566997663f591",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 7.5023716,
+      "work_relative_max": 2.114393830774419e-14,
+      "raw_local_work_relative_max": 4.084624445814212e-15,
+      "numerical_lambda_abs_max": 0,
+      "midpoint_residual_relative_max": 9.998193991130312e-12,
+      "maximum_iterations": 7,
+      "allocations": 0,
+      "known_prepared_bytes": 7077888,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.131141851520931,
+        0.17250649818790004,
+        0.15842084830444614
+      ],
+      "wire_energy_relative": [
+        2.2222771798946475e-14,
+        3.909768585790683e-14,
+        3.030986535481887e-14
+      ],
+      "maximum_wire_energy_relative": 3.909768585790683e-14,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.0004055236755621608,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": true
+    },
+    {
+      "label": "collocation-512000-O8",
+      "rate_hz": 512000,
+      "order": 8,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-512000-O8.bin",
+        "verify",
+        "1",
+        "8",
+        "--collocation"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-512000-O8.bin",
+      "coefficient_sha256": "0c6403d353b811c1de736a76d97dcc2f7a07c4f8b79766c8221785798906ca32",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-512000-O8.json",
+      "result_sha256": "ad042ef4d786061d60cb8009cb543ce90c74883dc7587a41d2dde707b044c992",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 4.1914774,
+      "work_relative_max": 6.355195093634476e-14,
+      "raw_local_work_relative_max": 2.41926413254133e-08,
+      "numerical_lambda_abs_max": 1.675624517936225e-08,
+      "midpoint_residual_relative_max": 5.1534632983940495e-12,
+      "maximum_iterations": 6,
+      "allocations": 0,
+      "known_prepared_bytes": 1179648,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.13114185152094,
+        0.17250649818790667,
+        0.15842084830445016
+      ],
+      "wire_energy_relative": [
+        4.635035260923122e-14,
+        7.755178840951067e-14,
+        5.5714087762036996e-14
+      ],
+      "maximum_wire_energy_relative": 7.755178840951067e-14,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.0004480093238774987,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": true
+    },
+    {
+      "label": "collocation-512000-O16",
+      "rate_hz": 512000,
+      "order": 16,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-512000-O16.bin",
+        "verify",
+        "1",
+        "16",
+        "--collocation"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-512000-O16.bin",
+      "coefficient_sha256": "0c6403d353b811c1de736a76d97dcc2f7a07c4f8b79766c8221785798906ca32",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-512000-O16.json",
+      "result_sha256": "19c7d848e893995057e23eaad519be80aaea6e708767164330daa1465078678e",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 8.3498349,
+      "work_relative_max": 2.2105026412641653e-14,
+      "raw_local_work_relative_max": 4.084624445814277e-15,
+      "numerical_lambda_abs_max": 0,
+      "midpoint_residual_relative_max": 7.634357617805134e-12,
+      "maximum_iterations": 6,
+      "allocations": 0,
+      "known_prepared_bytes": 3538944,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.13114185152094082,
+        0.17250649818787903,
+        0.1584208483044389
+      ],
+      "wire_energy_relative": [
+        5.269971598035878e-14,
+        8.270045485993462e-14,
+        1.541773497817376e-14
+      ],
+      "maximum_wire_energy_relative": 8.270045485993462e-14,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.00040552367518728724,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": true
+    },
+    {
+      "label": "unconstrained-256000-O24",
+      "rate_hz": 256000,
+      "order": 24,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\unconstrained-256000-O24.bin",
+        "verify",
+        "1",
+        "24",
+        "--collocation",
+        "--unconstrained"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\unconstrained-256000-O24.bin",
+      "coefficient_sha256": "7c1e9c4778aec8bf3178b3c1d8b1784c8547f2d58f841db6f069facd0f7acd7c",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\unconstrained-256000-O24.json",
+      "result_sha256": "f4ad751bb800cae6d23ee3b03753c1b209c032a6344b35e018807258f06c6f6f",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 7.4974871,
+      "work_relative_max": 2.114393830774419e-14,
+      "raw_local_work_relative_max": 4.084624445814212e-15,
+      "numerical_lambda_abs_max": 0,
+      "midpoint_residual_relative_max": 9.998193991130312e-12,
+      "maximum_iterations": 7,
+      "allocations": 0,
+      "known_prepared_bytes": 7077888,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": false,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.131141851520931,
+        0.17250649818790004,
+        0.15842084830444614
+      ],
+      "wire_energy_relative": [
+        2.2222771798946475e-14,
+        3.909768585790683e-14,
+        3.030986535481887e-14
+      ],
+      "maximum_wire_energy_relative": 3.909768585790683e-14,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "state_relative": 0.0004055236755621608,
+      "state_1percent_gate_passed": true,
+      "scoped_coast_state_and_energy_passed": true
+    }
+  ],
+  "benchmarks": [
+    {
+      "label": "frozen-phase-benchmark",
+      "rate_hz": 2048000,
+      "order": 8,
+      "frames": 1,
+      "command": [
+        "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-transverse-gradient-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\frozen-phase-benchmark.bin",
+        "bench",
+        "1",
+        "8",
+        "8"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\frozen-phase-benchmark.bin",
+      "coefficient_sha256": "35954a3378628acfb55abf3541952bf2938dd8b9c64da135bc6e6e92ead560e4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\frozen-phase-benchmark.json",
+      "result_sha256": "10ae6b8bfe814637e56933ea7d99481c33cccc78648f7d31651a908d1f9de373",
+      "executable_sha256": "064710cb77b09ae34fc83ba2701556beecddd30e037a12e3b46b4c9ea4782487",
+      "completed": true,
+      "failure": null,
+      "seconds": 5.0915844,
+      "work_relative_max": 1.7530006761303503e-11,
+      "raw_local_work_relative_max": 1.1669637860576816e-06,
+      "numerical_lambda_abs_max": 8.582022290078065e-07,
+      "midpoint_residual_relative_max": 2.7581560118347462e-12,
+      "maximum_iterations": 4,
+      "allocations": 0,
+      "known_prepared_bytes": 16321032,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418515167017,
+        0.1725064981868405,
+        0.15842084830162595
+      ],
+      "wire_energy_relative": [
+        3.227190920643007e-11,
+        6.102939597844708e-12,
+        1.77715675853529e-11
+      ],
+      "maximum_wire_energy_relative": 3.227190920643007e-11,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "benchmark": {
+        "buffers": 8,
+        "mean_ms": 636.447425,
+        "p99_ms": 687.5189,
+        "max_ms": 687.5189,
+        "allocations": 0,
+        "microframes_per_buffer": 256,
+        "deadline_ms": 0.125,
+        "physical_duration_s": 0.001,
+        "matched_physical_duration": true,
+        "isolated_component_budget_passed": false
+      }
+    },
+    {
+      "label": "collocation-benchmark-128000-O24",
+      "rate_hz": 128000,
+      "order": 24,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-benchmark-128000-O24.bin",
+        "bench",
+        "1",
+        "24",
+        "8",
+        "--collocation",
+        "--buffer-microframes=16"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-benchmark-128000-O24.bin",
+      "coefficient_sha256": "29b7bd1c96841155984f468d0e783be1c049942da2b9e12be17d8b34b137d231",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-benchmark-128000-O24.json",
+      "result_sha256": "409ae2e00d1af64720b53ab600d0b85dbfdb0e5d3672437c55b082e08ad68ed3",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 0.8440684,
+      "work_relative_max": 2.4748018701109677e-14,
+      "raw_local_work_relative_max": 7.313912086054682e-08,
+      "numerical_lambda_abs_max": 5.40585433780353e-08,
+      "midpoint_residual_relative_max": 2.2279044993919706e-12,
+      "maximum_iterations": 8,
+      "allocations": 0,
+      "known_prepared_bytes": 7077888,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.13114185152093538,
+        0.17250649818789865,
+        0.158420848304445
+      ],
+      "wire_energy_relative": [
+        1.1217208622325363e-14,
+        3.1052894529119415e-14,
+        2.312660246726064e-14
+      ],
+      "maximum_wire_energy_relative": 3.1052894529119415e-14,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "benchmark": {
+        "buffers": 8,
+        "mean_ms": 105.507825,
+        "p99_ms": 149.57770000000002,
+        "max_ms": 149.57770000000002,
+        "allocations": 0,
+        "microframes_per_buffer": 16,
+        "deadline_ms": 0.125,
+        "physical_duration_s": 0.001,
+        "matched_physical_duration": true,
+        "isolated_component_budget_passed": false
+      }
+    },
+    {
+      "label": "collocation-benchmark-256000-O16",
+      "rate_hz": 256000,
+      "order": 16,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-benchmark-256000-O16.bin",
+        "bench",
+        "1",
+        "16",
+        "8",
+        "--collocation",
+        "--buffer-microframes=32"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-benchmark-256000-O16.bin",
+      "coefficient_sha256": "7c1e9c4778aec8bf3178b3c1d8b1784c8547f2d58f841db6f069facd0f7acd7c",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-benchmark-256000-O16.json",
+      "result_sha256": "295ac311ce3a6dfd3264c8089e29ca67b221a4853bef157d51b4f56c92ca171f",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 0.8640954,
+      "work_relative_max": 4.324896472038584e-15,
+      "raw_local_work_relative_max": 2.3749195874493676e-10,
+      "numerical_lambda_abs_max": 1.9346698961948817e-10,
+      "midpoint_residual_relative_max": 9.994852562553974e-12,
+      "maximum_iterations": 7,
+      "allocations": 0,
+      "known_prepared_bytes": 3538944,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.13114185152093263,
+        0.17250649818789443,
+        0.15842084830444064
+      ],
+      "wire_energy_relative": [
+        9.735690502395598e-15,
+        6.5967288896056796e-15,
+        4.380038346072091e-15
+      ],
+      "maximum_wire_energy_relative": 9.735690502395598e-15,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "benchmark": {
+        "buffers": 8,
+        "mean_ms": 108.011225,
+        "p99_ms": 116.9773,
+        "max_ms": 116.9773,
+        "allocations": 0,
+        "microframes_per_buffer": 32,
+        "deadline_ms": 0.125,
+        "physical_duration_s": 0.001,
+        "matched_physical_duration": true,
+        "isolated_component_budget_passed": false
+      }
+    },
+    {
+      "label": "collocation-benchmark-512000-O8",
+      "rate_hz": 512000,
+      "order": 8,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-benchmark-512000-O8.bin",
+        "bench",
+        "1",
+        "8",
+        "8",
+        "--collocation",
+        "--buffer-microframes=64"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-benchmark-512000-O8.bin",
+      "coefficient_sha256": "0c6403d353b811c1de736a76d97dcc2f7a07c4f8b79766c8221785798906ca32",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-benchmark-512000-O8.json",
+      "result_sha256": "937c9bdd46b1fb4cb5905e3a4bb2633b63a8ca3b65c4bd296611afd42eaebd96",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 0.7425881,
+      "work_relative_max": 1.1533057258769558e-14,
+      "raw_local_work_relative_max": 2.41926413254133e-08,
+      "numerical_lambda_abs_max": 1.6175221444829912e-08,
+      "midpoint_residual_relative_max": 5.1534632983940495e-12,
+      "maximum_iterations": 6,
+      "allocations": 0,
+      "known_prepared_bytes": 1179648,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418515209352,
+        0.17250649818789596,
+        0.15842084830444142
+      ],
+      "wire_energy_relative": [
+        9.735690502395598e-15,
+        1.5445999351271835e-14,
+        5.256046015286509e-16
+      ],
+      "maximum_wire_energy_relative": 1.5445999351271835e-14,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "benchmark": {
+        "buffers": 8,
+        "mean_ms": 92.82300000000001,
+        "p99_ms": 95.3296,
+        "max_ms": 95.3296,
+        "allocations": 0,
+        "microframes_per_buffer": 64,
+        "deadline_ms": 0.125,
+        "physical_duration_s": 0.001,
+        "matched_physical_duration": true,
+        "isolated_component_budget_passed": false
+      }
+    },
+    {
+      "label": "collocation-repeat-512000-O8",
+      "rate_hz": 512000,
+      "order": 8,
+      "frames": 1,
+      "command": [
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\trajectory.exe",
+        "local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-repeat-512000-O8.bin",
+        "bench",
+        "1",
+        "8",
+        "8",
+        "--collocation",
+        "--buffer-microframes=64"
+      ],
+      "coefficient_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-repeat-512000-O8.bin",
+      "coefficient_sha256": "0c6403d353b811c1de736a76d97dcc2f7a07c4f8b79766c8221785798906ca32",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-collocation-2026-10-13\\collocation-repeat-512000-O8.json",
+      "result_sha256": "cd32bb19281c05ae2c2ca2aacdaee69b0e1ef0569d95c26bfbb9a791add0fd3c",
+      "executable_sha256": "8a2ac16a5917ddab51af4af1cbf873810a54451e63d89c2519fab706b09e5918",
+      "completed": true,
+      "failure": null,
+      "seconds": 0.7584978,
+      "work_relative_max": 1.1533057258769558e-14,
+      "raw_local_work_relative_max": 2.41926413254133e-08,
+      "numerical_lambda_abs_max": 1.6175221444829912e-08,
+      "midpoint_residual_relative_max": 5.1534632983940495e-12,
+      "maximum_iterations": 6,
+      "allocations": 0,
+      "known_prepared_bytes": 1179648,
+      "per_wire_energy_constraint": true,
+      "numerical_energy_constraint": true,
+      "initial_wire_energy_j": [
+        0.1311418515209339,
+        0.1725064981878933,
+        0.15842084830444134
+      ],
+      "final_wire_energy_j": [
+        0.1311418515209352,
+        0.17250649818789596,
+        0.15842084830444142
+      ],
+      "wire_energy_relative": [
+        9.735690502395598e-15,
+        1.5445999351271835e-14,
+        5.256046015286509e-16
+      ],
+      "maximum_wire_energy_relative": 1.5445999351271835e-14,
+      "per_wire_1e9_gate_passed": true,
+      "total_work_1e9_gate_passed": true,
+      "benchmark": {
+        "buffers": 8,
+        "mean_ms": 94.81173749999999,
+        "p99_ms": 109.1369,
+        "max_ms": 109.1369,
+        "allocations": 0,
+        "microframes_per_buffer": 64,
+        "deadline_ms": 0.125,
+        "physical_duration_s": 0.001,
+        "matched_physical_duration": true,
+        "isolated_component_budget_passed": false
+      }
+    }
+  ],
+  "seconds": 86.94702719990164,
+  "collocation_refinement_pairs": [
+    {
+      "label": "128k-order24-to32",
+      "left": "collocation-128000-O24",
+      "right": "collocation-128000-O32",
+      "state_relative": 0.0002474776633651844
+    },
+    {
+      "label": "256k-order16-to24",
+      "left": "collocation-256000-O16",
+      "right": "collocation-256000-O24",
+      "state_relative": 9.080143512753891e-07
+    },
+    {
+      "label": "512k-order8-to16",
+      "left": "collocation-512000-O8",
+      "right": "collocation-512000-O16",
+      "state_relative": 9.41465816783594e-05
+    },
+    {
+      "label": "128k-to256k",
+      "left": "collocation-128000-O32",
+      "right": "collocation-256000-O24",
+      "state_relative": 1.1919372110683792e-08
+    },
+    {
+      "label": "256k-to512k",
+      "left": "collocation-256000-O24",
+      "right": "collocation-512000-O16",
+      "state_relative": 7.007999062412376e-13
+    }
+  ],
+  "sources_unchanged": true,
+  "reference_report_unchanged": true
+}

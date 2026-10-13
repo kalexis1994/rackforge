@@ -72,6 +72,11 @@ class PhaseTrajectoryTests(unittest.TestCase):
         np.testing.assert_allclose(native['v'][:-1],expected_v,rtol=1e-10,atol=1e-14)
         self.assertEqual(native['numerical_lambda_abs_max'],0.)
         self.assertEqual(native['maximum_iterations'],1);self.assertEqual(native['allocations'],0)
+        collocation=self.run_native(f,'verify',1,8,'--collocation')
+        np.testing.assert_allclose(collocation['q'][:-1],expected_q,rtol=1e-10,atol=1e-18)
+        np.testing.assert_allclose(collocation['v'][:-1],expected_v,rtol=1e-10,atol=1e-14)
+        self.assertEqual(collocation['numerical_lambda_abs_max'],0.)
+        self.assertEqual(collocation['maximum_iterations'],1);self.assertEqual(collocation['allocations'],0)
 
     def test_failed_coupled_iteration_does_not_publish_partial_state(self):
         f=self.coast(12,.000125)
@@ -152,6 +157,57 @@ class PhaseTrajectoryTests(unittest.TestCase):
             for key in ['q','v','work_relative_max','numerical_lambda_abs_max','maximum_iterations']:
                 self.assertEqual(fast[key],full[key],key)
             self.assertEqual(fast['allocations'],0)
+
+    def test_collocation_cardinal_integrals_match_polynomial_moments(self):
+        for order in [8,16,32]:
+            data=self.run_native(self.coast(),'collocation-rule',1,order)
+            rule=np.asarray(data['rule']);t=rule[:,0]/data['h']
+            a=np.asarray(data['matrix']).reshape(order,order)/data['h']
+            for degree in range(order):
+                np.testing.assert_allclose(a @ t**degree,t**(degree+1)/(degree+1),rtol=0,atol=3e-14)
+
+    def test_collocation_matches_continuous_ode_without_energy_projection(self):
+        f=self.coast(4,.0005);ns=len(f['q'])-1;core=f['system'].string
+        def derivative(_t,y):
+            return np.r_[y[ns:],-core.gradient_hessian(np.r_[y[:ns],0.],False)[:ns]]
+        ode=solve_ivp(derivative,(0,.0005),np.r_[f['q'][:-1],f['v'][:-1]],
+            method='DOP853',rtol=1e-12,atol=1e-15,max_step=1/2048000)
+        self.assertTrue(ode.success)
+        omega=np.sqrt(np.diag(core.K))[f['keep'][:-1]]
+        expected=np.r_[omega*ode.y[:ns,-1],ode.y[ns:,-1]]
+        errors=[]
+        for frames in [8,4,2]:
+            native=self.run_native(f,'verify',frames,8,'--collocation','--unconstrained')
+            self.assertTrue(native['completed']);self.assertTrue(native['temporal_collocation'])
+            errors.append(relative(np.r_[omega*np.asarray(native['q'])[:-1],native['v'][:-1]],expected))
+            self.assertEqual(native['numerical_lambda_abs_max'],0.)
+            self.assertEqual(native['allocations'],0)
+        self.assertTrue(errors[0]>errors[1]>errors[2],errors)
+        self.assertLess(errors[-1],1e-8)
+
+    def test_collocation_failure_is_atomic_and_empty_wire_is_invariant(self):
+        f=self.coast(12,.000125)
+        failed=self.run_native(f,'verify',1,8,'--collocation','--iteration-limit=1')
+        self.assertFalse(failed['completed']);self.assertEqual(failed['completed_microframes'],0)
+        np.testing.assert_array_equal(failed['q'],f['q']);np.testing.assert_array_equal(failed['v'],f['v'])
+        self.assertEqual(failed['allocations'],0)
+        width=48;f['q'][:width]=0.;f['v'][:width]=0.
+        native=self.run_native(f,'verify',1,8,'--collocation')
+        self.assertTrue(native['completed'])
+        np.testing.assert_array_equal(native['q'][:width],np.zeros(width))
+        np.testing.assert_array_equal(native['v'][:width],np.zeros(width))
+        initial=self.audit.wire_energies(f,f['q'],f['v'])
+        final=self.audit.wire_energies(f,native['q'],native['v'])
+        self.assertLess(max(abs(final-initial)/np.maximum(initial,1e-30)),1e-9)
+
+    def test_collocation_benchmark_uses_requested_physical_duration(self):
+        f=self.coast(4,.000125)
+        verify=self.run_native(f,'verify',1,8,'--collocation')
+        bench=self.run_native(f,'bench',1,8,'8','--collocation','--buffer-microframes=2')
+        self.assertTrue(bench['completed']);self.assertEqual(bench['completed_microframes'],16)
+        self.assertEqual(bench['buffers'],8);self.assertEqual(bench['buffer_microframes'],2)
+        self.assertEqual(bench['allocations'],0)
+        np.testing.assert_array_equal(bench['q'],verify['q']);np.testing.assert_array_equal(bench['v'],verify['v'])
 
     def test_coupled_trajectory_refines_against_continuous_ode(self):
         f=self.coast(4,.0005);ns=len(f['q'])-1;core=f['system'].string

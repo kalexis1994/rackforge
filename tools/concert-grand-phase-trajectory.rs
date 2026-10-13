@@ -1,6 +1,8 @@
 //! Experimental fixed-bridge string trajectory, without hammer/contact.
 //! Averaged interaction midpoint with an explicit numerical energy constraint.
 //! Temporal accuracy must be checked independently; closed energy is not proof.
+#[path = "concert-grand-collocation.rs"]
+mod collocation;
 #[allow(dead_code)]
 #[path = "concert-grand-native-strings.rs"]
 mod native;
@@ -99,6 +101,7 @@ struct Stats {
     residual: f64,
 }
 struct Trajectory {
+    collocation: Option<collocation::Collocation>,
     wires: Vec<Wire>,
     plans: Vec<PhaseQuadratic>,
     waves: Vec<AxialWaveform>,
@@ -143,6 +146,7 @@ impl Trajectory {
         nt: usize,
         nl: usize,
         forced_axial: bool,
+        use_collocation: bool,
     ) -> Self {
         let omega2 = wires
             .iter()
@@ -159,11 +163,19 @@ impl Trajectory {
             .iter()
             .map(|w| (w.sqrt() * h).sin() / w.sqrt())
             .collect::<Vec<_>>();
-        let transverse_indices = (0..3)
-            .flat_map(|i| i * width + nl..(i + 1) * width)
-            .collect::<Vec<_>>();
+        let transverse_indices = if use_collocation {
+            Vec::new()
+        } else {
+            (0..3)
+                .flat_map(|i| i * width + nl..(i + 1) * width)
+                .collect::<Vec<_>>()
+        };
         let mut sample_transfer = Vec::with_capacity(order * transverse_indices.len());
-        let rule = gauss(order, h);
+        let rule = if use_collocation {
+            Vec::new()
+        } else {
+            gauss(order, h)
+        };
         let waves = if forced_axial {
             plans
                 .iter()
@@ -181,6 +193,7 @@ impl Trajectory {
             }
         }
         Self {
+            collocation: use_collocation.then(|| collocation::Collocation::new(&omega2, h, order)),
             wires,
             plans,
             waves,
@@ -222,6 +235,11 @@ impl Trajectory {
         self.plans.iter().map(|p| p.prepared_bytes()).sum::<usize>()
             + self.sample_transfer.capacity() * std::mem::size_of::<[f64; 4]>()
             + self.waves.iter().map(|w| w.prepared_bytes()).sum::<usize>()
+            + self
+                .collocation
+                .as_ref()
+                .map(|c| c.prepared_bytes())
+                .unwrap_or(0)
     }
     fn project(&mut self, target: f64, mut lambda: f64) -> Result<(f64, f64), &'static str> {
         for _ in 0..12 {
@@ -307,6 +325,9 @@ impl Trajectory {
         Err("wire energy roots did not converge")
     }
     fn step(&mut self) -> Result<Stats, &'static str> {
+        if self.collocation.is_some() {
+            return self.step_collocation();
+        }
         let size = self.q.len();
         let width = self.wires[0].size();
         let start_energy = self.energy();
@@ -458,6 +479,65 @@ impl Trajectory {
         // No physical q/v is published before both conditions converge.
         Err("midpoint iteration did not converge")
     }
+    fn step_collocation(&mut self) -> Result<Stats, &'static str> {
+        let target = self.energy();
+        let target_wires = wire_energies(&mut self.wires, &self.omega2, &self.q, &self.v, None);
+        for j in 0..self.q.len() {
+            self.free_q[j] = self.c[j] * self.q[j] + self.s[j] * self.v[j];
+            self.free_v[j] = -self.omega2[j] * self.s[j] * self.q[j] + self.c[j] * self.v[j];
+        }
+        energy(
+            &mut self.wires,
+            &self.omega2,
+            &self.free_q,
+            &self.free_v,
+            Some(&mut self.gradient),
+        );
+        for j in 0..self.q.len() {
+            self.direction_q[j] = self.free_q[j] + self.gradient[j] / self.omega2[j];
+            self.direction_v[j] = self.free_v[j];
+        }
+        let (iterations, residual) = self.collocation.as_mut().unwrap().solve(
+            &mut self.wires,
+            &self.omega2,
+            &self.q,
+            &self.v,
+            &mut self.delta_q,
+            &mut self.delta_v,
+            self.limit,
+        )?;
+        for j in 0..self.q.len() {
+            self.raw_q[j] = self.free_q[j] + self.delta_q[j];
+            self.raw_v[j] = self.free_v[j] + self.delta_v[j];
+        }
+        let raw = energy(
+            &mut self.wires,
+            &self.omega2,
+            &self.raw_q,
+            &self.raw_v,
+            None,
+        );
+        let lambda = if !self.constrained {
+            self.end_q.copy_from_slice(&self.raw_q);
+            self.end_v.copy_from_slice(&self.raw_v);
+            0.
+        } else if self.per_wire_constraint {
+            self.project_wires(&target_wires, [0.; 3])?
+                .iter()
+                .map(|x| x.abs())
+                .fold(0., f64::max)
+        } else {
+            self.project(target, 0.)?.0.abs()
+        };
+        self.q.copy_from_slice(&self.end_q);
+        self.v.copy_from_slice(&self.end_v);
+        Ok(Stats {
+            iterations,
+            lambda,
+            residual,
+            raw_work_relative: (raw - target).abs() / target.abs().max(1e-30),
+        })
+    }
 }
 
 fn main() {
@@ -529,6 +609,17 @@ fn main() {
         .unwrap_or(64);
     assert!((1..=64).contains(&frames) && 256 % frames == 0 && p[4] > 0.);
     let h = frames as f64 / p[4];
+    if args.get(2).is_some_and(|x| x == "collocation-rule") {
+        let rule = gauss(order, h);
+        let serial_rule = rule.iter().map(|&(t, w)| [t, w]).collect::<Vec<_>>();
+        println!(
+            "{{\"rule\":{:?},\"matrix\":{:?},\"h\":{}}}",
+            serial_rule,
+            collocation::integration_matrix(&rule, h),
+            h
+        );
+        return;
+    }
     let root = (p[1] * p[0] / 2.).sqrt();
     let ku = (1..=nl)
         .map(|n| std::f64::consts::PI * n as f64 / p[0] / root)
@@ -536,20 +627,25 @@ fn main() {
     let kv = (1..=nt)
         .map(|n| std::f64::consts::PI * n as f64 / p[0] / root)
         .collect::<Vec<_>>();
-    let plans = wires
-        .iter()
-        .map(|w| {
-            PhaseQuadratic::new(
-                nt,
-                nl,
-                w.frequencies2().iter().map(|w| w.sqrt()).collect(),
-                &ku,
-                &kv,
-                ea * p[0],
-                h,
-            )
-        })
-        .collect::<Vec<_>>();
+    let use_collocation = args.iter().any(|x| x == "--collocation");
+    let plans = if use_collocation {
+        Vec::new()
+    } else {
+        wires
+            .iter()
+            .map(|w| {
+                PhaseQuadratic::new(
+                    nt,
+                    nl,
+                    w.frequencies2().iter().map(|w| w.sqrt()).collect(),
+                    &ku,
+                    &kv,
+                    ea * p[0],
+                    h,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
     if args.get(2).is_some_and(|x| x == "waveform") {
         let times = [0., 0.17 * h, 0.5 * h, 0.83 * h, h];
         let mut samples = vec![vec![0.; 3 * nl]; times.len()];
@@ -597,7 +693,8 @@ fn main() {
         order,
         nt,
         nl,
-        !args.iter().any(|x| x == "--no-axial-waveform"),
+        !use_collocation && !args.iter().any(|x| x == "--no-axial-waveform"),
+        use_collocation,
     );
     model.constrained = !args.iter().any(|x| x == "--unconstrained");
     model.transverse_sample_gradient = !args.iter().any(|x| x == "--full-sample-gradient");
@@ -633,8 +730,18 @@ fn main() {
         0
     };
     assert!(!bench || (8..=2048).contains(&buffers));
+    let buffer_microframes = args
+        .iter()
+        .find_map(|x| x.strip_prefix("--buffer-microframes="))
+        .map(|x| x.parse::<usize>().unwrap())
+        .unwrap_or(256);
+    assert!(
+        buffer_microframes >= frames
+            && buffer_microframes <= 4096
+            && buffer_microframes % frames == 0
+    );
     let total = if bench {
-        256 * buffers
+        buffer_microframes * buffers
     } else {
         (data[19 + 3 * nt] * p[4]).round() as usize
     };
@@ -661,7 +768,7 @@ fn main() {
                 completed += frames;
                 work_max =
                     work_max.max((model.energy() - initial).abs() / initial.abs().max(1e-30));
-                if bench && completed % 256 == 0 {
+                if bench && completed % buffer_microframes == 0 {
                     times.push(last.elapsed().as_secs_f64() * 1000.);
                     last = Instant::now();
                 }
@@ -689,5 +796,5 @@ fn main() {
     let failure_json = failure
         .map(|s| format!("{:?}", s))
         .unwrap_or_else(|| "null".to_string());
-    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"initial_wire_energy_j\":{:?},\"final_wire_energy_j\":{:?},\"per_wire_energy_constraint\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,initial_wires,final_wires,model.per_wire_constraint,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0));
+    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"initial_wire_energy_j\":{:?},\"final_wire_energy_j\":{:?},\"per_wire_energy_constraint\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false,\"temporal_collocation\":{},\"buffer_microframes\":{}}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,initial_wires,final_wires,model.per_wire_constraint,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0),model.collocation.is_some(),buffer_microframes);
 }

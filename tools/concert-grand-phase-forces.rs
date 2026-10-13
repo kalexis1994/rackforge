@@ -170,6 +170,88 @@ pub struct PhaseQuadratic {
     simd: bool,
 }
 impl PhaseQuadratic {
+    pub fn set_portable(&mut self) {
+        self.simd = false;
+    }
+    /// All axial modes remain dynamic. Separate high-frequency homogeneous
+    /// carriers from their slow forced part; low/resonant modes use sinc.
+    pub fn axial_waveform(&self, times: &[f64]) -> AxialWaveform {
+        let nl = self.axial_offsets.len() - 1;
+        let maximum_transverse = self.omega[nl..nl + self.nt]
+            .iter()
+            .copied()
+            .fold(0., f64::max);
+        let high = (0..nl)
+            .map(|j| self.omega[j] > 4. * maximum_transverse)
+            .collect::<Vec<_>>();
+        let mut initial_q = vec![[0.; 4]; self.axial.len()];
+        let mut initial_v = initial_q.clone();
+        let mut samples = Vec::with_capacity(times.len() * self.axial.len());
+        for &t in times {
+            for (output, range) in self.axial_offsets.windows(2).enumerate() {
+                for k in range[0]..range[1] {
+                    let [left, right] = self.axial.indices[k];
+                    let a = self.omega[left as usize];
+                    let b = self.omega[right as usize];
+                    let sum = a + b;
+                    let diff = a - b;
+                    let coefficient = self.axial.coefficients[k];
+                    let response;
+                    if high[output] {
+                        // omega_u > 2*max forcing frequency ensures both
+                        // denominators exceed 3/4 omega_u^2. No near-resonance
+                        // division or stiffness/mode removal occurs here.
+                        let w2 = self.omega[output] * self.omega[output];
+                        let ds = w2 - sum * sum;
+                        let dd = w2 - diff * diff;
+                        let (ss, cs) = (sum * t).sin_cos();
+                        let (sd, cd) = (diff * t).sin_cos();
+                        response = [
+                            -0.5 * coefficient * (cs / ds + cd / dd),
+                            -0.5 * coefficient * (ss / ds - sd / dd),
+                            -0.5 * coefficient * (ss / ds + sd / dd),
+                            -0.5 * coefficient * (cd / dd - cs / ds),
+                        ];
+                        initial_q[k] = [
+                            -0.5 * coefficient * (1. / ds + 1. / dd),
+                            0.,
+                            0.,
+                            -0.5 * coefficient * (1. / dd - 1. / ds),
+                        ];
+                        initial_v[k] = [
+                            0.,
+                            -0.5 * coefficient * (sum / ds - diff / dd),
+                            -0.5 * coefficient * (sum / ds + diff / dd),
+                            0.,
+                        ];
+                    } else {
+                        let rs = harmonic_response(self.omega[output], sum, t)[0];
+                        let rd = harmonic_response(self.omega[output], diff, t)[0];
+                        response = [
+                            -0.5 * coefficient * (rs[0] + rd[0]),
+                            -0.5 * coefficient * (rs[1] - rd[1]),
+                            -0.5 * coefficient * (rs[1] + rd[1]),
+                            -0.5 * coefficient * (rd[0] - rs[0]),
+                        ];
+                    }
+                    samples.push(response);
+                }
+            }
+        }
+        AxialWaveform {
+            nt: self.nt,
+            nl,
+            omega: self.omega.clone(),
+            indices: self.axial.indices.clone(),
+            offsets: self.axial_offsets.clone(),
+            initial_q,
+            initial_v,
+            samples,
+            high,
+            products: vec![[0.; 4]; self.axial.len()],
+            sample_count: times.len(),
+        }
+    }
     pub fn new(
         nt: usize,
         nl: usize,
@@ -183,6 +265,7 @@ impl PhaseQuadratic {
         assert!(ku.len() == nl && kv.len() == nt);
         assert!(h.is_finite() && h > 0. && ea_length.is_finite() && ea_length > 0.);
         assert!(omega.iter().all(|w| w.is_finite() && *w > 0.));
+        assert_eq!(&omega[nl..nl + nt], &omega[nl + nt..]);
         let mut axial = Vec::with_capacity(nt * nt);
         let mut transverse = Vec::with_capacity(2 * nt * nt - nt);
         // Integral cos(j*pi*x/L) cos(k*pi*x/L) cos(l*pi*x/L)
@@ -450,6 +533,81 @@ impl PhaseQuadratic {
             }
         }
     }
+}
+
+pub struct AxialWaveform {
+    nt: usize,
+    nl: usize,
+    omega: Vec<f64>,
+    indices: Vec<[u16; 2]>,
+    offsets: Vec<usize>,
+    initial_q: Vec<[f64; 4]>,
+    initial_v: Vec<[f64; 4]>,
+    samples: Vec<[f64; 4]>,
+    high: Vec<bool>,
+    products: Vec<[f64; 4]>,
+    sample_count: usize,
+}
+impl AxialWaveform {
+    pub fn prepared_bytes(&self) -> usize {
+        (self.initial_q.capacity()
+            + self.initial_v.capacity()
+            + self.samples.capacity()
+            + self.products.capacity())
+            * std::mem::size_of::<[f64; 4]>()
+            + self.omega.capacity() * 8
+            + self.indices.capacity() * 4
+            + self.offsets.capacity() * std::mem::size_of::<usize>()
+            + self.high.capacity() * std::mem::size_of::<bool>()
+    }
+    pub fn high_modes(&self) -> usize {
+        self.high.iter().filter(|x| **x).count()
+    }
+    pub fn set_carriers(&mut self, q: &[f64], v: &[f64]) {
+        assert!(q.len() == self.omega.len() && v.len() == q.len());
+        for (product, &[left, right]) in self.products.iter_mut().zip(&self.indices) {
+            let (left, right) = (left as usize, right as usize);
+            let (a, b) = (v[left] / self.omega[left], v[right] / self.omega[right]);
+            let (c, d) = (
+                v[left + self.nt] / self.omega[left + self.nt],
+                v[right + self.nt] / self.omega[right + self.nt],
+            );
+            *product = [
+                q[left] * q[right] + q[left + self.nt] * q[right + self.nt],
+                q[left] * b + q[left + self.nt] * d,
+                a * q[right] + c * q[right + self.nt],
+                a * b + c * d,
+            ];
+        }
+    }
+    fn dot(a: &[f64; 4], b: &[f64; 4]) -> f64 {
+        a.iter().zip(b).map(|(a, b)| a * b).sum()
+    }
+    pub fn initial_particular(&self, q: &mut [f64], v: &mut [f64]) {
+        assert!(q.len() == self.nl && v.len() == self.nl);
+        q.fill(0.);
+        v.fill(0.);
+        for (j, range) in self.offsets.windows(2).enumerate() {
+            for k in range[0]..range[1] {
+                q[j] += Self::dot(&self.initial_q[k], &self.products[k]);
+                v[j] += Self::dot(&self.initial_v[k], &self.products[k]);
+            }
+        }
+    }
+    pub fn sample(&self, index: usize, out: &mut [f64]) {
+        assert!(out.len() == self.nl && index < self.sample_count);
+        out.fill(0.);
+        let start = index * self.products.len();
+        for (j, range) in self.offsets.windows(2).enumerate() {
+            for k in range[0]..range[1] {
+                out[j] += Self::dot(&self.samples[start + k], &self.products[k]);
+            }
+        }
+    }
+}
+
+pub fn allocation_count() -> usize {
+    ALLOCATIONS.load(Ordering::Relaxed)
 }
 
 fn apply_choir(plans: &mut [PhaseQuadratic], q: &[f64], v: &[f64], dq: &mut [f64], dv: &mut [f64]) {

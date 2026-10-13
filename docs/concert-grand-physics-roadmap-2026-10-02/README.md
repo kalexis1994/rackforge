@@ -156,6 +156,21 @@ incluida la integral con 256/512 modos. Todavía falla plazo en las tres
 geometrías, sin contacto/trayectoria acoplada. Sigue reducir costo y resolver
 ese acoplamiento conservativo; no es aún un instrumento tocable.
 
+El [acoplamiento con trayectoria axial forzada](RESULTADOS-P7-trayectoria-forzada.md)
+prueba ahora evolución completa de cuerdas en un sostenido mixto C4 de 6 ms,
+sin martillo. El primer centro libre conserva energía pero falla **98,4255 %**;
+incluir la respuesta axial dentro del bloque baja a **6,4605 %** a 128 kHz/N16,
+todavía rechazado. Sólo **2,048 MHz/N1** pasa estado **0,6387 %** y ledger
+**9,283e−11** frente a una referencia 8,192→16,384 MHz que cambia **0,1185 %**.
+**37 pruebas pasan**, replays del motor anterior exactos. CPU se rechaza:
+media **1.010,912 ms** por buffer de presupuesto **0,125 ms**, sin contacto,
+cuerpo o presión. Este solver experimental sirve de control; sigue incluir
+la respuesta transversal interna y factorizar tablas antes de integración.
+La auditoría por cuerda añade un rechazo: la restricción compartida pasa
+ledger total, pero falla energía individual, máximo **4,916e−7** frente
+a 1e−9. En puente fijo/sin contacto no hay intercambio físico entre cuerdas.
+Se preserva el control y sigue separar las restricciones de energía.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

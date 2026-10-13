@@ -1,0 +1,235 @@
+{
+  "parent_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-13\\phase-trajectory.json",
+  "parent_sha256": "a4bf16878ed7cb6c15d2919f076aa42f05ad96aed1f8b78026e99ac4bfbd5a4b",
+  "source_sha256": {
+    "measure-concert-grand-native-strings.py": "cf5da1c3225751639e1fc7985a4892662edf18e4e777b4e175879e2e58b2a5a2",
+    "concert-grand-native-strings.rs": "2dad1e3e5f6c93af81d9599dd4851236e3fed9aa01530224fdb1b3377d0e65cf",
+    "concert_grand_native_strings.py": "4c0cae8d1155dab1a97c3ddbfa2afa6f6f08afb1e90167edbdfe7d14f78be450",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "concert-grand-phase-forces.rs": "b69c7ed7c60706e53a8e32032c44ed60451d73a5e85e3a986d5cc63947537056",
+    "concert-grand-phase-trajectory.rs": "dc80c292aac2f974f6c9471ae0c912d6111252318a3124491374ffb7ca6b0ec5",
+    "measure-concert-grand-phase-trajectory.py": "22b26a4b6b57e1baf530c77153ba742e1ef1e27d220cfaf6fad697529d587324",
+    "concert_grand_phase_forces.py": "02854406da8aa6516c311fac97445be44dcf2d23fcebc3eb8dff82b5c4d902c8",
+    "tests/test_concert_phase_trajectory.py": "9a5b6302b90211fab07111e471e3566bf7ac253355cfcf1d78b99f860d62f8ce",
+    "audit-concert-grand-phase-wire-energy.py": "1af89c60a2addb47f1f112bdc2247c39b4f77104a5679d803240a099e18608ac"
+  },
+  "per_wire_energy_tolerance": 1e-09,
+  "contact_included": false,
+  "global_physics_approved": false,
+  "cases": [
+    {
+      "label": "teacher-8192000",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\teacher-8192000.json",
+      "result_sha256": "35d9449baefb17314f0999c59e632afe52d5321ec5ccefeb410b00eb49f8c1a7",
+      "final_wire_energy_j": [
+        0.13114185152104785,
+        0.17250649818790034,
+        0.1584208483042727
+      ],
+      "wire_energy_relative": [
+        8.68804554615955e-13,
+        4.086753995024006e-14,
+        1.064524519629361e-12
+      ],
+      "maximum_wire_energy_relative": 1.064524519629361e-12,
+      "per_wire_1e9_gate_passed": true
+    },
+    {
+      "label": "teacher-16384000",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\teacher-16384000.json",
+      "result_sha256": "339df4414ea6f2258f5e4b4bf1fbb88a50b38f424fd2553138abb84ea4b086e2",
+      "final_wire_energy_j": [
+        0.13114185152105573,
+        0.17250649818823152,
+        0.15842084830439515
+      ],
+      "wire_energy_relative": [
+        9.289118611959627e-13,
+        1.9606765426520687e-12,
+        2.9153535231455837e-13
+      ],
+      "maximum_wire_energy_relative": 1.9606765426520687e-12,
+      "per_wire_1e9_gate_passed": true
+    },
+    {
+      "label": "carrier-control",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\carrier-control.json",
+      "result_sha256": "b256086b8b032176fc3db78c77c0807e7bf9aef4d16d7b9e9976697958bfe4b8",
+      "final_wire_energy_j": [
+        0.13110512533151372,
+        0.172467954120342,
+        0.15849611856137374
+      ],
+      "wire_energy_relative": [
+        0.00028004934347237087,
+        0.00022343545290286592,
+        0.0004751284804873626
+      ],
+      "maximum_wire_energy_relative": 0.0004751284804873626,
+      "per_wire_1e9_gate_passed": false
+    },
+    {
+      "label": "forced128-N16",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\forced128-N16.json",
+      "result_sha256": "9552a92dcf71c8920183cf43270883f4ffaba681949cef7e94a7bb28a64d0196",
+      "final_wire_energy_j": [
+        0.1311846689228763,
+        0.17253851283046534,
+        0.1583460162598965
+      ],
+      "wire_energy_relative": [
+        0.00032649685394720636,
+        0.0001855851397387813,
+        0.0004723623522140868
+      ],
+      "maximum_wire_energy_relative": 0.0004723623522140868,
+      "per_wire_1e9_gate_passed": false
+    },
+    {
+      "label": "forced128-N8",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\forced128-N8.json",
+      "result_sha256": "ece1c82795e343fe45d47a33acf19865675637ab108ce724dd7ef556569abacf",
+      "final_wire_energy_j": [
+        0.1311514088416605,
+        0.17255899424840984,
+        0.1583587949231953
+      ],
+      "wire_energy_relative": [
+        7.287773213307074e-05,
+        0.0003043135248120957,
+        0.00039169958948074527
+      ],
+      "maximum_wire_energy_relative": 0.00039169958948074527,
+      "per_wire_1e9_gate_passed": false
+    },
+    {
+      "label": "forced128-N4",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\forced128-N4.json",
+      "result_sha256": "e5f2650f3b0a4a323e19f7dd6c83618274c58627ad39d86e33c333e876dbe660",
+      "final_wire_energy_j": [
+        0.13113780783736237,
+        0.1725700956774197,
+        0.1583612944984341
+      ],
+      "wire_energy_relative": [
+        3.083442489674129e-05,
+        0.00036866721076876695,
+        0.0003759215194503763
+      ],
+      "maximum_wire_energy_relative": 0.0003759215194503763,
+      "per_wire_1e9_gate_passed": false
+    },
+    {
+      "label": "forced128-N1",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\forced128-N1.json",
+      "result_sha256": "eae7c016f63831437e5aeaa26e4868f0f7af2c3a89a6fb9675e15fb24cefd1ff",
+      "final_wire_energy_j": [
+        0.1311461236800709,
+        0.17254170778710246,
+        0.1583813665461933
+      ],
+      "wire_energy_relative": [
+        3.257662666367817e-05,
+        0.00020410592979988872,
+        0.00024922072233923853
+      ],
+      "maximum_wire_energy_relative": 0.00024922072233923853,
+      "per_wire_1e9_gate_passed": false
+    },
+    {
+      "label": "forced256-N1",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\forced256-N1.json",
+      "result_sha256": "8c97d1aaa06c1720209608be31a71d4e9e5c1a4afaaffba4dd72eaf0fbb7a509",
+      "final_wire_energy_j": [
+        0.1311395467791528,
+        0.172523110757841,
+        0.15840654047529892
+      ],
+      "wire_energy_relative": [
+        1.757441849712927e-05,
+        9.630112559357036e-05,
+        9.031531705294785e-05
+      ],
+      "maximum_wire_energy_relative": 9.630112559357036e-05,
+      "per_wire_1e9_gate_passed": false
+    },
+    {
+      "label": "forced512-N1",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\forced512-N1.json",
+      "result_sha256": "3ba8313de7c12cbb21cb961cafab8ed4c9de76200a02967baa29e7a7a6f740e2",
+      "final_wire_energy_j": [
+        0.13113708036610267,
+        0.1725047676449636,
+        0.1584273499977173
+      ],
+      "wire_energy_relative": [
+        3.638163390185225e-05,
+        1.0031755022897054e-05,
+        4.1040641718203925e-05
+      ],
+      "maximum_wire_energy_relative": 4.1040641718203925e-05,
+      "per_wire_1e9_gate_passed": false
+    },
+    {
+      "label": "forced1024-N1",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\forced1024-N1.json",
+      "result_sha256": "21e1f1de6da3d89c54d125994711124df4121d350cd24c28707e0409c50dc2c6",
+      "final_wire_energy_j": [
+        0.13114210790603825,
+        0.17250729628836223,
+        0.15841979381891194
+      ],
+      "wire_energy_relative": [
+        1.9550212336327486e-06,
+        4.6264951020322625e-06,
+        6.65622953469084e-06
+      ],
+      "maximum_wire_energy_relative": 6.65622953469084e-06,
+      "per_wire_1e9_gate_passed": false
+    },
+    {
+      "label": "forced2048-N1",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\forced2048-N1.json",
+      "result_sha256": "70bacabffd322e4e43090f1507bf6c3984c903d5888fd8d5e822a29d22cc6a6c",
+      "final_wire_energy_j": [
+        0.13114178705200938,
+        0.1725065758154303,
+        0.15842083510293548
+      ],
+      "wire_energy_relative": [
+        4.915968760885323e-07,
+        4.499977555919135e-07,
+        8.333187204840131e-08
+      ],
+      "maximum_wire_energy_relative": 4.915968760885323e-07,
+      "per_wire_1e9_gate_passed": false
+    },
+    {
+      "label": "unconstrained128-N16",
+      "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-phase-trajectory-2026-10-13\\unconstrained128-N16.json",
+      "result_sha256": "28982b466aec65d9f579b981f561a82d4814a2247888d20dcf37336796dfd5e0",
+      "final_wire_energy_j": [
+        0.13117426194923282,
+        0.1725247845691508,
+        0.15833341353658473
+      ],
+      "wire_energy_relative": [
+        0.00024714023725471974,
+        0.0001060040140492945,
+        0.0005519145288793264
+      ],
+      "maximum_wire_energy_relative": 0.0005519145288793264,
+      "per_wire_1e9_gate_passed": false
+    }
+  ],
+  "initial_wire_energy_j": [
+    0.1311418515209339,
+    0.1725064981878933,
+    0.15842084830444134
+  ],
+  "sources_unchanged": true
+}

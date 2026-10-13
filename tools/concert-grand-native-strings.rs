@@ -22,6 +22,7 @@ unsafe impl GlobalAlloc for CountAlloc {
         unsafe { System.realloc(p, l, n) }
     }
 }
+#[cfg(not(concert_phase_library))]
 #[global_allocator]
 static ALLOCATOR: CountAlloc = CountAlloc;
 #[repr(C)]
@@ -348,7 +349,7 @@ pub struct Wire {
     products: Vec<f64>,
 }
 impl Wire {
-    fn new(
+    pub(crate) fn new(
         nt: usize,
         nl: usize,
         nodes: usize,
@@ -419,8 +420,12 @@ impl Wire {
             products: vec![0.; 3 * nodes],
         }
     }
-    fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         self.nl + 2 * self.nt
+    }
+    #[cfg(concert_phase_library)]
+    pub(crate) fn frequencies2(&self) -> &[f64] {
+        &self.omega2
     }
     fn fields(&mut self, q: &[f64], bridge: f64, slot: usize) {
         let n = self.nodes;
@@ -458,9 +463,47 @@ impl Wire {
         }
         self.ea * self.length / n as f64 * sum
     }
-    fn point_nonlinearity(&mut self, q: &[f64], out: &mut [f64]) -> f64 {
+    pub(crate) fn point_nonlinearity(&mut self, q: &[f64], out: &mut [f64]) -> f64 {
         self.fields(q, 0., 0);
         self.point_from_fields(out, false)
+    }
+    /// Quartic-potential gradient only; experimental phase-trajectory caller.
+    /// Keep the same spatial quadrature and normalization as point_from_fields.
+    #[cfg(concert_phase_library)]
+    pub(crate) fn point_cubic(&mut self, q: &[f64], out: &mut [f64]) {
+        assert!(q.len() == self.size() && out.len() == self.size());
+        let n = self.nodes;
+        self.plan.synthesize(
+            &q[self.nl..self.nl + self.nt],
+            &self.kv,
+            &mut self.fields[n..2 * n],
+        );
+        self.plan.synthesize(
+            &q[self.nl + self.nt..],
+            &self.kv,
+            &mut self.fields[2 * n..3 * n],
+        );
+        for j in 0..n {
+            let v = self.fields[n + j];
+            let w = self.fields[2 * n + j];
+            let eta = 0.5 * (v * v + w * w);
+            self.products[n + j] = eta * v;
+            self.products[2 * n + j] = eta * w;
+        }
+        out[..self.nl].fill(0.);
+        let factor = self.ea * self.length / (2 * n) as f64;
+        self.plan.analyze(
+            &self.products[n..2 * n],
+            &self.kv,
+            factor,
+            &mut out[self.nl..self.nl + self.nt],
+        );
+        self.plan.analyze(
+            &self.products[2 * n..3 * n],
+            &self.kv,
+            factor,
+            &mut out[self.nl + self.nt..],
+        );
     }
     fn point_from_fields(&mut self, out: &mut [f64], axial_ready: bool) -> f64 {
         let n = self.nodes;

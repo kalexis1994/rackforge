@@ -111,7 +111,7 @@ impl RackForgeProcessor {
     const CID: TUID = uid(0x6D4E5B5A, 0x41014BE2, 0x9D8B31E2, 0xF63CA701);
 
     fn new() -> Self {
-        let models = engine::load_bundled_plugin_models()
+        let models = engine::load_plugin_models()
             .map(|models| models.into_iter().map(Arc::new).collect())
             .inspect_err(|error| {
                 diagnostic::write(format!("processor plugin models unavailable: {error:#}"));
@@ -881,7 +881,9 @@ impl RackForgeControllerShared {
             .catalog
             .iter()
             .position(|model| model.plugin_id == plugin_id)
-            .ok_or_else(|| format!("Plugin {plugin_id} is not bundled with RackForge VST3"))?;
+            .ok_or_else(|| {
+                format!("Plugin {plugin_id} is not installed and enabled in RackForge")
+            })?;
         self.apply_plugin_selection(index).map(|_| ())
     }
 
@@ -910,7 +912,9 @@ impl RackForgeControllerShared {
             .catalog
             .iter()
             .position(|model| model.plugin_id == plugin_id)
-            .ok_or_else(|| format!("Plugin {plugin_id} is not bundled with RackForge VST3"))?;
+            .ok_or_else(|| {
+                format!("Plugin {plugin_id} is not installed and enabled in RackForge")
+            })?;
         let model = self.apply_plugin_selection(catalog_index)?;
         let handler = self
             .handler
@@ -946,7 +950,7 @@ impl Class for RackForgeController {
 impl RackForgeController {
     const CID: TUID = uid(0xA9E488B2, 0xF36E4B52, 0xB1FD8D9B, 0xAF4016CC);
     fn new() -> Self {
-        let catalog: Vec<Arc<VstPluginModel>> = engine::load_bundled_plugin_models()
+        let catalog: Vec<Arc<VstPluginModel>> = engine::load_plugin_models()
             .map(|models| models.into_iter().map(Arc::new).collect())
             .inspect_err(|error| {
                 diagnostic::write(format!("controller plugin models unavailable: {error:#}"));

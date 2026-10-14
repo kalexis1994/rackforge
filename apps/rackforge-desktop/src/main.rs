@@ -8790,34 +8790,11 @@ fn install_bundled_plugins(options: &Options) -> Result<()> {
     let Some(store_root) = options.plugin_store_root.as_deref() else {
         return Ok(());
     };
-    // Concert Grand was once offered only on a first start, behind this
-    // marker, so a player could remove it for good before the store recorded
-    // uninstalls. A store that went through that offer and no longer holds it
-    // lost it to such an uninstall: it stays out, as a recorded uninstall
-    // would. Without this the default instrument was never updated again
-    // after the first start.
-    let marker = options
-        .rackforge_root
-        .join("state")
-        .join("bundled-default-initialized");
-    let removed_before_records = marker.is_file()
-        && !store_root
-            .join("packages")
-            .join(rackforge_core::DEFAULT_INSTRUMENT_ID)
-            .is_dir();
     let carried = BUNDLED_DEFAULT_PLUGIN
-        .map(|bytes| ("RF-Concert-Grand", bytes, true))
+        .map(|bytes| ("RF-Concert-Grand", bytes))
         .into_iter()
-        .chain(
-            BUNDLED_OFFICIAL_PLUGINS
-                .iter()
-                .map(|(name, bytes)| (*name, *bytes, false)),
-        );
-    for (archive_name, bytes, default) in carried {
-        if default && removed_before_records {
-            eprintln!("DESKTOP_OFFICIAL_PLUGIN archive={archive_name} removed_by_player=true");
-            continue;
-        }
+        .chain(BUNDLED_OFFICIAL_PLUGINS.iter().copied());
+    for (archive_name, bytes) in carried {
         match install_bundled_official_archive(store_root, bytes)
             .with_context(|| format!("installing bundled official plugin {archive_name}"))?
         {
@@ -8837,12 +8814,6 @@ fn install_bundled_plugins(options: &Options) -> Result<()> {
             BundledInstall::RemovedByPlayer { plugin_id, version } => eprintln!(
                 "DESKTOP_OFFICIAL_PLUGIN id={plugin_id} version={version} removed_by_player=true"
             ),
-        }
-        if default {
-            if let Some(parent) = marker.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(&marker, b"1\n")?;
         }
     }
     Ok(())

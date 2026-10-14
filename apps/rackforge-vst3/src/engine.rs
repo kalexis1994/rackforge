@@ -1,10 +1,11 @@
 use anyhow::{Context, Result, bail};
+use rackforge_core::DEFAULT_INSTRUMENT_ID;
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage, midi2::Midi2Event};
 use rackforge_plugin_api::{
     ParameterSchema, PluginBranding, PluginKind, ResourceRequirement, WebSurfaceKind,
     abi::ParameterEventV1,
 };
-use rackforge_repository::install_official_archive;
+use rackforge_repository::{BundledInstall, install_bundled_official_archive, plugin_is_enabled};
 #[cfg(windows)]
 use rackforge_resource_host::NativeResourceBrowser;
 use serde::Deserialize;
@@ -48,10 +49,10 @@ struct RootDocument {
 #[cfg(windows)]
 static RESOURCES: OnceLock<Option<Arc<NativeResourceBrowser>>> = OnceLock::new();
 
-static BUNDLED_PACKAGES: OnceLock<Vec<PathBuf>> = OnceLock::new();
-static BUNDLED_PACKAGES_INIT: Mutex<()> = Mutex::new(());
-static BUNDLED_MODELS: OnceLock<Vec<VstPluginModel>> = OnceLock::new();
-static BUNDLED_MODELS_INIT: Mutex<()> = Mutex::new(());
+static CARRIED_INSTALLED: OnceLock<()> = OnceLock::new();
+static CARRIED_INSTALLED_INIT: Mutex<()> = Mutex::new(());
+static MODELS: OnceLock<Vec<VstPluginModel>> = OnceLock::new();
+static MODELS_INIT: Mutex<()> = Mutex::new(());
 
 /// Every plug-in runtime this module has loaded, kept so `ExitDll` can retire
 /// them, and a count of the instances still borrowing them.
@@ -314,10 +315,19 @@ fn open_resource_browser() -> Option<Arc<NativeResourceBrowser>> {
         .map(Arc::new)
 }
 
-/// The instruments the VST3 can be, in the order they were carried.
+/// The instruments the DAW can switch between: every instrument the player
+/// has installed and enabled in RackForge, at its newest version, Concert
+/// Grand first and the rest by name.
+///
+/// The list is the player's, not the DLL's. It used to be exactly what the
+/// build carried, so an instrument installed from a file or from a plugin's
+/// own release never reached the DAW, and one the player had uninstalled or
+/// switched off was offered anyway. The packages this build carries are laid
+/// down first, by the same official install every host uses, so a machine
+/// that has never run RackForge still opens with them.
 ///
 /// INSTRUMENTS. A VST3 instrument plug-in offers a list of things to play,
-/// and the carried packages are not all playable: the Standard edition
+/// and installed packages are not all playable: the Standard edition
 /// travels with RF-Comp, RF-EQ and RF-Limiter beside the instruments, and
 /// `open_package` rightly refuses an effect. Unfiltered, the first effect
 /// in the list failed `setActive` and the WHOLE plug-in failed to activate
@@ -325,41 +335,69 @@ fn open_resource_browser() -> Option<Arc<NativeResourceBrowser>> {
 /// scan and the load had both succeeded. The effects belong to the chain a
 /// PLAY surface builds, not to the list of instruments the DAW switches
 /// between.
-pub fn load_bundled_plugin_models() -> Result<Vec<VstPluginModel>> {
-    get_or_try_init_cloned(&BUNDLED_MODELS, &BUNDLED_MODELS_INIT, || {
+pub fn load_plugin_models() -> Result<Vec<VstPluginModel>> {
+    get_or_try_init_cloned(&MODELS, &MODELS_INIT, || {
         let root = rackforge_root()?;
-        models_from_roots(&root, newest_roots(&root, bundled_package_roots()?))
+        ensure_carried_installed()?;
+        Ok(models_from_roots(
+            &root,
+            instrument_roots(&root.join("plugin-store")),
+        ))
     })
 }
 
-/// The newest installed version of each package the build carried. The DAW's
-/// list of instruments and the engine that opens one must agree, and the
-/// engine plays the newest version the store holds.
-fn newest_roots(root: &Path, carried: Vec<PathBuf>) -> Vec<PathBuf> {
-    let store = root.join("plugin-store");
-    carried
+/// The models of these packages. A package that cannot be modelled is left
+/// out and logged: one broken instrument must not take the others with it.
+fn models_from_roots(root: &Path, packages: Vec<PathBuf>) -> Vec<VstPluginModel> {
+    packages
         .into_iter()
-        .map(|carried_root| {
-            PluginPackage::open(&carried_root)
+        .filter_map(|package_root| {
+            load_plugin_model_at(root, package_root.clone())
+                .inspect_err(|error| {
+                    crate::diagnostic::write(format!(
+                        "plugin model {} left out: {error:#}",
+                        package_root.display()
+                    ));
+                })
                 .ok()
-                .and_then(|package| newest_package_root(&store, &package.manifest().id))
-                .unwrap_or(carried_root)
         })
         .collect()
 }
 
-/// The instrument models among these packages. One definition, because the
-/// test path had its own copy of this walk and the filter reached only the
-/// shipping one -- the test then still saw the effects and failed.
-fn models_from_roots(root: &Path, packages: Vec<PathBuf>) -> Result<Vec<VstPluginModel>> {
-    packages
+/// The newest version of every enabled instrument in `store` that the VST3
+/// can run -- a portable component, since it loads no native code -- with
+/// Concert Grand first and the rest by name.
+fn instrument_roots(store: &Path) -> Vec<PathBuf> {
+    let mut instruments = Vec::new();
+    for plugin in fs::read_dir(store.join("packages"))
         .into_iter()
-        .filter(|package_root| {
-            PluginPackage::open(package_root)
-                .is_ok_and(|package| package.manifest().kind == PluginKind::Instrument)
-        })
-        .map(|package_root| load_plugin_model_at(root, package_root))
-        .collect()
+        .flatten()
+        .flatten()
+    {
+        let Some(plugin_id) = plugin.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if !plugin_is_enabled(store, &plugin_id).unwrap_or(false) {
+            continue;
+        }
+        let Some(root) = newest_package_root(store, &plugin_id) else {
+            continue;
+        };
+        let Ok(package) = PluginPackage::open(&root) else {
+            continue;
+        };
+        let manifest = package.manifest();
+        if manifest.kind != PluginKind::Instrument || manifest.portable_component().is_none() {
+            continue;
+        }
+        instruments.push((
+            manifest.id != DEFAULT_INSTRUMENT_ID,
+            manifest.name.to_lowercase(),
+            root,
+        ));
+    }
+    instruments.sort();
+    instruments.into_iter().map(|(_, _, root)| root).collect()
 }
 
 fn load_plugin_model_at(root: &Path, package_root: PathBuf) -> Result<VstPluginModel> {
@@ -470,48 +508,55 @@ where
     Ok(cache.get().expect("guarded VST3 cache initialized").clone())
 }
 
-fn bundled_package_roots() -> Result<Vec<PathBuf>> {
-    get_or_try_init_cloned(&BUNDLED_PACKAGES, &BUNDLED_PACKAGES_INIT, || {
-        install_bundled_packages_at(&rackforge_root()?)
+fn ensure_carried_installed() -> Result<()> {
+    get_or_try_init_cloned(&CARRIED_INSTALLED, &CARRIED_INSTALLED_INIT, || {
+        install_carried_packages_at(&rackforge_root()?);
+        Ok(())
     })
 }
 
-fn install_bundled_packages_at(root: &Path) -> Result<Vec<PathBuf>> {
+/// Lays down every package this build carries through the store's official
+/// install, the rule every host follows: the release corrects a same-version
+/// copy with other bytes, a plugin the player uninstalled stays out, a
+/// newcomer is enabled, and versions older than the two newest are pruned.
+///
+/// A package that fails is logged and skipped. Failing the lot left a plug-in
+/// with no instruments -- no model, no view and nothing to draw: the editor
+/// opened black.
+fn install_carried_packages_at(root: &Path) {
     let store = root.join("plugin-store");
-    let data = root.join("data");
     for path in [
         store.join("packages"),
         store.join("records"),
-        data.join("plugins"),
+        root.join("data").join("plugins"),
     ] {
-        fs::create_dir_all(&path).with_context(|| format!("creating {}", path.display()))?;
-    }
-    let mut installed = Vec::new();
-    let carried = std::iter::once(("Concert Grand", BUNDLED_PLUGIN)).chain(
-        BUNDLED_OFFICIAL_PLUGINS
-            .iter()
-            .map(|(name, bytes)| (*name, Some(*bytes))),
-    );
-    for (name, bytes) in carried {
-        if let Some(bytes) = bytes {
-            // The release is the authority on what a bundled version holds, the
-            // same rule the desktop and the platform installers follow. Without
-            // it a store left holding an older build of the same version made
-            // every install fail, and a plug-in with no instruments has no
-            // model, no view and nothing to draw: the editor opened black.
-            installed.push(
-                install_official_archive(&store, bytes)
-                    .with_context(|| format!("installing bundled VST3 plugin {name}"))?
-                    .path,
-            );
+        if let Err(error) = fs::create_dir_all(&path) {
+            crate::diagnostic::write(format!("creating {}: {error}", path.display()));
         }
     }
-    Ok(installed)
+    let carried = BUNDLED_PLUGIN
+        .map(|bytes| ("Concert Grand", bytes))
+        .into_iter()
+        .chain(BUNDLED_OFFICIAL_PLUGINS.iter().copied());
+    for (name, bytes) in carried {
+        match install_bundled_official_archive(&store, bytes) {
+            Ok(BundledInstall::Installed { .. }) => {}
+            Ok(BundledInstall::RemovedByPlayer { plugin_id, .. }) => {
+                crate::diagnostic::write(format!(
+                    "carried {plugin_id} skipped: removed by the player"
+                ));
+            }
+            Err(error) => {
+                crate::diagnostic::write(format!("installing carried plugin {name}: {error}"));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
-fn load_bundled_plugin_models_at(root: &Path) -> Result<Vec<VstPluginModel>> {
-    models_from_roots(root, newest_roots(root, install_bundled_packages_at(root)?))
+fn load_plugin_models_at(root: &Path) -> Vec<VstPluginModel> {
+    install_carried_packages_at(root);
+    models_from_roots(root, instrument_roots(&root.join("plugin-store")))
 }
 
 /// Where the engine opens `plugin_id`: the newest version the store holds,
@@ -522,7 +567,7 @@ fn load_bundled_plugin_models_at(root: &Path) -> Result<Vec<VstPluginModel>> {
 /// compared the rest as text, which ranks 0.9.0 above 0.10.0.
 fn package_root_for_id(plugin_id: &str) -> Result<PathBuf> {
     // Carried packages are installed into the store before anything opens.
-    bundled_package_roots()?;
+    ensure_carried_installed()?;
     newest_package_root(&rackforge_root()?.join("plugin-store"), plugin_id)
         .with_context(|| format!("RackForge VST3 has no installed plugin {plugin_id}"))
 }
@@ -573,24 +618,6 @@ pub(crate) fn rackforge_root() -> Result<PathBuf> {
         );
     }
     Ok(document.root)
-}
-
-#[cfg(test)]
-fn newest_installed_instrument(store: &Path) -> Result<Option<PathBuf>> {
-    let packages = store.join("packages");
-    let mut candidates = Vec::new();
-    for plugin in fs::read_dir(packages).into_iter().flatten().flatten() {
-        for version in fs::read_dir(plugin.path()).into_iter().flatten().flatten() {
-            let root = version.path();
-            if let Ok(package) = PluginPackage::open(&root)
-                && package.manifest().kind == PluginKind::Instrument
-            {
-                candidates.push(root);
-            }
-        }
-    }
-    candidates.sort();
-    Ok(candidates.pop())
 }
 
 #[cfg(test)]
@@ -667,23 +694,37 @@ mod tests {
         assert_eq!(initializations.load(Ordering::SeqCst), 1);
     }
 
+    /// A package directory in `store`, enough for `PluginPackage::open`.
+    fn plant(store: &Path, id: &str, name: &str, version: &str, portable: bool) -> PathBuf {
+        let package = store.join("packages").join(id).join(version);
+        fs::create_dir_all(&package).unwrap();
+        let code = if portable {
+            "[component]\nabi = \"wasm-v1\"\npath = \"component.wasm\"\n\
+             runtime_descriptor = \"metadata/runtime.json\"\n\
+             parameter_schema = \"metadata/parameters.json\"\n\
+             preset_catalog = \"metadata/presets.json\"\n"
+        } else {
+            "[binaries]\nlinux-aarch64 = \"lib/synth.so\"\n"
+        };
+        fs::write(
+            package.join("rackforge-plugin.toml"),
+            format!(
+                "schema_version = 1\nid = \"{id}\"\nname = \"{name}\"\n\
+                 vendor = \"RackForge Test\"\nversion = \"{version}\"\nkind = \"instrument\"\n\
+                 state_version = 1\ncapabilities = [\"audio_output\", \"midi_input\"]\n\
+                 ui_layouts = [\"little@1\"]\n\n[api]\nmajor = 1\nminor = 5\n\n{code}"
+            ),
+        )
+        .unwrap();
+        package
+    }
+
     #[test]
     fn the_engine_opens_the_newest_semantic_version() {
         let root = TestRoot::create();
         let store = root.path().join("plugin-store");
-        let manifest = |version: &str| {
-            format!(
-                "schema_version = 1\nid = \"org.rackforge.synth\"\nname = \"Test Synth\"\n\
-                 vendor = \"RackForge Test\"\nversion = \"{version}\"\nkind = \"instrument\"\n\
-                 state_version = 1\ncapabilities = [\"audio_output\", \"midi_input\"]\n\
-                 ui_layouts = [\"little@1\"]\n\n[api]\nmajor = 1\nminor = 5\n\n\
-                 [binaries]\nlinux-aarch64 = \"lib/synth.so\"\n"
-            )
-        };
         for version in ["0.9.0", "0.10.0", "0.2.0"] {
-            let package = store.join("packages/org.rackforge.synth").join(version);
-            fs::create_dir_all(&package).unwrap();
-            fs::write(package.join("rackforge-plugin.toml"), manifest(version)).unwrap();
+            plant(&store, "org.rackforge.synth", "Synth", version, false);
         }
         assert_eq!(
             newest_package_root(&store, "org.rackforge.synth"),
@@ -692,11 +733,37 @@ mod tests {
         assert_eq!(newest_package_root(&store, "org.rackforge.other"), None);
     }
 
+    /// The DAW offers what the player has: every enabled instrument in the
+    /// store at its newest version, whether a release carried it or not,
+    /// and nothing they switched off or that the VST3 cannot run.
     #[test]
-    fn missing_store_has_no_fallback_instrument() {
+    fn the_instrument_list_is_the_players_store() {
         let root = TestRoot::create();
-        fs::create_dir_all(root.path().join("packages")).unwrap();
-        assert_eq!(newest_installed_instrument(root.path()).unwrap(), None);
+        let store = root.path().join("plugin-store");
+        assert!(instrument_roots(&store).is_empty());
+
+        plant(&store, "org.rackforge.zither", "Zither", "1.0.0", true);
+        plant(&store, "org.rackforge.alto", "alto", "0.9.0", true);
+        let newest_alto = plant(&store, "org.rackforge.alto", "alto", "0.10.0", true);
+        let grand = plant(
+            &store,
+            DEFAULT_INSTRUMENT_ID,
+            "RF - Concert Grand",
+            "1.0.0",
+            true,
+        );
+        plant(&store, "org.rackforge.native", "Native", "1.0.0", false);
+        plant(&store, "org.rackforge.off", "Off", "1.0.0", true);
+        rackforge_repository::set_plugin_enabled(&store, "org.rackforge.off", false).unwrap();
+
+        assert_eq!(
+            instrument_roots(&store),
+            vec![
+                grand,
+                newest_alto,
+                store.join("packages/org.rackforge.zither/1.0.0"),
+            ]
+        );
     }
 
     /// Every instrument the build carried reaches the store -- and NO
@@ -717,15 +784,17 @@ mod tests {
             return;
         }
         let root = TestRoot::create();
-        let ids = load_bundled_plugin_models_at(root.path())
-            .unwrap()
+        let ids = load_plugin_models_at(root.path())
             .into_iter()
             .map(|model| model.plugin_id)
             .collect::<Vec<_>>();
-        assert!(ids.contains(&"org.rackforge.concert-grand".to_owned()));
+        assert_eq!(ids.first().map(String::as_str), Some(DEFAULT_INSTRUMENT_ID));
+        let store = root.path().join("plugin-store");
         let mut instruments = 0usize;
         let mut effects = Vec::new();
-        for path in install_bundled_packages_at(root.path()).unwrap() {
+        for plugin in fs::read_dir(store.join("packages")).unwrap().flatten() {
+            let plugin_id = plugin.file_name().to_string_lossy().into_owned();
+            let path = newest_package_root(&store, &plugin_id).expect("an installed version");
             let package = PluginPackage::open(&path).unwrap();
             if package.manifest().kind == PluginKind::Instrument {
                 instruments += 1;
@@ -736,7 +805,7 @@ mod tests {
         assert_eq!(
             ids.len(),
             instruments,
-            "an instrument was carried but never installed: {ids:?}"
+            "an instrument was carried but never offered: {ids:?}"
         );
         for effect in effects {
             assert!(
@@ -756,31 +825,23 @@ mod tests {
             return;
         }
         let root = TestRoot::create();
-        let installed = install_bundled_packages_at(root.path()).expect("first install");
-        let version_root = installed
-            .first()
-            .expect("the install placed a package")
-            .clone();
+        install_carried_packages_at(root.path());
+        let store = root.path().join("plugin-store");
+        let version_root =
+            newest_package_root(&store, DEFAULT_INSTRUMENT_ID).expect("the install placed it");
         let version = version_root
             .file_name()
             .and_then(|name| name.to_str())
             .expect("a version directory")
-            .to_owned();
-        let plugin_id = version_root
-            .parent()
-            .and_then(|path| path.file_name())
-            .and_then(|name| name.to_str())
-            .expect("a plugin directory")
             .to_owned();
 
         // The record is what the conflict is decided against, so this is where
         // an older build of the same version shows: same identity, different
         // bytes. Planting a file inside the package would not reproduce it,
         // because nothing reads the directory back.
-        let record = root
-            .path()
-            .join("plugin-store/records")
-            .join(&plugin_id)
+        let record = store
+            .join("records")
+            .join(DEFAULT_INSTRUMENT_ID)
             .join(format!("{version}.json"));
         let text = fs::read_to_string(&record).expect("reading the installation record");
         let key = "\"artifact_sha256\": \"";
@@ -789,14 +850,33 @@ mod tests {
         let drifted = format!("{}{}{}", &text[..start], "0".repeat(64), &text[end..]);
         fs::write(&record, drifted).expect("planting the drift");
 
-        install_bundled_packages_at(root.path())
-            .expect("a release must be able to correct a version that drifted");
         assert!(
-            !load_bundled_plugin_models_at(root.path())
-                .expect("models after replacement")
-                .is_empty(),
-            "the plug-in was left with no instrument to show"
+            load_plugin_models_at(root.path())
+                .iter()
+                .any(|model| model.plugin_id == DEFAULT_INSTRUMENT_ID),
+            "a release must be able to correct a version that drifted"
         );
+        let corrected = fs::read_to_string(&record).expect("reading the corrected record");
+        assert!(!corrected.contains(&"0".repeat(64)));
+    }
+
+    /// An instrument the player uninstalled stays out of the DAW too: the
+    /// VST3 used to install everything its DLL carried and offer it again.
+    #[test]
+    fn a_carried_instrument_the_player_removed_is_not_offered() {
+        if BUNDLED_PLUGIN.is_none() {
+            return;
+        }
+        let root = TestRoot::create();
+        install_carried_packages_at(root.path());
+        let store = root.path().join("plugin-store");
+        rackforge_repository::uninstall_plugin(&store, DEFAULT_INSTRUMENT_ID).unwrap();
+        assert!(
+            !load_plugin_models_at(root.path())
+                .iter()
+                .any(|model| model.plugin_id == DEFAULT_INSTRUMENT_ID)
+        );
+        assert!(!store.join("packages").join(DEFAULT_INSTRUMENT_ID).exists());
     }
 
     #[test]
@@ -808,8 +888,7 @@ mod tests {
             return;
         }
         let root = TestRoot::create();
-        let model = load_bundled_plugin_models_at(root.path())
-            .unwrap()
+        let model = load_plugin_models_at(root.path())
             .into_iter()
             .find(|model| model.plugin_id == "org.rackforge.rf-106")
             .expect("bundled RF-106 model");

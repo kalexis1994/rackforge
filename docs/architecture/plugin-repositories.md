@@ -66,8 +66,8 @@ everywhere:
 - The release is the authority on what its versions contain: a same-version
   copy with other bytes is replaced, and the record says `official`.
 - A plugin the player uninstalled stays out. `uninstall_plugin` records it in
-  `removed.json` beside `activation.json`; installing the plugin again from a
-  file or a repository takes the uninstall back; no release ever does.
+  `removed.json`; installing the plugin again from a file or a repository
+  takes the uninstall back; no release ever does.
 - A plugin the store has never held is enabled. One it already knows keeps
   whatever the player chose.
 - The store keeps the two newest versions of the plugin, never dropping the
@@ -76,9 +76,11 @@ everywhere:
   A version a running process still has mapped is left in place and pruned
   on a later start.
 
-The VST3 plug-in is self-contained: it installs everything its DLL carries
-unconditionally, and like every other host opens the newest installed
-version of each.
+The VST3 plug-in lays down what its DLL carries by the same rules, then offers
+the DAW every enabled instrument in the store that has a portable component,
+at its newest version, Concert Grand first and the rest by name: an
+instrument installed from a file or a repository appears there too, and one
+the player uninstalled or switched off does not.
 
 ## Catalog v1
 

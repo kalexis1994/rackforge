@@ -60,24 +60,8 @@ trap - EXIT
 # newcomer is enabled, one the store already knows keeps whatever the player
 # chose, and versions older than the two newest are pruned. See the Raspberry
 # Pi installer for the same rule.
-#
-# Concert Grand was once offered only on a first install, behind this marker,
-# so a player could remove it for good before the store recorded uninstalls.
-# A store that went through that offer and no longer holds it lost it to such
-# an uninstall: leave it out, as a recorded uninstall would. The marker is
-# still written for an older installer run over this one.
-concert_grand_id=org.rackforge.concert-grand
-default_marker="$root/state/bundled-default-initialized"
-skip_concert_grand=0
-if [[ -f "$default_marker" && ! -d "$root/plugin-store/packages/$concert_grand_id" ]]; then
-  skip_concert_grand=1
-fi
 shopt -s nullglob
 for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
-  if [[ "$(basename "$official_plugin")" == "RF-Concert-Grand.rfplugin" \
-    && "$skip_concert_grand" -eq 1 ]]; then
-    continue
-  fi
   install_output="$("$root/bin/rackforge-store" install-local \
     "$official_plugin" "$root/plugin-store" --official)"
   printf '%s\n' "$install_output"
@@ -87,9 +71,6 @@ for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
   if [[ ! "$install_output" =~ PLUGIN_(INSTALLED|REMOVED_BY_PLAYER)[[:space:]]+id=[^[:space:]]+ ]]; then
     printf 'could not read the plugin id installed from %s\n' "$official_plugin" >&2
     exit 1
-  fi
-  if [[ "$(basename "$official_plugin")" == "RF-Concert-Grand.rfplugin" ]]; then
-    printf '1\n' >"$default_marker"
   fi
 done
 shopt -u nullglob

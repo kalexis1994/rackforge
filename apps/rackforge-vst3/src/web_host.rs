@@ -249,7 +249,7 @@ fn installed_resource_path(
         .catalog
         .iter()
         .find(|candidate| candidate.plugin_id == plugin_id)
-        .ok_or_else(|| format!("RackForge VST3 does not carry {plugin_id}"))?;
+        .ok_or_else(|| format!("RackForge VST3 does not offer {plugin_id}"))?;
     let requirement = model
         .resources
         .iter()
@@ -317,7 +317,7 @@ fn handle_resource_request(
         {
             Ok(())
         } else {
-            Err(format!("RackForge VST3 does not carry {plugin_id}"))
+            Err(format!("RackForge VST3 does not offer {plugin_id}"))
         }
     };
     let outcome = match (method, path) {
@@ -368,7 +368,7 @@ fn handle_resource_request(
                 .catalog
                 .iter()
                 .find(|candidate| candidate.plugin_id == plugin_id)
-                .ok_or_else(|| format!("RackForge VST3 does not carry {plugin_id}"))?;
+                .ok_or_else(|| format!("RackForge VST3 does not offer {plugin_id}"))?;
             Ok(Value::Array(
                 model
                     .resources
@@ -628,7 +628,7 @@ fn catalog_model(
         .iter()
         .find(|model| model.plugin_id == plugin_id)
         .cloned()
-        .ok_or_else(|| format!("Plugin {plugin_id} is not bundled with RackForge VST3"))
+        .ok_or_else(|| format!("Plugin {plugin_id} is not installed and enabled in RackForge"))
 }
 
 fn validate_instance(command: &Value) -> Result<(), String> {

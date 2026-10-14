@@ -234,8 +234,7 @@ fn prepare_new_plugin_disabled(root: &Path) -> Result<(), RepositoryError> {
     Ok(())
 }
 
-/// The plugins a player uninstalled, kept apart from `activation.json` so a
-/// host that predates it reads its store unchanged.
+/// The plugins a player uninstalled.
 ///
 /// A release lays down its official set on every start. Without this list an
 /// official plugin the player removed came back -- enabled, as a newcomer --

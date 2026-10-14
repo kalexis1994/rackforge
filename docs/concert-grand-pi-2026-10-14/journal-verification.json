@@ -1,0 +1,16 @@
+{
+  "campanella": {
+    "journal_sha256": "50502f16a03035220cc031cdaf7f3b194bbe1490b9f4879dc1b2c4661d99d6ad",
+    "journal_bytes": 170795,
+    "error_lines": [],
+    "exact_parameters_after": true,
+    "deadline_misses": 0.0
+  },
+  "nocturno": {
+    "journal_sha256": "ae7f5d7d4f14824a3499928d6d906449d39cd6617197cafe8b372fddd63b25ee",
+    "journal_bytes": 141955,
+    "error_lines": [],
+    "exact_parameters_after": true,
+    "deadline_misses": 0.0
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "compile_commands": [
+    [
+      "rustc",
+      "--edition=2024",
+      "-O",
+      "--crate-name",
+      "rackforge_plugin_sdk",
+      "--crate-type",
+      "rlib",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/crates/rackforge-plugin-sdk/src/lib.rs",
+      "-o",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/librackforge_plugin_sdk.rlib"
+    ],
+    [
+      "rustc",
+      "--edition=2024",
+      "-O",
+      "--crate-name",
+      "rackforge_concert_grand",
+      "--crate-type",
+      "rlib",
+      "--crate-type",
+      "cdylib",
+      "--extern",
+      "rackforge_plugin_sdk=/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/librackforge_plugin_sdk.rlib",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/plugins/concert-grand/src/lib.rs",
+      "--out-dir",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build"
+    ],
+    [
+      "rustc",
+      "--edition=2024",
+      "-O",
+      "-L",
+      "dependency=/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build",
+      "--extern",
+      "rackforge_plugin_sdk=/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/librackforge_plugin_sdk.rlib",
+      "--extern",
+      "rackforge_concert_grand=/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/librackforge_concert_grand.rlib",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/tools/concert-grand-release-probe.rs",
+      "-o",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/probe"
+    ]
+  ],
+  "results": {
+    "Nocturno": {
+      "frames": 10256064,
+      "rate": 44100,
+      "block": 256,
+      "warmup_frames": 8820,
+      "events": 6027,
+      "peak": 0.33643636,
+      "rms": 0.028495827618985576,
+      "wall_seconds": 118.663128877,
+      "command": [
+        "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/probe",
+        "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/Nocturno-events.txt",
+        "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/Nocturno.f32",
+        "44100",
+        "10256064",
+        "256",
+        "concert",
+        "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/render.tuning"
+      ],
+      "raw_sha256": "940e6fc7e951004b7dd4097fa9ecfcac362c044169de7e6908be249886985355",
+      "windows_raw_sha256": "940e6fc7e951004b7dd4097fa9ecfcac362c044169de7e6908be249886985355",
+      "bit_identical_to_windows": true,
+      "realtime_ratio": 0.5102390140579954
+    },
+    "Campanella": {
+      "frames": 12355005,
+      "rate": 44100,
+      "block": 256,
+      "warmup_frames": 8820,
+      "events": 11381,
+      "peak": 0.9248338,
+      "rms": 0.05200867765318893,
+      "wall_seconds": 122.51164746,
+      "command": [
+        "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/probe",
+        "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/Campanella-events.txt",
+        "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/Campanella.f32",
+        "44100",
+        "12355005",
+        "256",
+        "concert",
+        "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/render.tuning"
+      ],
+      "raw_sha256": "7a4a81813117303279b5d61a1274d5e2d42e05766961474cdbccc13eeb837955",
+      "windows_raw_sha256": "7a4a81813117303279b5d61a1274d5e2d42e05766961474cdbccc13eeb837955",
+      "bit_identical_to_windows": true,
+      "realtime_ratio": 0.4372935221787446
+    }
+  },
+  "native_library_sha256": "738c0a3e3d93fa30de7caef1e1d7b9353bf6ed28ef346c069ec059d09649307d",
+  "source_sha256": "cb6d553c638f06fb43010984b6321ebcb9fa6f137832e755ba47eb9fa5e16b77"
+}

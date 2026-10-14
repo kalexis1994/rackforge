@@ -1,0 +1,32 @@
+{
+  "plugin_id": "org.rackforge.concert-grand",
+  "version": "0.171.36",
+  "package": "/home/kalex/rackforge/plugin-store/packages/org.rackforge.concert-grand/0.171.36",
+  "root": "/home/kalex/rackforge",
+  "backup": "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/backup",
+  "source_sha256": "cb6d553c638f06fb43010984b6321ebcb9fa6f137832e755ba47eb9fa5e16b77",
+  "files_sha256": {
+    "component.wasm": "441a7d4396e4c851616570936d6166408de4b7500a2b42cfe4c0ac1df17d5769",
+    "native/linux-aarch64/librackforge_concert_grand.so": "738c0a3e3d93fa30de7caef1e1d7b9353bf6ed28ef346c069ec059d09649307d",
+    "rackforge-plugin.toml": "3d93d5d37025d59308a5584ab3431c8f46bb567334c6f085af15b8f00a84e43f",
+    "metadata/runtime.json": "f8c499271876bd851d96ebdad4fc500e41a9d66dd2de1fc601d32ea054da45e6"
+  },
+  "config": "# The startup audio configuration RackForge hands to Core.\n#\n# Installers render this file into `<root>/config/audio.toml.example`,\n# replacing /home/kalex/rackforge with the deployment root and\n# /home/kalex/rackforge/plugin-store/packages/org.rackforge.concert-grand/0.171.36 with the bundled instrument they just\n# installed. The rendered file is a working configuration: copy it to\n# `config/audio.toml` and Core starts with it.\n#\n# It is also the seed the Web host copies the first time an instrument is\n# activated, replacing `package` with that instrument and dropping `preset`.\n# Everything else below reaches Core exactly as written, which is why this\n# file carries nothing specific to one plugin or one machine.\n\nschema_version = 3\npackage = \"/home/kalex/rackforge/plugin-store/packages/org.rackforge.concert-grand/0.171.36\"\ndata_root = \"/home/kalex/rackforge/data\"\n\n# Resource overrides belong to the plugin that declares them: Core refuses a\n# configuration that overrides a resource the active plugin does not declare,\n# so this seed carries none. Add them under a `[resources]` table only\n# alongside a `package` that declares those ids.\n\n[audio.output]\n# Nothing here names a make or a model, and nothing should: this file is\n# imaged onto machines whose interface nobody has met yet. `automatic` means\n# \"whichever connected output can run this profile\", and when more than one\n# can, the choice is by kind of connection -- something plugged into USB was\n# plugged in to be played through, a board's own output is the fallback, and\n# HDMI on a headless appliance usually leads to a screen that is not there.\n#\n# To pin one deliberately, replace the device table with\n# `mode = \"usb\"` and the interface's ids, or `mode = \"id\"` and the device id\n# Core prints in AUDIO_READY.\nsample_format = \"s32_le\"\nsample_rate_hz = 44100\nchannels = 2\n# RackForge's buffer on every platform: 256 samples a block, played from a\n# queue of three. LITTLE and the web settings change it to 128 or 512.\nperiod_frames = 256\nbuffer_frames = 768\n\n[audio.output.device]\nmode = \"automatic\"\n\n# Audio capture is opt-in. Uncomment this section to capture every input of\n# the interface -- up to 32 -- and let each Rack cable from the audio input\n# choose its own: a guitar on input 1, a voice on input 2. Keep rate and period\n# equal to the output profile so both streams remain in one clock domain.\n#\n# To capture only some inputs, list them: `channels = [1]` for a mono guitar\n# on input 1 alone. PLAY takes what is captured as a whole, as a Rack cable\n# left on \"All\" does -- one input on both sides, a pair side for side.\n# Core runs the capture on the output's rate and buffer whatever is written\n# here, and takes it along when the output's buffer changes.\n#\n# [audio.input]\n# sample_format = \"s32_le\"\n# sample_rate_hz = 44100\n# period_frames = 256\n# buffer_frames = 768\n# gain_db = 0\n#\n# [audio.input.device]\n# mode = \"automatic\"\n",
+  "service_environment": "Environment=RACKFORGE_ROOT=/home/kalex/rackforge RACKFORGE_AUDIO_WORKERS=4\n",
+  "native_startup_lines": [
+    "PLUGIN_NATIVE_BUILD id=org.rackforge.concert-grand version=0.171.36 platform=linux-aarch64",
+    "PLUGIN_NATIVE_BUILD id=org.rackforge.concert-grand version=0.171.36 platform=linux-aarch64",
+    "PLUGIN_NATIVE_BUILD id=org.rackforge.concert-grand version=0.171.36 platform=linux-aarch64"
+  ],
+  "thermal": {
+    "measure_temp": "temp=49.6'C",
+    "get_throttled": "throttled=0x0"
+  },
+  "health": {
+    "core_connected": true,
+    "revision": "91eb43f",
+    "schema_version": 1,
+    "status": "ok",
+    "ui_revision": "91eb43f"
+  }
+}

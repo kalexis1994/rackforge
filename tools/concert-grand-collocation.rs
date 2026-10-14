@@ -33,6 +33,7 @@ pub(super) fn integration_matrix(rule: &[(f64, f64)], h: f64) -> Vec<f64> {
 }
 
 pub(super) struct Collocation {
+    scalar_forces: bool,
     refresh_converged_forces: bool,
     order: usize,
     size: usize,
@@ -73,6 +74,7 @@ impl Collocation {
             }
         }
         Self {
+            scalar_forces: false,
             refresh_converged_forces: false,
             order,
             size,
@@ -96,12 +98,30 @@ impl Collocation {
     }
     fn forces(&mut self, wires: &mut [Wire]) {
         let width = wires[0].size();
-        for node in 0..self.order {
+        let batch_end = if self.scalar_forces {
+            0
+        } else {
+            self.order / 4 * 4
+        };
+        for node in (0..batch_end).step_by(4) {
+            for (i, wire) in wires.iter_mut().enumerate() {
+                let start = node * self.size + i * width;
+                wire.point_nonlinearity_batch4(
+                    &self.q[start..],
+                    self.size,
+                    &mut self.gradient[start..],
+                );
+            }
+        }
+        for node in batch_end..self.order {
             for (i, wire) in wires.iter_mut().enumerate() {
                 let range = node * self.size + i * width..node * self.size + (i + 1) * width;
                 wire.point_nonlinearity(&self.q[range.clone()], &mut self.gradient[range]);
             }
         }
+    }
+    pub(super) fn scalar_forces(&mut self) {
+        self.scalar_forces = true;
     }
     pub(super) fn refresh_converged_forces(&mut self) {
         self.refresh_converged_forces = true;

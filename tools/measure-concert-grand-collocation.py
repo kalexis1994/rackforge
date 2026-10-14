@@ -20,7 +20,11 @@ def main():
     parser.add_argument('--local', type=Path, required=True)
     parser.add_argument('--report', type=Path, required=True)
     parser.add_argument('--reuse-forces', action='store_true')
+    parser.add_argument('--batch-forces', action='store_true')
     args = parser.parse_args()
+    if args.reuse_forces and args.batch_forces:
+        raise ValueError('choose a single comparison stage')
+    compare_collocation = args.reuse_forces or args.batch_forces
     if args.local.exists() or args.report.exists():
         raise ValueError('fresh paths required')
     root = Path(__file__).resolve().parents[1]
@@ -31,16 +35,17 @@ def main():
     for name, sha in old['source_sha256'].items():
         if hashlib.sha256(subprocess.check_output(['git', 'show', args.reference_ref+':tools/'+name], cwd=root)).hexdigest() != sha:
             raise ValueError('frozen source mismatch: '+name)
-    baseline_label = 'collocation-512000-O8' if args.reuse_forces else 'optimized-trajectory'
+    baseline_label = 'reused-512000-O8' if args.batch_forces else ('collocation-512000-O8' if args.reuse_forces else 'optimized-trajectory')
     baseline = next(c for c in old['cases'] if c['label'] == baseline_label)
-    controls = [c for c in old['cases'] if c['label'] in ['collocation-128000-O24','collocation-256000-O16','collocation-512000-O8']] if args.reuse_forces else [baseline]
+    labels = ['reused-128000-O24','reused-256000-O16','reused-512000-O8'] if args.batch_forces else ['collocation-128000-O24','collocation-256000-O16','collocation-512000-O8']
+    controls = [c for c in old['cases'] if c['label'] in labels] if compare_collocation else [baseline]
     for entry in [*controls, *old['teacher_cases']]:
         for prefix in ['result', 'coefficient']:
             if digest(Path(entry[prefix+'_path'])) != entry[prefix+'_sha256']:
                 raise ValueError('reference data changed')
     if digest(Path(old['executable_path'])) != old['executable_sha256']:
         raise ValueError('baseline executable changed')
-    names = list(old['source_sha256'])+['concert-grand-collocation.rs', Path(__file__).name]
+    names = list(old['source_sha256'])+['concert-grand-collocation.rs','concert-grand-batch-cosine.rs', Path(__file__).name]
     sources = {name: digest(root/'tools'/name) for name in names}
     spec = importlib.util.spec_from_file_location('wire_audit', root/'tools/audit-concert-grand-phase-wire-energy.py')
     audit = importlib.util.module_from_spec(spec)
@@ -50,7 +55,8 @@ def main():
     exe = args.local/'trajectory.exe'
     subprocess.run(['rustc', '--edition=2021', '-O', '-C', 'target-cpu=native', '--cfg', 'concert_phase_library',
                     str(root/'tools/concert-grand-phase-trajectory.rs'), '-o', str(exe)], check=True)
-    record = dict(stage='reuse forces at converged collocation nodes' if args.reuse_forces else 'full nonlinear gradient at interaction collocation nodes', source_sha256=sources,
+    stage = 'four-node batched cosine transforms' if args.batch_forces else ('reuse forces at converged collocation nodes' if args.reuse_forces else 'full nonlinear gradient at interaction collocation nodes')
+    record = dict(stage=stage, source_sha256=sources,
                   reference_ref=args.reference_ref, reference_sources_authenticated_from_git=True,
                   reference_report_path=str(args.reference_report.resolve()), reference_report_sha256=digest(args.reference_report),
                   reference_reintegrated=False, baseline_case=baseline, baseline_executable_path=old['executable_path'],
@@ -85,12 +91,12 @@ def main():
             np.testing.assert_array_equal(np.delete(f['parameters'],4), np.delete(control_fixture['parameters'],4))
             path = args.local/(label+'.bin')
             write_fixture(path, f)
-            frozen_control = next((c for c in controls if c.get('rate_hz')==rate and c.get('order')==order),None) if args.reuse_forces else (baseline if rate==2048000 else None)
+            frozen_control = next((c for c in controls if c.get('rate_hz')==rate and c.get('order')==order),None) if compare_collocation else (baseline if rate==2048000 else None)
             if frozen_control and digest(path) != frozen_control['coefficient_sha256']:
                 raise ValueError('control physical input changed')
             microframes = rate//8000
             mode = ['bench', 1, order, 8] if bench else ['verify', 1, order]
-            extra = [f'--buffer-microframes={microframes}'] if bench and (executable == exe or args.reuse_forces) else []
+            extra = [f'--buffer-microframes={microframes}'] if bench and (executable == exe or compare_collocation) else []
             command = [str(executable), str(path), *map(str, mode), *flags, *extra]
             process = subprocess.run(command, capture_output=True, text=True, check=True)
             data = json.loads(process.stdout)
@@ -118,7 +124,7 @@ def main():
                 if not flags:
                     entry['frozen_phase_arrays_and_work_equal'] = all(data[k] == previous[k] for k in
                                                                      ['q', 'v', 'work_relative_max', 'numerical_lambda_abs_max'])
-                if args.reuse_forces and frozen_control:
+                if compare_collocation and frozen_control:
                     control_data = json.loads(Path(frozen_control['result_path']).read_text())
                     control_error = relative(metric(data),metric(control_data))
                     entry.update(frozen_control_state_relative=control_error,control_1e9_gate_passed=control_error<=1e-9,
@@ -137,6 +143,20 @@ def main():
             save()
 
         save()
+        if args.batch_forces:
+            for rate,order in [(128000,24),(256000,16),(512000,8)]:
+                run(f'batched-{rate}-O{order}',rate,order,['--collocation'])
+                run(f'single-{rate}-O{order}',rate,order,['--collocation','--scalar-collocation-forces'])
+            run('frozen-benchmark',512000,8,['--collocation'],True,old['executable_path'])
+            run('single-benchmark',512000,8,['--collocation','--scalar-collocation-forces'],True)
+            run('batched-benchmark',512000,8,['--collocation'],True)
+            run('batched-repeat',512000,8,['--collocation'],True)
+            run('frozen-repeat',512000,8,['--collocation'],True,old['executable_path'])
+            run('batched-256k-benchmark',256000,16,['--collocation'],True)
+            record['sources_unchanged'] = all(digest(root/'tools'/name)==sha for name,sha in sources.items())
+            record['reference_report_unchanged'] = digest(args.reference_report)==record['reference_report_sha256']
+            save()
+            return
         if args.reuse_forces:
             for rate,order in [(128000,24),(256000,16),(512000,8)]:
                 run(f'reused-{rate}-O{order}',rate,order,['--collocation'])

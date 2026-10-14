@@ -32,6 +32,9 @@ struct Complex {
     i: f64,
 }
 type FftKernel = fn(&mut [Complex], &[Complex], bool);
+#[cfg(concert_phase_library)]
+#[path = "concert-grand-batch-cosine.rs"]
+mod batch_cosine;
 fn fft_butterflies_portable(data: &mut [Complex], roots: &[Complex], inverse: bool) {
     let mut width = 2;
     while width <= data.len() {
@@ -334,6 +337,8 @@ struct AxialEndpoint<'a> {
     gain: &'a [f64],
 }
 pub struct Wire {
+    #[cfg(concert_phase_library)]
+    batch4: Option<batch_cosine::BatchCosine>,
     nt: usize,
     nl: usize,
     nodes: usize,
@@ -405,6 +410,8 @@ impl Wire {
             })
             .collect();
         Self {
+            #[cfg(concert_phase_library)]
+            batch4: None,
             nt,
             nl,
             nodes,

@@ -137,7 +137,7 @@ struct Trajectory {
 }
 impl Trajectory {
     fn new(
-        wires: Vec<Wire>,
+        mut wires: Vec<Wire>,
         plans: Vec<PhaseQuadratic>,
         q: Vec<f64>,
         v: Vec<f64>,
@@ -172,6 +172,9 @@ impl Trajectory {
         };
         let mut sample_transfer = Vec::with_capacity(order * transverse_indices.len());
         let rule = if use_collocation {
+            for wire in &mut wires {
+                wire.prepare_batch4();
+            }
             Vec::new()
         } else {
             gauss(order, h)
@@ -240,6 +243,11 @@ impl Trajectory {
                 .as_ref()
                 .map(|c| c.prepared_bytes())
                 .unwrap_or(0)
+            + self
+                .wires
+                .iter()
+                .map(|w| w.batch_prepared_bytes())
+                .sum::<usize>()
     }
     fn project(&mut self, target: f64, mut lambda: f64) -> Result<(f64, f64), &'static str> {
         for _ in 0..12 {
@@ -572,6 +580,30 @@ fn main() {
         .iter()
         .map(|t| Wire::new(nt, nl, nodes, p[0], p[1], *t, ea, ei))
         .collect::<Vec<_>>();
+    if args.get(2).is_some_and(|x| x == "batch-gradient") {
+        let stride = 3 * width;
+        let mut inputs = vec![0.; 4 * stride];
+        let mut batch = inputs.clone();
+        let mut single = inputs.clone();
+        for (lane, factor) in [1., -0.25, 0., 1e-12].iter().enumerate() {
+            for j in 0..stride {
+                inputs[lane * stride + j] = factor * q[j];
+            }
+        }
+        for (i, wire) in wires.iter_mut().enumerate() {
+            wire.prepare_batch4();
+            wire.point_nonlinearity_batch4(&inputs[i * width..], stride, &mut batch[i * width..]);
+            for lane in 0..4 {
+                let range = lane * stride + i * width..lane * stride + (i + 1) * width;
+                wire.point_nonlinearity(&inputs[range.clone()], &mut single[range]);
+            }
+        }
+        println!(
+            "{{\"gradient\":{:?},\"single_gradient\":{:?},\"q_nodes\":{:?}}}",
+            batch, single, inputs
+        );
+        return;
+    }
     if args.get(2).is_some_and(|x| x == "transverse-gradient") {
         let mut full = vec![0.; 3 * width];
         let mut partial = full.clone();
@@ -697,6 +729,14 @@ fn main() {
         use_collocation,
     );
     model.constrained = !args.iter().any(|x| x == "--unconstrained");
+    if args.iter().any(|x| x == "--scalar-collocation-forces") {
+        if let Some(collocation) = &mut model.collocation {
+            collocation.scalar_forces();
+        }
+        for wire in &mut model.wires {
+            wire.disable_batch4();
+        }
+    }
     if args.iter().any(|x| x == "--refresh-converged-forces") {
         if let Some(collocation) = &mut model.collocation {
             collocation.refresh_converged_forces();

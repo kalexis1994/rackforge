@@ -224,6 +224,46 @@ class PhaseTrajectoryTests(unittest.TestCase):
             self.assertEqual(reused['allocations'],0)
             self.assertLess(reused['midpoint_residual_relative_max'],1e-11)
 
+    def test_four_node_gradient_matches_single_and_independent_spatial_quadrature(self):
+        for nt in [4,96,256]:
+            if nt==256:
+                f=self.coast(4);width=4*nt
+                f.update(transverse=nt,axial=2*nt,nodes=1024,shapes=np.zeros(3*nt),
+                         q=np.zeros(3*width+1),v=np.zeros(3*width+1),endpoint=np.zeros(3*width+1))
+                f['q'][[2*nt-1,3*nt-1,width-1]]=[2e-10,1e-8,-1.2e-8]
+            else:f=self.coast(nt)
+            data=self.run_native(f,'batch-gradient');width=4*nt;nl=2*nt
+            np.testing.assert_array_equal(data['gradient'],data['single_gradient'])
+            q=np.asarray(data['q_nodes']).reshape(4,3,width)
+            observed=np.asarray(data['gradient']).reshape(4,3,width)
+            np.testing.assert_array_equal(observed[2],np.zeros((3,width)))
+            self.assertGreater(np.linalg.norm(observed[3]),0.)
+            length,mu,young,density=f['parameters'][:4];ea=young*mu/density;root=np.sqrt(mu*length/2)
+            points,weights=roots_legendre(16);cells=2*nt
+            x=((np.arange(cells)[:,None]+(points[None]+1)/2)*length/cells).ravel()
+            wt=np.tile(weights*length/(2*cells),cells)
+            du=np.cos(x[:,None]*np.pi*np.arange(1,nl+1)/length)*(np.pi*np.arange(1,nl+1)/length/root)
+            dt=np.cos(x[:,None]*np.pi*np.arange(1,nt+1)/length)*(np.pi*np.arange(1,nt+1)/length/root)
+            for lane in [0,1,3]:
+                for wire in range(3):
+                    u=du @ q[lane,wire,:nl];v=dt @ q[lane,wire,nl:nl+nt];w=dt @ q[lane,wire,nl+nt:]
+                    eta=.5*(v*v+w*w)
+                    expected=np.r_[ea*du.T @ (wt*eta),ea*dt.T @ (wt*(u+eta)*v),ea*dt.T @ (wt*(u+eta)*w)]
+                    if np.linalg.norm(expected)>0:
+                        self.assertLess(relative(observed[lane,wire],expected),2e-9)
+                    else:
+                        self.assertTrue(np.all(observed[lane,wire]==0.))
+
+    def test_batched_forces_preserve_full_trajectory_and_scalar_tail(self):
+        for nt,rate,order in [(4,128000,10),(96,128000,24),(96,256000,16),(96,512000,8)]:
+            f=fixture(transverse=nt,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.
+            batch=self.run_native(f,'verify',1,order,'--collocation')
+            single=self.run_native(f,'verify',1,order,'--collocation','--scalar-collocation-forces')
+            self.assertTrue(batch['completed'] and single['completed'])
+            for key in ['q','v','work_relative_max','numerical_lambda_abs_max','maximum_iterations']:
+                self.assertEqual(batch[key],single[key],key)
+            self.assertEqual(batch['allocations'],0)
+
     def test_coupled_trajectory_refines_against_continuous_ode(self):
         f=self.coast(4,.0005);ns=len(f['q'])-1;core=f['system'].string
         def derivative(_t,y):

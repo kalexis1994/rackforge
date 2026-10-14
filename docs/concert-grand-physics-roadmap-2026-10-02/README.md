@@ -1,6 +1,6 @@
 # Seguimiento de física pendiente — Concert Grand
 
-Actualizado: 2026-10-13. El usuario autoriza investigar y probar los mecanismos
+Actualizado: 2026-10-14. El usuario autoriza investigar y probar los mecanismos
 pendientes en orden, documentando resultados. Las muestras disponibles permiten
 comparar el resultado audible; no identifican de forma única cada mecanismo real.
 
@@ -223,6 +223,18 @@ suite acumulada 47. El refresco final anterior se conserva por flag y es
 exacto al control. Anderson se descarta por mayor costo e iteraciones.
 Ver [medición](medidas-P7-cuerdas-nativas-2026-10-13/collocation-force-reuse.json)
 y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
+
+El 2026-10-14, agrupar las transformadas de **cuatro nodos temporales** conserva
+exactamente q/v, ledger y lambda de ca7e5f87 a 128/256/512 kHz en los mismos
+6 ms. La media a 512 kHz/8 baja **77,829 → 47,915 ms**, repetición **48,068 ms**
+frente a **78,155 ms** del control repetido: **38,4–38,5 % menos tiempo**.
+Máximos **48,733/50,052 ms** y cero asignaciones. Las tablas/buffers crecen
+172.032 bytes hasta **1.351.680 bytes**, manteniendo todos los modos. Pasan
+las **49 pruebas** de trayectoria, fases, cuerdas y presión, incluyendo
+gradientes independientes con 256/512 modos, nodos cero y amplitudes pequeñas.
+CPU sigue rechazado frente a 0,125 ms; el alcance de estado continúa en los
+6 ms sin contacto/cuerpo. Ver la
+[medición autenticada](medidas-P7-cuerdas-nativas-2026-10-14/collocation-batch.json).
 
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)

@@ -185,3 +185,71 @@ su código no queda en la ruta actual.
 
 Sigue reducir las evaluaciones y contracciones de la colocación, y extender
 duración/contacto antes de integración con cuerpo, presión, pedales y polifonía.
+
+## Transformadas agrupadas de cuatro nodos — 2026-10-14
+
+La [medición agrupada](medidas-P7-cuerdas-nativas-2026-10-14/collocation-batch.json)
+autentica **ca7e5f87**, conserva los tres controles de 6 ms y reutiliza las
+referencias finas anteriores. La hipótesis es aprovechar que las fuerzas
+de distintos nodos temporales usan los mismos coeficientes de transformación.
+
+El nuevo `concert-grand-batch-cosine.rs` procesa cuatro nodos independientes
+en paralelo. Cada componente real/imaginaria contiene cuatro valores f64,
+alineados a 32 bytes; las operaciones ordinarias permiten autovectorización
+del compilador. El ensamblador local con `target-cpu=native` contiene operaciones
+de cuatro doubles en registros YMM en la síntesis agrupada. No se agregan
+intrinsics ni accesos sin comprobación de límites. Se reutilizan las raíces,
+fases y permutaciones preparadas del plan de cosenos existente.
+
+Cada canal sintetiza los tres campos y analiza los tres componentes del
+gradiente con la misma cuadratura y normalización. Los canales no se mezclan;
+no se promedian fuerzas, recortan modos ni limitan amplitudes. El cálculo
+agrupado devuelve sólo el gradiente consumido por la iteración; las evaluaciones
+de energía y las raíces siguen usando la ruta completa individual. Las
+asignaciones ocurren en la preparación. Para órdenes que no son múltiplos
+de cuatro, los nodos restantes usan la evaluación individual.
+
+La ruta nueva se limita a la biblioteca experimental de fases. El núcleo
+normal de contacto conserva sus algoritmos. `--scalar-collocation-forces`
+recupera la evaluación individual y libera el workspace agrupado antes del
+procesamiento. La opción de refresco final anterior también se conserva.
+
+Los seis replays de **6 ms** —agrupado e individual a 128 kHz/24, 256 kHz/16
+y 512 kHz/8— reproducen **exactamente q/v, ledger total y lambda de ca7e5f87**.
+El máximo de iteraciones sigue en 8/7/6. Los errores frente al maestro permanecen
+en **0,053051 / 0,040580 / 0,044801 %** y los errores finales por cuerda en
+**2,048e−13 / 4,974e−14 / 8,302e−14**. Todos pasan sus gates de estado y energía.
+
+Los benchmarks son secuenciales, sin pruebas simultáneas, y avanzan el mismo
+**1 ms físico** en ocho buffers de **0,125 ms**. Cada paso incluye sus
+comprobaciones de energía:
+
+| Ruta | Media por buffer | P99/máximo | Asignaciones |
+|---|---:|---:|---:|
+| Ejecutable congelado ca7e5f87, 512 kHz/8 | 77,829 ms | 78,667 ms | 0 |
+| Ejecutable actual, nodos individuales | 82,146 ms | 84,012 ms | 0 |
+| Cuatro nodos agrupados, 512 kHz/8 | **47,915 ms** | **48,733 ms** | **0** |
+| Repetición agrupada | **48,068 ms** | **50,052 ms** | **0** |
+| Repetición del ejecutable congelado | 78,155 ms | 79,330 ms | 0 |
+| Cuatro nodos agrupados, 256 kHz/16 | 54,237 ms | 56,335 ms | 0 |
+
+La media mejora **1,624× / 38,44 %** frente al primer control; la repetición
+mejora **1,626× / 38,50 %** frente al control repetido. Los máximos también
+bajan en estas mediciones. Todos los benchmarks pasan energía por cuerda y
+ledger. Las tablas y buffers contabilizados suman **1.351.680 bytes** a
+512 kHz/8, incremento de **172.032 bytes** por los workspaces de las tres
+cuerdas. No es memoria total del proceso. **CPU sigue rechazado**: máximos
+48,733/50,052 ms frente a 0,125 ms, unas **390/400 veces** el presupuesto.
+
+Pasan las **49 pruebas** actuales: 17 de trayectoria, seis de fases, 22 del
+núcleo de cuerdas y cuatro de presión. Las dos regresiones nuevas comparan
+gradientes agrupados e individuales y una integración espacial Gauss
+independiente con 4/96/256 modos transversales y hasta 512 axiales. Incluyen
+un canal exactamente vacío y otro con amplitud 1e−12 del control, que permanece
+activo. La prueba de trayectoria compara estado, ledger y lambda exactos a
+tres relojes y prueba un orden 10 con dos nodos restantes individuales. No
+cambia el gate de residual 1e−11 ni el de conservación energética 1e−9.
+
+La mejora mantiene el alcance del sostenido mixto de 6 ms sin contacto, cuerpo,
+presión, pedales o polifonía. Sigue reducir el costo y extender la validación
+temporal antes de seleccionar una ruta para el instrumento tocable.

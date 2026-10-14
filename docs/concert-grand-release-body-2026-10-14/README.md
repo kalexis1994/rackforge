@@ -126,6 +126,46 @@ comparándose por separado y la selección final será por escucha.
 - `tools/audit-concert-grand-release-prompt.py`: ablación de un coeficiente.
 - `tools/verify-concert-grand-release-probe.py`: comprobación de la huella.
 
-Datos de trabajo en `local/concert-grand-release-body-2026-10-14/`.
-Los archivos de referencia permanecen en su ubicación original de investigación;
-no se duplican grabaciones ni factores acústicos.
+## La Campanella completa y limpieza de ensayos anteriores
+
+A pedido del usuario se eliminaron **14.987 archivos generados**, que sumaban
+33.605.638.126 bytes (**31,30 GiB**): audios de ensayos anteriores, cachés
+numéricas y binarios de diagnóstico. Se conservaron código, MIDI, informes,
+mediciones CSV, grabaciones originales en `local/reference-audio` y el entorno
+Python. Los audios crudos y referencias derivadas de los bancos anteriores ya
+no están disponibles; sus informes y hashes quedan como registro histórico.
+El [resumen de limpieza](cleanup-2026-10-14.json) identifica las extensiones,
+el espacio liberado y el inventario completo conservado en `local/`.
+
+Se generó un nuevo audio de **referencia de la release 0.171.35**, sin aplicar
+todavía una mejora de cuerpo/sostenido. El MIDI completo dura 275,159 s y el
+WAV añade cinco segundos de cola: **280,159 s**. El proceso nativo tardó
+**25,85 s** en esta máquina, unas 10,84 veces más rápido que tiempo real.
+Esto mide el render nativo offline, no el margen de CPU del plugin WASM.
+
+Audio para escuchar:
+`C:/SHARED/Piano-Campanella-release-2026-10-14/Campanella-release-0.171.35.wav`.
+
+El nuevo render procesa las 4.249 pulsaciones y sus 4.249 liberaciones en una
+sola instancia continua del piano de producción. Conserva tempo, orden,
+velocidades y valores continuos de pedal del MIDI original; el programa 0
+queda seleccionado mediante el preset Concert. Salida estéreo float32 a
+44.100 Hz, bloques de 256 muestras, ganancia de exportación 1, sin
+normalización adicional. Pico **0,92546**; RMS de los últimos 100 ms
+**6,13e−12**, por lo que la cola final ya se extinguió.
+
+Se comprobó la igualdad exacta entre muestras crudas y WAV, ausencia de
+valores no finitos y saturación, fuentes de producción idénticas a `v0.1.32`,
+y reproducción de la huella publicada `e74df30116b39a5a` con la inicialización
+de CI. El lector directo del MIDI coincide en los 11.382 eventos con el plan
+anterior; la diferencia temporal máxima de 1,302 microsegundos corresponde a
+la cuantización a 256 kHz de aquel plan. El render nuevo usa tiempos racionales
+del MIDI original y redondea una sola vez a muestras de audio.
+
+- [Procedencia, tiempos y comprobaciones del render](campanella-baseline.json).
+- [Huella de la biblioteca recompilada para este render](campanella-probe-verification.json).
+- `tools/render-concert-grand-release-midi.py`: lector MIDI y render completo.
+- Nuevos datos de trabajo en `local/concert-grand-release-campanella-2026-10-14/`.
+
+Este WAV será la versión A para comparar futuros cambios locales de cuerpo
+y sostenido con el mismo MIDI, preset y nivel de exportación.

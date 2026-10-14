@@ -1,0 +1,59 @@
+{
+  "created": "2026-10-14T17:26:22.2159520-03:00",
+  "inventory_sha256": "dac2c585b344018364ebad8a57263c45e42fffa823dc149691f1294f9b591a6f",
+  "count": 14987,
+  "deleted_bytes": 33605638126.0,
+  "free_before": 99470364672,
+  "free_after": 133089210368,
+  "preserved": [
+    "source files and source archives",
+    "reports and CSV measurements",
+    "local/reference-audio",
+    "Python environment and dependency cache",
+    "Git repository and worktrees"
+  ],
+  "extensions": {
+    ".exe": {
+      "count": 158,
+      "bytes": 726843993
+    },
+    ".f32": {
+      "count": 7526,
+      "bytes": 20457997232
+    },
+    ".wav": {
+      "count": 4384,
+      "bytes": 4231098394
+    },
+    ".rlib": {
+      "count": 9,
+      "bytes": 7099136
+    },
+    ".rmeta": {
+      "count": 4,
+      "bytes": 1979413
+    },
+    ".pdb": {
+      "count": 6,
+      "bytes": 14966784
+    },
+    ".npz": {
+      "count": 58,
+      "bytes": 1037426430
+    },
+    ".f64": {
+      "count": 2321,
+      "bytes": 5204457488
+    },
+    ".bin": {
+      "count": 520,
+      "bytes": 14141928
+    },
+    ".npy": {
+      "count": 1,
+      "bytes": 1909627328
+    }
+  },
+  "full_inventory": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\cleanup-concert-grand-inventory-2026-10-14.json",
+  "scope": "Only inventoried generated renders, numerical caches and diagnostic build outputs. No recursive directory removal."
+}

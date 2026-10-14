@@ -1,0 +1,126 @@
+{
+  "role": "Published release listening baseline; no new DSP improvement applied",
+  "release": "RackForge v0.1.32 / Concert Grand 0.171.35",
+  "git_head": "fc8fa523f097bc2ead786dcb243b3748b178e50d",
+  "midi_duration_seconds": 275.1588541666667,
+  "audio_duration_seconds": 280.15884353741495,
+  "rate": 44100,
+  "channels": 2,
+  "block": 256,
+  "tail_seconds": 5,
+  "export_gain": 1,
+  "counts": {
+    "cc64": 2872,
+    "cc67": 11,
+    "strikes": 4249,
+    "note_off": 4249
+  },
+  "source_events": 11382,
+  "rendered_events": 11381,
+  "program_selection": [
+    {
+      "seconds": 0.0,
+      "program": 0,
+      "reason": "Piano program 0 selected by concert preset"
+    }
+  ],
+  "synthetic_end_events": [],
+  "native": {
+    "frames": 12355005,
+    "rate": 44100,
+    "block": 256,
+    "warmup_frames": 8820,
+    "events": 11381,
+    "peak": 0.9254635,
+    "rms": 0.05237269808056979,
+    "wall_seconds": 25.7869334
+  },
+  "render_process_seconds": 25.851025700001628,
+  "peak": 0.9254634976387024,
+  "tail_last_100ms_rms": 6.130995762307738e-12,
+  "last_samples": [
+    6.745352106735103e-12,
+    3.3174448431372294e-12
+  ],
+  "output": "C:\\SHARED\\Piano-Campanella-release-2026-10-14\\Campanella-release-0.171.35.wav",
+  "output_sha256": "bd0d95e22be07bed0dcc630ccc85c646d33fdfc127a9f93b3400b002c7095f4b",
+  "raw_sha256": "e91752fa53b8872db745c4793b525af7bee05f90f686843d03ea87c1acf81d41",
+  "files_sha256": {
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\concert-grand-release-probe.rs": "317935110022c4e58e35c4ba1093a72dd939823ff029477aa4c3fbe462a26b5d",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\render-concert-grand-release-midi.py": "be9050450f23128766a3dd77d1c8c2a0c26c9dc159d138f5c443035a233e3d8b",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs": "e16dc6ca43d2c37652eaa0444b360c5d1f6cc96b37cf65816749f18f8adea841",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\crates\\rackforge-plugin-sdk\\src\\lib.rs": "af557b4b598264ce09d000916c91388804b763337c6517d13f09d32faca793ab",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib": "dd7a10832c20260cd98c29bda740fa10d3908a335a4f7da34d3e78a170b8a068",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_concert_grand.rlib": "f04812fa488f9f9edaf1869037d9b58496fca5cddd2bfde095b4d9033b281609",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe": "cfe4662a2e5783825acf8825009ebba1431a7baa33794fe40a83c7aa2b679771",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\piano-comparacion\\09-midi\\liszt-la-campanella.mid": "af07dbf66a65bbb761ca0ef261e3657267350f62bb963d6f298d2ea46684122a",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\events.txt": "3fe9e3a7b11805cefd31fae5c6375ebdb9a9cd59385b57cf0a6406a7ea5d22b5"
+  },
+  "compile_commands": [
+    [
+      "rustc",
+      "+1.98.0-x86_64-pc-windows-msvc",
+      "--edition=2024",
+      "-O",
+      "--crate-name",
+      "rackforge_plugin_sdk",
+      "--crate-type",
+      "rlib",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\crates\\rackforge-plugin-sdk\\src\\lib.rs",
+      "-o",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib"
+    ],
+    [
+      "rustc",
+      "+1.98.0-x86_64-pc-windows-msvc",
+      "--edition=2024",
+      "-O",
+      "--crate-name",
+      "rackforge_concert_grand",
+      "--crate-type",
+      "rlib",
+      "--extern",
+      "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs",
+      "-o",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_concert_grand.rlib"
+    ],
+    [
+      "rustc",
+      "+1.98.0-x86_64-pc-windows-msvc",
+      "--edition=2024",
+      "-O",
+      "-L",
+      "dependency=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14",
+      "--extern",
+      "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib",
+      "--extern",
+      "rackforge_concert_grand=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_concert_grand.rlib",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\concert-grand-release-probe.rs",
+      "-o",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe"
+    ]
+  ],
+  "render_command": [
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\events.txt",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\Campanella-release-0.171.35.f32",
+    "44100",
+    "12355005",
+    "256",
+    "concert"
+  ],
+  "validation": [
+    "4249 strikes and 4249 note releases",
+    "Original tempo, order and continuous controllers",
+    "Single continuous production instance; no note cache",
+    "Production source matches v0.1.32",
+    "Finite stereo output, peak below full scale, exact WAV/raw sample equality"
+  ],
+  "independent_previous_plan_check": {
+    "events": 11382,
+    "maximum_timing_difference_seconds": 1.3020833478094573e-06,
+    "previous_plan_sha256": "55c92764fc7f9e370d2e31c0ecd3297d73cbcb921bcef9192098f4a3dd6577e5",
+    "passed": true
+  }
+}

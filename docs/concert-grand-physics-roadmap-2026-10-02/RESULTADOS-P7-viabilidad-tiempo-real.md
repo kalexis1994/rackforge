@@ -143,6 +143,11 @@ otra prueba de costo, banda, contacto, registros y polifonía; no está implemen
 ni se promete su rendimiento. Estos datos no justifican seguir tratando las
 microoptimizaciones del solucionador completo como un camino asegurado.
 
+Continuación posterior: la hipótesis se implementó y midió en el
+[ensayo híbrido lineal/no lineal](RESULTADOS-P7-hibrido-lineal-no-lineal.md).
+Ese ensayo conserva todos los modos y documenta por separado el costo,
+la recuperación de energía aguda y el error de sus acoplamientos eliminados.
+
 ## Integridad y pruebas
 
 La auditoría verifica **130 ejecuciones nativas**, entradas, resultados,

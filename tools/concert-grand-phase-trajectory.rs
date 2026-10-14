@@ -7,6 +7,8 @@ mod collocation;
 mod profile;
 #[path = "concert-grand-observation.rs"]
 mod observation;
+#[path = "concert-grand-hybrid.rs"]
+mod hybrid;
 #[allow(dead_code)]
 #[path = "concert-grand-native-strings.rs"]
 mod native;
@@ -666,6 +668,11 @@ fn main() {
         .unwrap_or(64);
     assert!((1..=64).contains(&frames) && 256 % frames == 0 && p[4] > 0.);
     let h = frames as f64 / p[4];
+    if let Some(low) = args.iter().find_map(|x| x.strip_prefix("--linear-highs=")) {
+        assert!(args.iter().any(|x| x == "--collocation"));
+        hybrid::run(&args, &data, nt, nl, wires, q, v, frames, order, low.parse().unwrap());
+        return;
+    }
     if args.get(2).is_some_and(|x| x == "collocation-rule") {
         let rule = gauss(order, h);
         let serial_rule = rule.iter().map(|&(t, w)| [t, w]).collect::<Vec<_>>();

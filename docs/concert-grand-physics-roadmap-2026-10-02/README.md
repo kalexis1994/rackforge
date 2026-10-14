@@ -317,6 +317,19 @@ consume 0,1231 ms medios/0,1550 ms máximos para una nota. El recorte simple
 no demuestra un piano fiel y polifónico. El modelo completo y la fábrica
 mantienen sus parámetros; pasan 32 pruebas actuales, suite acumulada 58.
 
+La [variante híbrida lineal/no lineal](RESULTADOS-P7-hibrido-lineal-no-lineal.md)
+conserva todas las coordenadas 96/192 y reduce sólo el potencial no lineal.
+Ocho modos no lineales mejoran el error mecánico suave **4,52 → 0,376 %**;
+en el fuerte dan **6,556 %**, con energía aguda presente y evolución espectral
+incorrecta. Doce/24 modos dan **2,705/0,429 %** en el fuerte, pero las medias
+cuestan **0,2011/0,6796 ms** por bloque de 0,125 ms. La opción más barata
+fuerte mide **0,1318 ms medios / 0,1451 ms máximos**, sin mezclador de audio.
+Los seis casos pasan refinamiento temporal; ninguno pasa el plazo del
+solucionador. La auditoría autentica 31 ejecuciones, energía híbrida por
+cuerda <2,381e−12 y cero asignaciones. El estado mixto sigue fallando con
+130,97 % de error. Pasan 36 pruebas actuales; suite acumulada 62, manteniendo
+pendientes reacción no lineal de agudos, audio causal e instrumento integrado.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

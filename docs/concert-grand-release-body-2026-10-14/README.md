@@ -333,3 +333,24 @@ el candidato; la diferencia queda dentro de la variación de las mediciones.
 
 **Pendiente de escucha del usuario.** La rama contiene el candidato, con el
 diagnóstico previo separado en `29ea9c5e`. No se publica ni instala un paquete.
+
+## Nocturno de Chopin para escucha
+
+Se renderiza completo `chopin-nocturno-op9-2.mid` con el mismo candidato de
+cuerpo del fundamental y el residuo agudo aceptado, sin cambiar el DSP.
+Son 1.498 pulsaciones y 1.498 liberaciones; se conservan tempo, velocidades,
+pedal continuo, una corda y el mensaje inicial de sostenuto. Los 6.028 eventos
+coinciden con el plan histórico; la diferencia temporal máxima de 1,302
+microsegundos corresponde a su anterior cuantización a 256 kHz. El render
+nuevo usa directamente los tiempos racionales del MIDI.
+
+La música dura 224,564 s y se añaden ocho segundos de cola, conservando el
+estado final original del pedal (CC64=80), sin eventos artificiales ni fade.
+El WAV completo dura **232,564 s (3:53)** y el proceso tarda **24,72 s**.
+Pico **0,33999**; RMS final de 100 ms **1,33e−11**. Se verifica salida finita,
+igualdad exacta WAV/crudo y hashes del ejecutable y las fuentes del candidato.
+Ganancia de exportación 1, sin normalización ni EQ adicional.
+
+Audio: `C:/SHARED/Piano-Nocturno-2026-10-14/Chopin-Nocturno-op9-2-cuerpo-medio.wav`.
+[Procedencia y comprobaciones](nocturno-render.json).
+Herramienta reutilizable: `tools/render-concert-grand-midi.py`.

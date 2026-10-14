@@ -28,7 +28,8 @@ etapa de cobertura estructural.
 
 ## Base y reglas de comparación
 
-- Fábrica y paquete actuales: 0.172.0. El paquete en `C:\SHARED` conserva
+- Base histórica de la investigación local: 0.172.0, distinta de la release
+  publicada 0.171.35 elegida el 2026-10-14. Su paquete en `C:\SHARED` registró
   SHA256 `ecca3e6381a130e8db088315f406296589f30a5a2ee75475acec176a1b9a55cb`.
 - El control A sin drenaje conserva un sostenido que gustó al usuario. Es una
   ablación resistiva, **no una nueva calibración física aceptada o instalada**.
@@ -46,7 +47,23 @@ etapa de cobertura estructural.
 
 ## Orden y estado
 
-### Prioridad actual: escuchar un MIDI con render offline reducido
+### Prioridad actual: mejorar desde la release publicada
+
+El 2026-10-14, después de la última escucha, el usuario indica que el prototipo
+mejoró un poco pero está muy lejos del modelo que funciona en la release.
+Se toma como base publicada **RackForge v0.1.32 / Concert Grand 0.171.35**,
+confirmada contra el tag y GitHub. **0.172.0 es la versión de esta rama local**;
+los informes históricos que la llaman «actual» no identifican la release publicada.
+El usuario confirma la versión incluida en la release y elige **cuerpo y
+sostenido** como primera prioridad de mejora.
+La [revisión y aprendizajes](REVISION-release-y-aprendizajes-2026-10-14.md)
+separa los controles útiles de los cambios que no ganaron en escucha y
+prioriza medir cuerpo/sostenido del registro medio, ataques/reiteraciones,
+balance y costo sobre la versión publicada, sin atribuirle defectos medidos
+sólo en 0.172.0. La investigación nativa se conserva;
+la siguiente etapa deja de perseguir su sustitución integral de la release.
+
+### Historial: escucha MIDI del prototipo offline
 
 El 2026-10-14 el usuario prioriza escuchar un fragmento MIDI en un tiempo
 razonable y evaluar con el oído las simplificaciones físicas. Los errores
@@ -86,8 +103,8 @@ provisional configurable. Nueve controles pasan. Se entregan **37,1 s** nuevos
 con 310 golpes, calculados en **4 min 39,3 s** incluida preparación. En las
 ventanas de fuerza medidas, las colas inferiores al 1 % del ataque pasan de
 66 a cero, con idéntica ganancia; los primeros ocho segundos de música son
-idénticos bit a bit al audio anterior. La valoración del nuevo pasaje sigue
-pendiente antes de repetir el render largo. WAV en
+idénticos bit a bit al audio anterior. La escucha posterior lo encuentra algo
+mejor, pero muy lejos de la release; no se selecciona como nueva base. WAV en
 `C:/SHARED/Piano-Campanella-apagadores-2026-10-14/`.
 
 El usuario pide avanzar hacia una prueba tocable. El

@@ -2,6 +2,10 @@
 
 Fecha: 2026-10-14.
 
+**Devolución posterior:** mejora un poco, pero sigue muy lejos del modelo de
+la release actual. No se selecciona este prototipo como base del instrumento.
+Se retoma la release según la [revisión y aprendizajes](REVISION-release-y-aprendizajes-2026-10-14.md).
+
 El usuario rechaza la escucha de la primera mitad de La Campanella: «el 90%
 se escucha como ticks cortados». Esa valoración sustituye cualquier aceptación
 implícita por haber conservado eventos o superado controles de archivo. El
@@ -79,9 +83,9 @@ ticks percibidos por el usuario.
 
 No hay ajuste de ganancia, de alineamiento ni de duración de las notas.
 La mejora cuantitativa corresponde a las dos correcciones juntas; las pruebas
-de invariancia aíslan sus mecanismos por separado. La decisión de escucha
-del WAV corregido sigue pendiente. No se repite automáticamente la media
-obra antes de evaluar este pasaje.
+de invariancia aíslan sus mecanismos por separado. La escucha del usuario
+registra una mejora parcial insuficiente frente a la release; la siguiente
+etapa vuelve al modelo publicado.
 
 El WAV se guarda únicamente en
 `C:/SHARED/Piano-Campanella-apagadores-2026-10-14/Campanella-hibrido-NL8.wav`.

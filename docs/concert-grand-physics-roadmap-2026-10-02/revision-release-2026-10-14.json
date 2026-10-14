@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-14",
+  "timezone": "America/Buenos_Aires",
+  "request": "Return to the working release and retain useful research as targeted improvements",
+  "published_release": {
+    "name": "RackForge v0.1.32 Preview",
+    "publishedAt": "2026-10-13T11:23:18Z",
+    "tagName": "v0.1.32"
+  },
+  "published_plugin_version": "0.171.35",
+  "local_research_plugin_version": "0.172.0",
+  "installed_user_package_inspected": false,
+  "baseline_choice": "User explicitly selected the version bundled in the published release",
+  "snapshot": {
+    "ref": "v0.1.32",
+    "commit": "91eb43f88495f0485e7a7ed61718280ddce23a8d",
+    "files": {
+      "crates/rackforge-plugin-sdk/src/lib.rs": "af557b4b598264ce09d000916c91388804b763337c6517d13f09d32faca793ab",
+      "crates/rackforge-plugin-sdk/src/portable.rs": "d5b3e171d927b3777cc11eabad67ffb9c3aa22a857075bb6b82d78294aee7988",
+      "crates/rackforge-plugin-sdk/src/wide_midi_probe_test.rs": "1ed0bf2acc3202ebc664b44ded329171f08a1d5abe6da467e4a9580ea8f0785c",
+      "plugins/concert-grand/src/lib.rs": "e16dc6ca43d2c37652eaa0444b360c5d1f6cc96b37cf65816749f18f8adea841",
+      "plugins/concert-grand/src/math.rs": "8fcbef468ccce24de475503793ee778f715f419c31bb2300d0cc0ffd4bd472ee",
+      "crates/rackforge-plugin-sdk/README.md": "59e73e8bb0748810effb2e2866d218a737b5f2b6ff03c2e5b4b55f102782dc21",
+      "plugins/concert-grand/package/rackforge-plugin.toml": "24edc2e7a22486bf34be6f0b6173dd51de5ce4f2648716154701fc415eb5525b",
+      "plugins/concert-grand/package/metadata/runtime.json": "40a59efe61df11866f4aec991202ddd94f491bd3e44d342af9b6579a64f0fc08",
+      "plugins/concert-grand/package/metadata/presets.json": "32e5f67f071cc828e221ac703dd3976769c8266db4bbebda5226fde1dd5713c3",
+      "plugins/concert-grand/package/metadata/parameters.json": "3b94e6e8e6f4a51bf60eb5cc64de7f4c5935e4bc86cd780e0c5921b8a4f6a47a"
+    },
+    "modified": false
+  },
+  "snapshot_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\revision-release-2026-10-14",
+  "release_test_executable_sha256": "04eb77fed134c700c9d735a38bd41db85a5f4e07c76d90088a2df7d593316761",
+  "compiler": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "edition": 2024,
+  "tests": [
+    {
+      "binary": "frozen published release",
+      "filter": "render_fingerprint --ignored",
+      "passed": 2,
+      "hashes": [
+        "e74df30116b39a5a",
+        "8d20f899b0509bd0"
+      ]
+    },
+    {
+      "binary": "frozen published release",
+      "filter": "tests::the_top_octave_has_no_dampers --exact",
+      "passed": 1
+    },
+    {
+      "binary": "frozen published release",
+      "filter": "half_pedal",
+      "passed": 2
+    },
+    {
+      "binary": "frozen published release",
+      "filter": "tests::a_restrike_lands_on_the_same_string --exact",
+      "passed": 1
+    },
+    {
+      "binary": "current branch, cargo --offline --locked --release --lib",
+      "filter": "render_fingerprint --ignored",
+      "passed": 2,
+      "hashes": [
+        "232b085ed4248398",
+        "4371ab4adc1542ab"
+      ]
+    }
+  ],
+  "current_branch_source_commit": "22469d59574220c1883861944784e7ffc84288f1",
+  "current_branch_plugin_source_sha256": "654fa666e767e6f6040842a7051a056fc0a2d64b2a3158ea7adb7e856565cd8e",
+  "historical_C4_decay_diagnosis_applies_to": "0.172.0 research calibration; not yet reproduced on 0.171.35",
+  "dsp_changed": false,
+  "installed_or_published": false,
+  "full_piano_fidelity_claimed": false,
+  "preserved_research_tip": "22469d59",
+  "next_step": "Measure the selected working release before changing one suspected weakness",
+  "release_worktree": {
+    "path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge",
+    "branch": "codex/concert-grand-release-improvements",
+    "commit": "91eb43f88495f0485e7a7ed61718280ddce23a8d",
+    "clean": true,
+    "source_matches_snapshot": true
+  },
+  "user_selected_priority": "Body and sustain"
+}

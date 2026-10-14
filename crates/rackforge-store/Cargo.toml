@@ -12,6 +12,7 @@ getrandom.workspace = true
 rackforge-repository = { path = "../rackforge-repository" }
 rackforge-plugin-api = { path = "../rackforge-plugin-api" }
 rackforge-plugin-runtime = { path = "../rackforge-plugin-runtime" }
+semver.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 toml.workspace = true

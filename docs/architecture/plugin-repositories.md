@@ -55,6 +55,31 @@ small atomic metadata change, so a failed update cannot destroy the previously
 working version. A running audio graph is never hot-swapped by the downloader;
 the host changes versions only at an explicit safe lifecycle boundary.
 
+## Official packages a release carries
+
+Every host and platform installer lays down the official set its release
+carries, Concert Grand included, on each start or install through
+`install_bundled_official_archive` (`rackforge-store install-local
+--official` in the Linux and Raspberry Pi installers). The same rules hold
+everywhere:
+
+- The release is the authority on what its versions contain: a same-version
+  copy with other bytes is replaced, and the record says `official`.
+- A plugin the player uninstalled stays out. `uninstall_plugin` records it in
+  `removed.json` beside `activation.json`; installing the plugin again from a
+  file or a repository takes the uninstall back; no release ever does.
+- A plugin the store has never held is enabled. One it already knows keeps
+  whatever the player chose.
+- The store keeps the two newest versions of the plugin, never dropping the
+  one just installed. Every host plays the newest, so older versions are
+  never run again; the previous one stays so going back has somewhere to go.
+  A version a running process still has mapped is left in place and pruned
+  on a later start.
+
+The VST3 plug-in is self-contained: it installs everything its DLL carries
+unconditionally, and like every other host opens the newest installed
+version of each.
+
 ## Catalog v1
 
 The signed JSON document uses this shape:

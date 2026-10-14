@@ -52,10 +52,10 @@ use rackforge_plugin_api::{
     ProgramDocument, ProgramEditRequest, ProgramEditorValue, ProgramFieldEditRequest,
 };
 use rackforge_repository::{
-    InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
-    cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
-    install_official_archive, plugin_is_enabled, remove_plugin_user_data, set_plugin_enabled,
-    uninstall_plugin,
+    BundledInstall, InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES,
+    PluginUserDataRemovalOptions, cleanup_uninstall_tombstones, inspect_local_archive,
+    install_bundled_official_archive, install_local_archive, plugin_is_enabled,
+    remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
@@ -8686,8 +8686,7 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
         }
     }
 
-    install_bundled_default_plugin(&options)?;
-    install_bundled_official_plugins(&options)?;
+    install_bundled_plugins(&options)?;
     // The controllers RackForge describes from their makers' documentation,
     // installed before the MIDI inputs are matched against the store.
     rackforge_controller_catalog::install_bundled_and_report(
@@ -8780,79 +8779,71 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
     Ok(app)
 }
 
-fn install_bundled_default_plugin(options: &Options) -> Result<()> {
-    let Some(bytes) = BUNDLED_DEFAULT_PLUGIN else {
-        return Ok(());
-    };
+/// Lays down every package this build carries -- Concert Grand and the
+/// official set alike -- through the store's official install. The release is
+/// the authority on what its versions contain: a same-version copy an earlier
+/// build left behind is corrected rather than kept. A plugin the player
+/// uninstalled stays out, a newcomer is enabled, one the store already knows
+/// keeps whatever the player chose, and versions older than the two newest
+/// are pruned.
+fn install_bundled_plugins(options: &Options) -> Result<()> {
     let Some(store_root) = options.plugin_store_root.as_deref() else {
         return Ok(());
     };
+    // Concert Grand was once offered only on a first start, behind this
+    // marker, so a player could remove it for good before the store recorded
+    // uninstalls. A store that went through that offer and no longer holds it
+    // lost it to such an uninstall: it stays out, as a recorded uninstall
+    // would. Without this the default instrument was never updated again
+    // after the first start.
     let marker = options
         .rackforge_root
         .join("state")
         .join("bundled-default-initialized");
-    if marker.is_file() {
-        return Ok(());
-    }
-    let packages_root = store_root.join("packages");
-    if fs::read_dir(&packages_root)
-        .ok()
-        .is_some_and(|mut entries| entries.next().is_some())
-    {
-        if let Some(parent) = marker.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(&marker, b"1\n")?;
-        return Ok(());
-    }
-    // Built with this release, as the official set is: see below.
-    let installed = install_official_archive(store_root, bytes)
-        .context("installing the bundled default instrument")?;
-    eprintln!(
-        "DESKTOP_DEFAULT_PLUGIN id={} version={} path={} existing={}",
-        installed.record.plugin_id,
-        installed.record.version,
-        installed.path.display(),
-        installed.already_installed
-    );
-    if let Some(parent) = marker.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&marker, b"1\n")?;
-    Ok(())
-}
-
-fn install_bundled_official_plugins(options: &Options) -> Result<()> {
-    let Some(store_root) = options.plugin_store_root.as_deref() else {
-        return Ok(());
-    };
-    for (archive_name, bytes) in BUNDLED_OFFICIAL_PLUGINS {
-        let inspection = inspect_local_archive(store_root, bytes)
-            .with_context(|| format!("validating bundled official plugin {archive_name}"))?;
-        let known_plugin = store_root
+    let removed_before_records = marker.is_file()
+        && !store_root
             .join("packages")
-            .join(&inspection.plugin_id)
+            .join(rackforge_core::DEFAULT_INSTRUMENT_ID)
             .is_dir();
-        // The official set this build carries is pinned upstream and checked
-        // against a SHA-256 the source tree holds, so it is the authority on
-        // what its versions contain. A same-version copy left by an earlier
-        // build is corrected rather than kept: keeping it meant a player ran
-        // a stale instrument that no release could ever replace.
-        let installed = install_official_archive(store_root, bytes)
-            .with_context(|| format!("installing bundled official plugin {archive_name}"))?;
-        if !known_plugin {
-            set_plugin_enabled(store_root, &inspection.plugin_id, true).with_context(|| {
-                format!("enabling bundled official plugin {}", inspection.plugin_id)
-            })?;
-        }
-        eprintln!(
-            "DESKTOP_OFFICIAL_PLUGIN id={} version={} path={} existing={} enabled_by_build={}",
-            installed.record.plugin_id,
-            installed.record.version,
-            installed.path.display(),
-            installed.already_installed,
-            !known_plugin
+    let carried = BUNDLED_DEFAULT_PLUGIN
+        .map(|bytes| ("RF-Concert-Grand", bytes, true))
+        .into_iter()
+        .chain(
+            BUNDLED_OFFICIAL_PLUGINS
+                .iter()
+                .map(|(name, bytes)| (*name, *bytes, false)),
         );
+    for (archive_name, bytes, default) in carried {
+        if default && removed_before_records {
+            eprintln!("DESKTOP_OFFICIAL_PLUGIN archive={archive_name} removed_by_player=true");
+            continue;
+        }
+        match install_bundled_official_archive(store_root, bytes)
+            .with_context(|| format!("installing bundled official plugin {archive_name}"))?
+        {
+            BundledInstall::Installed {
+                package,
+                enabled_as_new,
+                pruned_versions,
+            } => eprintln!(
+                "DESKTOP_OFFICIAL_PLUGIN id={} version={} path={} existing={} enabled_by_build={} pruned_versions={}",
+                package.record.plugin_id,
+                package.record.version,
+                package.path.display(),
+                package.already_installed,
+                enabled_as_new,
+                pruned_versions
+            ),
+            BundledInstall::RemovedByPlayer { plugin_id, version } => eprintln!(
+                "DESKTOP_OFFICIAL_PLUGIN id={plugin_id} version={version} removed_by_player=true"
+            ),
+        }
+        if default {
+            if let Some(parent) = marker.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&marker, b"1\n")?;
+        }
     }
     Ok(())
 }

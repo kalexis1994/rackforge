@@ -2,10 +2,11 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signer, SigningKey};
 use rackforge_plugin_api::PluginManifest;
 use rackforge_repository::{
-    RepositoryConfig, RepositoryFile, fetch_repository, install_archive, install_local_archive,
-    install_official_archive, repository_platform_key, set_plugin_enabled, uninstall_plugin,
-    verify_catalog,
+    BundledInstall, RepositoryConfig, RepositoryFile, fetch_repository, install_archive,
+    install_bundled_official_archive, install_local_archive, repository_platform_key,
+    set_plugin_enabled, uninstall_plugin, verify_catalog,
 };
+use semver::Version;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -57,12 +58,13 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
             if command == "install-local" && flag == "--official" =>
         {
             // Only a platform installer laying down the release's own
-            // pinned, hash-checked package: it may overwrite a version, and
-            // its record says official.
-            install_local(package, store_root, true)
+            // pinned, hash-checked package: it may overwrite a version, its
+            // record says official, a plugin the player uninstalled is
+            // skipped, a newcomer is enabled and old versions are pruned.
+            install_official(package, store_root)
         }
         [command, package, store_root] if command == "install-local" => {
-            install_local(package, store_root, false)
+            install_local(package, store_root)
         }
         [command, plugin_id, store_root] if command == "enable" => {
             set_enabled(plugin_id, store_root, true)
@@ -96,14 +98,9 @@ fn uninstall(plugin_id: &str, store_root: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn install_local(package_path: &str, store_root: &str, official: bool) -> Result<(), String> {
+fn install_local(package_path: &str, store_root: &str) -> Result<(), String> {
     let bytes = fs::read(package_path).map_err(|error| error.to_string())?;
-    let installed = if official {
-        install_official_archive(store_root, &bytes)
-    } else {
-        install_local_archive(store_root, &bytes)
-    }
-    .map_err(|error| error.to_string())?;
+    let installed = install_local_archive(store_root, &bytes).map_err(|error| error.to_string())?;
     println!(
         "PLUGIN_INSTALLED id={} version={} path={} existing={} source={}",
         installed.record.plugin_id,
@@ -112,6 +109,30 @@ fn install_local(package_path: &str, store_root: &str, official: bool) -> Result
         installed.already_installed,
         installed.record.repository_id
     );
+    Ok(())
+}
+
+fn install_official(package_path: &str, store_root: &str) -> Result<(), String> {
+    let bytes = fs::read(package_path).map_err(|error| error.to_string())?;
+    match install_bundled_official_archive(store_root, &bytes).map_err(|error| error.to_string())? {
+        BundledInstall::Installed {
+            package,
+            enabled_as_new,
+            pruned_versions,
+        } => println!(
+            "PLUGIN_INSTALLED id={} version={} path={} existing={} source={} enabled_as_new={} pruned_versions={}",
+            package.record.plugin_id,
+            package.record.version,
+            package.path.display(),
+            package.already_installed,
+            package.record.repository_id,
+            enabled_as_new,
+            pruned_versions
+        ),
+        BundledInstall::RemovedByPlayer { plugin_id, version } => {
+            println!("PLUGIN_REMOVED_BY_PLAYER id={plugin_id} version={version}")
+        }
+    }
     Ok(())
 }
 
@@ -154,12 +175,13 @@ fn list(config_path: &str) -> Result<(), String> {
             verified.index.plugins.len()
         );
         for plugin in &verified.index.plugins {
-            let latest = plugin
-                .releases
-                .iter()
-                .map(|release| release.version.as_str())
-                .max()
-                .unwrap_or("none");
+            let latest = latest_version(
+                plugin
+                    .releases
+                    .iter()
+                    .map(|release| release.version.as_str()),
+            )
+            .unwrap_or("none");
             println!(
                 "PLUGIN id={} name={:?} latest={} summary={:?}",
                 plugin.id, plugin.name, latest, plugin.summary
@@ -167,6 +189,14 @@ fn list(config_path: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The newest of these versions by semver; text order put 0.9.0 above 0.10.0.
+fn latest_version<'a>(versions: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    versions
+        .filter_map(|text| Version::parse(text).ok().map(|version| (version, text)))
+        .max_by(|left, right| left.0.cmp(&right.0))
+        .map(|(_, text)| text)
 }
 
 fn install(
@@ -565,6 +595,19 @@ mod tests {
 
     fn arguments(text: &[&str]) -> Vec<String> {
         text.iter().map(|argument| (*argument).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_latest_release_is_the_highest_semantic_version() {
+        assert_eq!(
+            latest_version(["0.9.0", "0.10.0", "0.2.0"].into_iter()),
+            Some("0.10.0")
+        );
+        assert_eq!(
+            latest_version(["1.0.0-beta.1", "1.0.0", "not-a-version"].into_iter()),
+            Some("1.0.0")
+        );
+        assert_eq!(latest_version(std::iter::empty()), None);
     }
 
     #[test]

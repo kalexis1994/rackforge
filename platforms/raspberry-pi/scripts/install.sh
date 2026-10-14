@@ -43,41 +43,30 @@ do
   mv "$root/bin/$binary.new" "$root/bin/$binary"
 done
 
-bundled_plugin="$source_root/bundled-plugins/RF-Concert-Grand.rfplugin"
+# Every package the release carries, Concert Grand included, not one name
+# written here: the bundle decides which ones travel, so a new one needs no
+# edit. The store's official install skips a plugin the player uninstalled,
+# enables a newcomer, leaves one it already knows as the player set it, and
+# prunes versions older than the two newest.
+#
+# Concert Grand was once offered only on a first install, behind this marker,
+# so a player could remove it for good before the store recorded uninstalls.
+# A store that went through that offer and no longer holds it lost it to such
+# an uninstall: leave it out, as a recorded uninstall would. The marker is
+# still written for an older installer run over this one.
+concert_grand_id=org.rackforge.concert-grand
 bundled_default_marker="$root/state/bundled-default-initialized"
-shopt -s nullglob
-installed_plugins=("$root/plugin-store/packages"/*)
-shopt -u nullglob
+skip_concert_grand=0
+if [[ -f "$bundled_default_marker" && ! -d "$root/plugin-store/packages/$concert_grand_id" ]]; then
+  skip_concert_grand=1
+fi
 bundled_plugins=none
-if [[ ! -f "$bundled_default_marker" ]]; then
-  if [[ -f "$bundled_plugin" && ${#installed_plugins[@]} -eq 0 ]]; then
-    "$root/bin/rackforge-store" install-local \
-      "$bundled_plugin" \
-      "$root/plugin-store" --official
-    "$root/bin/rackforge-store" enable \
-      org.rackforge.concert-grand \
-      "$root/plugin-store"
-    bundled_plugins=org.rackforge.concert-grand
-  fi
-  if [[ -f "$bundled_plugin" || ${#installed_plugins[@]} -gt 0 ]]; then
-    printf '1\n' > "$bundled_default_marker"
-  fi
-fi
-
-# Every official instrument the release carries, not one name written here:
-# the bundle decides which ones travel, so a new one needs no edit. A plugin
-# the store already knows is installed but left as the player set it — only a
-# newcomer is enabled on their behalf.
-# On a first install there is no packages directory yet, and `ls` failing
-# inside a pipeline ends the whole installer under `set -o pipefail` -- with
-# no message, which is how a clean appliance stopped right here.
-known_ids=" "
-if [[ -d "$root/plugin-store/packages" ]]; then
-  known_ids=" $(ls "$root/plugin-store/packages" | tr '\n' ' ') "
-fi
 shopt -s nullglob
 for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
-  [[ "$(basename "$official_plugin")" == "RF-Concert-Grand.rfplugin" ]] && continue
+  if [[ "$(basename "$official_plugin")" == "RF-Concert-Grand.rfplugin" \
+    && "$skip_concert_grand" -eq 1 ]]; then
+    continue
+  fi
   install_output="$("$root/bin/rackforge-store" install-local \
     "$official_plugin" \
     "$root/plugin-store" --official)"
@@ -85,6 +74,9 @@ for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
   # Read the id the store just reported. No pipeline here on purpose:
   # under `set -o pipefail` a `... | head -1` ends in SIGPIPE and takes
   # the whole installer down after the first plugin.
+  if [[ "$install_output" =~ PLUGIN_REMOVED_BY_PLAYER[[:space:]]+id= ]]; then
+    continue
+  fi
   official_plugin_id=""
   if [[ "$install_output" =~ PLUGIN_INSTALLED[[:space:]]+id=([^[:space:]]+) ]]; then
     official_plugin_id="${BASH_REMATCH[1]}"
@@ -93,10 +85,8 @@ for official_plugin in "$source_root/bundled-plugins"/*.rfplugin; do
     printf 'could not read the plugin id installed from %s\n' "$official_plugin" >&2
     exit 1
   fi
-  if [[ "$known_ids" != *" $official_plugin_id "* ]]; then
-    "$root/bin/rackforge-store" enable \
-      "$official_plugin_id" \
-      "$root/plugin-store"
+  if [[ "$(basename "$official_plugin")" == "RF-Concert-Grand.rfplugin" ]]; then
+    printf '1\n' > "$bundled_default_marker"
   fi
   if [[ "$bundled_plugins" == none ]]; then
     bundled_plugins="$official_plugin_id"

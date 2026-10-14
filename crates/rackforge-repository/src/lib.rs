@@ -32,6 +32,13 @@ pub const MAX_PACKAGE_ENTRIES: usize = 16_384;
 const MAX_PORTABLE_METADATA_BYTES: u64 = 1024 * 1024;
 const PLUGIN_ACTIVATION_SCHEMA_VERSION: u32 = 1;
 const PLUGIN_ACTIVATION_FILE: &str = "activation.json";
+const REMOVED_PLUGINS_SCHEMA_VERSION: u32 = 1;
+const REMOVED_PLUGINS_FILE: &str = "removed.json";
+/// How many versions of an official plugin a release's install leaves in the
+/// store: the one hosts run and the one before it, so going back has
+/// somewhere to go. Older ones are never run again -- every host plays the
+/// newest version -- and each release would otherwise add one more of each.
+pub const RETAINED_OFFICIAL_VERSIONS: usize = 2;
 
 static TEMP_SERIAL: AtomicU64 = AtomicU64::new(0);
 
@@ -225,6 +232,86 @@ fn prepare_new_plugin_disabled(root: &Path) -> Result<(), RepositoryError> {
         write_json_atomic(&root.join(PLUGIN_ACTIVATION_FILE), &document)?;
     }
     Ok(())
+}
+
+/// The plugins a player uninstalled, kept apart from `activation.json` so a
+/// host that predates it reads its store unchanged.
+///
+/// A release lays down its official set on every start. Without this list an
+/// official plugin the player removed came back -- enabled, as a newcomer --
+/// the next time RackForge started, because nothing remembered it had ever
+/// been there.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct RemovedPluginsDocument {
+    schema_version: u32,
+    plugin_ids: BTreeSet<String>,
+}
+
+/// Whether the player uninstalled `plugin_id` and has not installed it again
+/// since. A release's official set skips such a plugin.
+pub fn plugin_was_removed(
+    store_root: impl AsRef<Path>,
+    plugin_id: &str,
+) -> Result<bool, RepositoryError> {
+    validate_plugin_identifier(plugin_id)
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    let root = ensure_real_directory(store_root.as_ref())?;
+    Ok(read_removed_plugins_document(&root)?
+        .plugin_ids
+        .contains(plugin_id))
+}
+
+fn read_removed_plugins_document(root: &Path) -> Result<RemovedPluginsDocument, RepositoryError> {
+    let bytes = match fs::read(root.join(REMOVED_PLUGINS_FILE)) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(RemovedPluginsDocument {
+                schema_version: REMOVED_PLUGINS_SCHEMA_VERSION,
+                plugin_ids: BTreeSet::new(),
+            });
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let document: RemovedPluginsDocument = serde_json::from_slice(&bytes)
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    if document.schema_version != REMOVED_PLUGINS_SCHEMA_VERSION {
+        return Err(RepositoryError::InvalidPackage(format!(
+            "unsupported removed plugins schema {}",
+            document.schema_version
+        )));
+    }
+    Ok(document)
+}
+
+fn set_plugin_removed(root: &Path, plugin_id: &str, removed: bool) -> Result<(), RepositoryError> {
+    let mut document = read_removed_plugins_document(root)?;
+    let changed = if removed {
+        document.plugin_ids.insert(plugin_id.to_owned())
+    } else {
+        document.plugin_ids.remove(plugin_id)
+    };
+    if changed {
+        write_json_atomic(&root.join(REMOVED_PLUGINS_FILE), &document)?;
+    }
+    Ok(())
+}
+
+/// What a release's install did with one package of its official set.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BundledInstall {
+    Installed {
+        package: InstalledPackage,
+        /// The store had never held this plugin, so it was enabled on the
+        /// player's behalf. A plugin the store already knew keeps whatever
+        /// the player chose.
+        enabled_as_new: bool,
+        /// Versions older than the ones the store keeps, taken out of it.
+        pruned_versions: usize,
+    },
+    /// The player uninstalled this plugin; it stays uninstalled until they
+    /// install it again themselves.
+    RemovedByPlayer { plugin_id: String, version: String },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -622,8 +709,20 @@ pub fn install_archive(
     selected: &SelectedArtifact,
     bytes: &[u8],
 ) -> Result<InstalledPackage, RepositoryError> {
-    verify_artifact_bytes(&selected.artifact, bytes)?;
+    let installed = install_verified_archive(store_root.as_ref(), selected, bytes)?;
+    // A player installing a plugin takes back an uninstall, as from a file.
     let root = ensure_real_directory(store_root.as_ref())?;
+    set_plugin_removed(&root, &installed.record.plugin_id, false)?;
+    Ok(installed)
+}
+
+fn install_verified_archive(
+    store_root: &Path,
+    selected: &SelectedArtifact,
+    bytes: &[u8],
+) -> Result<InstalledPackage, RepositoryError> {
+    verify_artifact_bytes(&selected.artifact, bytes)?;
+    let root = ensure_real_directory(store_root)?;
     let packages_root = ensure_real_child(&root, "packages")?;
     let records_root = ensure_real_child(&root, "records")?;
     prepare_new_plugin_disabled(&root)?;
@@ -728,7 +827,103 @@ pub fn install_official_archive(
         bytes,
         &AtomicBool::new(false),
         LocalSource::Official,
+        false,
     )
+    .map(LocalOutcome::expect_installed)
+}
+
+/// Lays down one package of the official set a release carries, the way every
+/// host and platform installer does on start: a plugin the player uninstalled
+/// stays uninstalled, a plugin the store has never held is enabled, and the
+/// store keeps [`RETAINED_OFFICIAL_VERSIONS`] versions of it, never dropping
+/// the one just installed.
+///
+/// Pruning is best effort. A version a running process still has mapped stays
+/// where it is and goes on a later start; it is never a reason to fail the
+/// install.
+pub fn install_bundled_official_archive(
+    store_root: impl AsRef<Path>,
+    bytes: &[u8],
+) -> Result<BundledInstall, RepositoryError> {
+    let root = ensure_real_directory(store_root.as_ref())?;
+    match install_local_archive_with(
+        &root,
+        bytes,
+        &AtomicBool::new(false),
+        LocalSource::Official,
+        true,
+    )? {
+        LocalOutcome::RemovedByPlayer { plugin_id, version } => {
+            Ok(BundledInstall::RemovedByPlayer { plugin_id, version })
+        }
+        LocalOutcome::Installed {
+            package,
+            newly_known,
+        } => {
+            if newly_known {
+                set_plugin_enabled(&root, &package.record.plugin_id, true)?;
+            }
+            let pruned_versions = prune_plugin_versions(
+                &root,
+                &package.record.plugin_id,
+                RETAINED_OFFICIAL_VERSIONS,
+                &package.record.version,
+            );
+            Ok(BundledInstall::Installed {
+                package,
+                enabled_as_new: newly_known,
+                pruned_versions,
+            })
+        }
+    }
+}
+
+/// Takes every version of `plugin_id` but the `keep` newest, and `protected`,
+/// out of the store. Returns how many left the catalog.
+fn prune_plugin_versions(root: &Path, plugin_id: &str, keep: usize, protected: &str) -> usize {
+    let packages = root.join("packages").join(plugin_id);
+    let Ok(entries) = fs::read_dir(&packages) else {
+        return 0;
+    };
+    let mut versions = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            fs::symlink_metadata(entry.path())
+                .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+        })
+        .filter_map(|entry| {
+            let name = entry.file_name().to_str()?.to_owned();
+            Version::parse(&name).ok().map(|version| (version, name))
+        })
+        .collect::<Vec<_>>();
+    versions.sort_by(|left, right| right.0.cmp(&left.0));
+    let Ok(trash_root) = ensure_real_child(root, ".uninstall") else {
+        return 0;
+    };
+    let mut pruned = 0;
+    for (_, name) in versions.into_iter().skip(keep) {
+        if name == protected {
+            continue;
+        }
+        let serial = TEMP_SERIAL.fetch_add(1, Ordering::Relaxed);
+        let tombstone = trash_root.join(format!(
+            "{}-{serial}-version-{plugin_id}-{name}",
+            writer_discriminator()
+        ));
+        // Out of discovery first, as an uninstall does: a version whose
+        // directory cannot move is still in use and stays whole.
+        if fs::rename(packages.join(&name), &tombstone).is_err() {
+            continue;
+        }
+        let _ = fs::remove_file(
+            root.join("records")
+                .join(plugin_id)
+                .join(format!("{name}.json")),
+        );
+        let _ = fs::remove_dir_all(&tombstone);
+        pruned += 1;
+    }
+    pruned
 }
 
 /// Installs a local package while allowing the host to cancel before the
@@ -739,7 +934,31 @@ pub fn install_local_archive_cancellable(
     bytes: &[u8],
     cancelled: &AtomicBool,
 ) -> Result<InstalledPackage, RepositoryError> {
-    install_local_archive_with(store_root, bytes, cancelled, LocalSource::User)
+    install_local_archive_with(store_root, bytes, cancelled, LocalSource::User, false)
+        .map(LocalOutcome::expect_installed)
+}
+
+enum LocalOutcome {
+    Installed {
+        package: InstalledPackage,
+        /// No version of this plugin was in the store before.
+        newly_known: bool,
+    },
+    RemovedByPlayer {
+        plugin_id: String,
+        version: String,
+    },
+}
+
+impl LocalOutcome {
+    fn expect_installed(self) -> InstalledPackage {
+        match self {
+            Self::Installed { package, .. } => package,
+            Self::RemovedByPlayer { .. } => {
+                unreachable!("only a release's own install skips a removed plugin")
+            }
+        }
+    }
 }
 
 fn install_local_archive_with(
@@ -747,7 +966,8 @@ fn install_local_archive_with(
     bytes: &[u8],
     cancelled: &AtomicBool,
     source: LocalSource,
-) -> Result<InstalledPackage, RepositoryError> {
+    skip_removed: bool,
+) -> Result<LocalOutcome, RepositoryError> {
     if bytes.is_empty() || bytes.len() as u64 > MAX_PACKAGE_BYTES {
         return Err(RepositoryError::Integrity(
             "local artifact size is outside supported limits".into(),
@@ -779,8 +999,24 @@ fn install_local_archive_with(
         };
         validate_extracted_payload(&stage, &manifest, platform)?;
         ensure_installation_not_cancelled(cancelled)?;
+        if skip_removed
+            && read_removed_plugins_document(&root)?
+                .plugin_ids
+                .contains(&manifest.id)
+        {
+            return Ok(LocalOutcome::RemovedByPlayer {
+                plugin_id: manifest.id,
+                version: manifest.version,
+            });
+        }
+        // A player installing a plugin themselves takes back an uninstall;
+        // the official set never does.
+        if source == LocalSource::User {
+            set_plugin_removed(&root, &manifest.id, false)?;
+        }
         prepare_new_plugin_disabled(&root)?;
 
+        let newly_known = !packages_root.join(&manifest.id).is_dir();
         let plugin_root = ensure_real_child(&packages_root, &manifest.id)?;
         let plugin_records = ensure_real_child(&records_root, &manifest.id)?;
         let destination = plugin_root.join(&manifest.version);
@@ -801,10 +1037,13 @@ fn install_local_archive_with(
         if destination.exists() {
             let existing = read_installation_record(&record_path)?;
             if existing == record {
-                return Ok(InstalledPackage {
-                    path: destination,
-                    record,
-                    already_installed: true,
+                return Ok(LocalOutcome::Installed {
+                    package: InstalledPackage {
+                        path: destination,
+                        record,
+                        already_installed: true,
+                    },
+                    newly_known,
                 });
             }
             // The same bytes from another source: the package stays, and the
@@ -818,10 +1057,13 @@ fn install_local_archive_with(
                 } else {
                     existing
                 };
-                return Ok(InstalledPackage {
-                    path: destination,
-                    record,
-                    already_installed: true,
+                return Ok(LocalOutcome::Installed {
+                    package: InstalledPackage {
+                        path: destination,
+                        record,
+                        already_installed: true,
+                    },
+                    newly_known,
                 });
             }
             if source == LocalSource::User {
@@ -842,10 +1084,13 @@ fn install_local_archive_with(
             let _ = fs::remove_dir_all(&destination);
             return Err(error);
         }
-        Ok(InstalledPackage {
-            path: destination,
-            record,
-            already_installed: false,
+        Ok(LocalOutcome::Installed {
+            package: InstalledPackage {
+                path: destination,
+                record,
+                already_installed: false,
+            },
+            newly_known,
         })
     })();
     if stage.exists() {
@@ -932,6 +1177,7 @@ pub fn uninstall_plugin(
         document.enabled_plugins.remove(plugin_id);
         write_json_atomic(&root.join(PLUGIN_ACTIVATION_FILE), &document)?;
     }
+    set_plugin_removed(&root, plugin_id, true)?;
     Ok(UninstalledPackage {
         plugin_id: plugin_id.into(),
         removed_versions,
@@ -2075,6 +2321,131 @@ preset_catalog = "metadata/presets.json"
             .join(format!("{version}.json"));
         let record = read_installation_record(&record_path).expect("record");
         assert_eq!(record.artifact_sha256, replaced.record.artifact_sha256);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A valid portable package of the test synth at `version`.
+    fn portable_at(version: &str) -> Vec<u8> {
+        let manifest = String::from_utf8(portable_manifest().to_vec())
+            .unwrap()
+            .replace("version = \"1.2.3\"", &format!("version = \"{version}\""));
+        let runtime = String::from_utf8(portable_runtime().to_vec())
+            .unwrap()
+            .replace("\"1.2.3\"", &format!("\"{version}\""));
+        archive(&[
+            ("rackforge-plugin.toml", manifest.as_bytes()),
+            ("component.wasm", b"\0asm\x01\0\0\0"),
+            ("metadata/runtime.json", runtime.as_bytes()),
+            ("metadata/parameters.json", portable_parameters()),
+            ("metadata/presets.json", portable_presets()),
+        ])
+    }
+
+    fn store_root(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "rackforge-repository-{name}-{}-{}",
+            writer_discriminator(),
+            TEMP_SERIAL.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    fn installed(outcome: BundledInstall) -> (InstalledPackage, bool, usize) {
+        match outcome {
+            BundledInstall::Installed {
+                package,
+                enabled_as_new,
+                pruned_versions,
+            } => (package, enabled_as_new, pruned_versions),
+            BundledInstall::RemovedByPlayer { plugin_id, .. } => {
+                panic!("{plugin_id} was skipped as removed")
+            }
+        }
+    }
+
+    #[test]
+    fn a_release_enables_a_newcomer_once_and_then_keeps_the_players_choice() {
+        let root = store_root("bundled-enable");
+        let (package, enabled_as_new, _) =
+            installed(install_bundled_official_archive(&root, &portable_at("1.0.0")).unwrap());
+        assert!(enabled_as_new);
+        assert!(package.record.is_official());
+        assert!(plugin_is_enabled(&root, "org.rackforge.synth").unwrap());
+
+        set_plugin_enabled(&root, "org.rackforge.synth", false).unwrap();
+        let (package, enabled_as_new, _) =
+            installed(install_bundled_official_archive(&root, &portable_at("1.1.0")).unwrap());
+        assert!(!enabled_as_new);
+        assert!(!package.already_installed);
+        assert!(!plugin_is_enabled(&root, "org.rackforge.synth").unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// An official plugin the player uninstalled came back, enabled, on the
+    /// next start: the release laid it down again as a newcomer.
+    #[test]
+    fn an_uninstalled_official_plugin_stays_out_until_the_player_installs_it() {
+        let root = store_root("bundled-removed");
+        installed(install_bundled_official_archive(&root, &portable_at("1.0.0")).unwrap());
+        uninstall_plugin(&root, "org.rackforge.synth").unwrap();
+        assert!(plugin_was_removed(&root, "org.rackforge.synth").unwrap());
+
+        let skipped = install_bundled_official_archive(&root, &portable_at("1.1.0")).unwrap();
+        assert_eq!(
+            skipped,
+            BundledInstall::RemovedByPlayer {
+                plugin_id: "org.rackforge.synth".into(),
+                version: "1.1.0".into(),
+            }
+        );
+        assert!(!root.join("packages/org.rackforge.synth").exists());
+        assert!(!plugin_is_enabled(&root, "org.rackforge.synth").unwrap());
+        // Nothing a release does takes the uninstall back, not even the
+        // unconditional install a self-contained host uses.
+        install_official_archive(&root, &portable_at("1.1.0")).unwrap();
+        assert!(plugin_was_removed(&root, "org.rackforge.synth").unwrap());
+
+        // Installing it themselves does, and the release then updates it.
+        uninstall_plugin(&root, "org.rackforge.synth").unwrap();
+        install_local_archive(&root, &portable_at("1.0.0")).unwrap();
+        assert!(!plugin_was_removed(&root, "org.rackforge.synth").unwrap());
+        let (package, enabled_as_new, _) =
+            installed(install_bundled_official_archive(&root, &portable_at("1.1.0")).unwrap());
+        assert_eq!(package.record.version, "1.1.0");
+        assert!(!enabled_as_new);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_release_keeps_the_newest_versions_and_never_the_one_it_drops_in() {
+        let root = store_root("bundled-prune");
+        for version in ["1.0.0", "1.1.0"] {
+            install_local_archive(&root, &portable_at(version)).unwrap();
+        }
+        let (_, _, pruned) =
+            installed(install_bundled_official_archive(&root, &portable_at("1.10.0")).unwrap());
+        assert_eq!(pruned, 1);
+        let packages = root.join("packages/org.rackforge.synth");
+        let records = root.join("records/org.rackforge.synth");
+        // Semantic order, not text: 1.10.0 is the newest, 1.0.0 the oldest.
+        assert!(!packages.join("1.0.0").exists());
+        assert!(!records.join("1.0.0.json").exists());
+        assert!(packages.join("1.1.0").is_dir());
+        assert!(packages.join("1.10.0").is_dir());
+
+        // A player's newer versions outrank the release's, but the version
+        // the release just installed is not taken straight back out.
+        for version in ["2.0.0", "3.0.0"] {
+            install_local_archive(&root, &portable_at(version)).unwrap();
+        }
+        let (_, _, pruned) =
+            installed(install_bundled_official_archive(&root, &portable_at("1.10.0")).unwrap());
+        assert_eq!(pruned, 1);
+        assert!(!packages.join("1.1.0").exists());
+        for version in ["1.10.0", "2.0.0", "3.0.0"] {
+            assert!(packages.join(version).is_dir(), "{version} was pruned");
+            assert!(records.join(format!("{version}.json")).is_file());
+        }
+        assert_eq!(fs::read_dir(root.join(".uninstall")).unwrap().count(), 0);
         fs::remove_dir_all(root).unwrap();
     }
 

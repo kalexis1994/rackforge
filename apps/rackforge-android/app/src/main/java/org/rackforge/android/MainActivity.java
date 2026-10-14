@@ -4152,8 +4152,10 @@ public final class MainActivity extends Activity {
     }
 
     // Official plugins ship as immutable .rfplugin assets. Every package is
-    // installed idempotently; a newly introduced plugin starts enabled, while
-    // later app updates preserve an explicit user disable.
+    // installed idempotently by the store's official install: a newly
+    // introduced plugin starts enabled, later app updates preserve an
+    // explicit user disable, a plugin the user uninstalled stays out, and
+    // versions older than the two newest are pruned.
     private void ensureBundledPlugins() throws Exception {
         String[] assets = getAssets().list("bundled-plugins");
         if (assets == null || assets.length == 0) {
@@ -4161,12 +4163,6 @@ public final class MainActivity extends Activity {
             return;
         }
         java.util.Arrays.sort(assets);
-        java.util.Set<String> knownPlugins = new java.util.HashSet<>();
-        JSONObject before = new JSONObject(installedPlugins(pluginStoreRoot().getAbsolutePath()));
-        JSONArray installedBefore = before.getJSONArray("plugins");
-        for (int index = 0; index < installedBefore.length(); index++) {
-            knownPlugins.add(installedBefore.getJSONObject(index).getString("plugin_id"));
-        }
         boolean changed = false;
         for (String asset : assets) {
             if (!asset.toLowerCase(Locale.ROOT).endsWith(".rfplugin")) continue;
@@ -4182,13 +4178,13 @@ public final class MainActivity extends Activity {
                 JSONObject descriptor = new JSONObject(installBundledPluginPackage(
                         temporary.getAbsolutePath(), pluginStoreRoot().getAbsolutePath()));
                 String pluginId = descriptor.getString("plugin_id");
-                boolean known = knownPlugins.contains(pluginId);
-                if (!known && !setInstalledPluginEnabled(
-                        pluginId, pluginStoreRoot().getAbsolutePath(), true)) {
-                    throw new IllegalStateException("Could not enable bundled plugin " + pluginId);
+                if (descriptor.optBoolean("removed_by_player")) {
+                    Log.i("RackForge", "Bundled plugin " + pluginId + " "
+                            + descriptor.optString("version") + " skipped: removed by the user");
+                    continue;
                 }
-                knownPlugins.add(pluginId);
-                changed |= !descriptor.optBoolean("already_installed") || !known;
+                changed |= !descriptor.optBoolean("already_installed")
+                        || descriptor.optBoolean("enabled_as_new");
                 Log.i("RackForge", "Bundled plugin " + pluginId + " "
                         + descriptor.optString("version")
                         + (descriptor.optBoolean("already_installed")

@@ -46,9 +46,9 @@ use rackforge_plugin_api::{
     abi::{MidiEventV1, ParameterEventV1},
 };
 use rackforge_repository::{
-    PluginUserDataRemovalOptions, cleanup_uninstall_tombstones, inspect_local_archive,
-    install_local_archive_cancellable, install_official_archive, plugin_is_enabled,
-    remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
+    BundledInstall, PluginUserDataRemovalOptions, cleanup_uninstall_tombstones,
+    inspect_local_archive, install_bundled_official_archive, install_local_archive_cancellable,
+    plugin_is_enabled, remove_plugin_user_data, set_plugin_enabled, uninstall_plugin,
 };
 use rackforge_session_api::{
     ButtonPhase, HostActionBinding, HostControlBinding, HostControlTarget, InstanceId,
@@ -3740,18 +3740,18 @@ fn installed_plugins_json(store_root: &Path) -> Result<String> {
             .iter()
             .map(|(version, _)| version.to_string())
             .collect::<Vec<_>>();
-        let active_version = candidates.iter().find_map(|(version, descriptor)| {
-            descriptor["active"]
-                .as_bool()
-                .unwrap_or(false)
-                .then(|| version.to_string())
-        });
-        let (_, mut latest) = candidates.pop().expect("plugin version group is not empty");
-        let latest_version = latest["version"].as_str().unwrap_or_default().to_owned();
-        latest["active"] = active_version
-            .as_deref()
-            .is_some_and(|active| active == latest_version.as_str())
-            .into();
+        let (latest_version, mut latest) =
+            candidates.pop().expect("plugin version group is not empty");
+        // Activation is recorded per plugin, so every version of an enabled
+        // plugin arrives marked active, and the version hosts run is the
+        // newest. Picking the first active one here named the OLDEST: with
+        // two versions installed -- what every release that updates a
+        // bundled plugin leaves -- the newest was reported inactive and
+        // offered as an update to itself.
+        let active_version = latest["active"]
+            .as_bool()
+            .unwrap_or(false)
+            .then(|| latest_version.to_string());
         latest["active_version"] = active_version.into();
         latest["installed_versions"] = installed_versions.into();
         plugins.push(latest);
@@ -5036,7 +5036,10 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installPluginFile
 
 /// Installs a package from the official set the APK carries, which the
 /// build fetched pinned by URL and SHA-256: like a user's install, except that
-/// it may correct a same-version copy and its record says official.
+/// it may correct a same-version copy and its record says official. A plugin
+/// the player uninstalled is skipped (`removed_by_player`), a newcomer is
+/// enabled (`enabled_as_new`), and versions older than the two newest are
+/// pruned.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_rackforge_android_MainActivity_installBundledPluginFile(
     mut env: JNIEnv,
@@ -5049,8 +5052,24 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installBundledPlu
         let store_root = PathBuf::from(java_string(&mut env, store_root)?);
         let bytes = std::fs::read(&archive_path)
             .with_context(|| format!("reading bundled plugin {}", archive_path.display()))?;
-        let installed = install_official_archive(&store_root, &bytes)
-            .context("validating and installing the bundled plugin")?;
+        let (installed, enabled_as_new) =
+            match install_bundled_official_archive(&store_root, &bytes)
+                .context("validating and installing the bundled plugin")?
+            {
+                BundledInstall::Installed {
+                    package,
+                    enabled_as_new,
+                    ..
+                } => (package, enabled_as_new),
+                BundledInstall::RemovedByPlayer { plugin_id, version } => {
+                    return Ok(serde_json::json!({
+                        "plugin_id": plugin_id,
+                        "version": version,
+                        "removed_by_player": true,
+                    })
+                    .to_string());
+                }
+            };
         let package = PluginPackage::open(&installed.path)
             .with_context(|| format!("opening installed plugin {}", installed.path.display()))?;
         let mut descriptor = package_descriptor(&package, false);
@@ -5059,6 +5078,7 @@ pub extern "system" fn Java_org_rackforge_android_MainActivity_installBundledPlu
         }
         descriptor["already_installed"] = installed.already_installed.into();
         descriptor["artifact_sha256"] = installed.record.artifact_sha256.into();
+        descriptor["enabled_as_new"] = enabled_as_new.into();
         Ok(descriptor.to_string())
     })();
     result_string(&mut env, result)

@@ -328,8 +328,24 @@ fn open_resource_browser() -> Option<Arc<NativeResourceBrowser>> {
 pub fn load_bundled_plugin_models() -> Result<Vec<VstPluginModel>> {
     get_or_try_init_cloned(&BUNDLED_MODELS, &BUNDLED_MODELS_INIT, || {
         let root = rackforge_root()?;
-        models_from_roots(&root, bundled_package_roots()?)
+        models_from_roots(&root, newest_roots(&root, bundled_package_roots()?))
     })
+}
+
+/// The newest installed version of each package the build carried. The DAW's
+/// list of instruments and the engine that opens one must agree, and the
+/// engine plays the newest version the store holds.
+fn newest_roots(root: &Path, carried: Vec<PathBuf>) -> Vec<PathBuf> {
+    let store = root.join("plugin-store");
+    carried
+        .into_iter()
+        .map(|carried_root| {
+            PluginPackage::open(&carried_root)
+                .ok()
+                .and_then(|package| newest_package_root(&store, &package.manifest().id))
+                .unwrap_or(carried_root)
+        })
+        .collect()
 }
 
 /// The instrument models among these packages. One definition, because the
@@ -495,28 +511,36 @@ fn install_bundled_packages_at(root: &Path) -> Result<Vec<PathBuf>> {
 
 #[cfg(test)]
 fn load_bundled_plugin_models_at(root: &Path) -> Result<Vec<VstPluginModel>> {
-    models_from_roots(root, install_bundled_packages_at(root)?)
+    models_from_roots(root, newest_roots(root, install_bundled_packages_at(root)?))
 }
 
+/// Where the engine opens `plugin_id`: the newest version the store holds,
+/// as every other host plays it.
+///
+/// This used to prefer the copy the DLL carried over anything installed, so a
+/// newer version from a plugin's own release never reached the DAW, and it
+/// compared the rest as text, which ranks 0.9.0 above 0.10.0.
 fn package_root_for_id(plugin_id: &str) -> Result<PathBuf> {
-    if let Some(path) = bundled_package_roots()?.iter().find(|path| {
-        PluginPackage::open(path).is_ok_and(|package| package.manifest().id == plugin_id)
-    }) {
-        return Ok(path.clone());
-    }
-    let store = rackforge_root()?.join("plugin-store");
-    let packages = store.join("packages").join(plugin_id);
-    let mut candidates = Vec::new();
-    for version in fs::read_dir(packages).into_iter().flatten().flatten() {
-        let root = version.path();
-        if PluginPackage::open(&root).is_ok() {
-            candidates.push(root);
-        }
-    }
-    candidates.sort();
-    candidates
-        .pop()
+    // Carried packages are installed into the store before anything opens.
+    bundled_package_roots()?;
+    newest_package_root(&rackforge_root()?.join("plugin-store"), plugin_id)
         .with_context(|| format!("RackForge VST3 has no installed plugin {plugin_id}"))
+}
+
+/// The highest semantic version of `plugin_id` installed in `store`.
+fn newest_package_root(store: &Path, plugin_id: &str) -> Option<PathBuf> {
+    fs::read_dir(store.join("packages").join(plugin_id))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|version| {
+            let root = version.path();
+            let package = PluginPackage::open(&root).ok()?;
+            let version = semver::Version::parse(&package.manifest().version).ok()?;
+            Some((version, root))
+        })
+        .max_by(|left, right| left.0.cmp(&right.0))
+        .map(|(_, root)| root)
 }
 
 impl Drop for RackForgeEngine {
@@ -641,6 +665,31 @@ mod tests {
             assert_eq!(handle.join().unwrap(), 42);
         }
         assert_eq!(initializations.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn the_engine_opens_the_newest_semantic_version() {
+        let root = TestRoot::create();
+        let store = root.path().join("plugin-store");
+        let manifest = |version: &str| {
+            format!(
+                "schema_version = 1\nid = \"org.rackforge.synth\"\nname = \"Test Synth\"\n\
+                 vendor = \"RackForge Test\"\nversion = \"{version}\"\nkind = \"instrument\"\n\
+                 state_version = 1\ncapabilities = [\"audio_output\", \"midi_input\"]\n\
+                 ui_layouts = [\"little@1\"]\n\n[api]\nmajor = 1\nminor = 5\n\n\
+                 [binaries]\nlinux-aarch64 = \"lib/synth.so\"\n"
+            )
+        };
+        for version in ["0.9.0", "0.10.0", "0.2.0"] {
+            let package = store.join("packages/org.rackforge.synth").join(version);
+            fs::create_dir_all(&package).unwrap();
+            fs::write(package.join("rackforge-plugin.toml"), manifest(version)).unwrap();
+        }
+        assert_eq!(
+            newest_package_root(&store, "org.rackforge.synth"),
+            Some(store.join("packages/org.rackforge.synth/0.10.0"))
+        );
+        assert_eq!(newest_package_root(&store, "org.rackforge.other"), None);
     }
 
     #[test]

@@ -1,0 +1,46 @@
+{
+  "scope": "Observe the actual F5 bridge input, preserving the full Nocturne render.",
+  "generator_sha256": "9d516405e1a55895a5f236605ef5c341bec9b5fe2425ff16f78ba8d4e190b3c0",
+  "production_source_sha256": "cb6d553c638f06fb43010984b6321ebcb9fa6f137832e755ba47eb9fa5e16b77",
+  "observer_source_sha256": "a7628fdce0ace332201599fe2710ab6b1ab153487e56adf786e1406385193b9a",
+  "observer_source_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\melody-observer\\lib.rs",
+  "compile_command": [
+    "rustc",
+    "+1.98.0-x86_64-pc-windows-msvc",
+    "--edition=2024",
+    "--test",
+    "-O",
+    "-L",
+    "dependency=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14",
+    "--extern",
+    "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\melody-observer\\lib.rs",
+    "-o",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\melody-observer\\tests.exe"
+  ],
+  "test_command": [
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\melody-observer\\tests.exe",
+    "--exact",
+    "tests::export_nocturne_context",
+    "--ignored",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "test_output": "\nrunning 1 test\ntest tests::export_nocturne_context ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 151 filtered out; finished in 5.82s\n\n",
+  "full_audio_identical_to_public_probe": true,
+  "raw_sha256": "8f017fed891e9b2e467f03e13d4512bb588173c829c105f85565264fbb9d3c99",
+  "tap_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\melody-force.f32",
+  "tap_sha256": "d570b203101d7e19fe2213a29cf7b4272104e0ab419750d4d80a3e7998a246cd",
+  "tap_columns": [
+    "voice_sample",
+    "bridge_force",
+    "keybed_out"
+  ],
+  "tap_channels": 3,
+  "rate": 44100,
+  "validated_continuous_tap_seconds": [
+    49,
+    51.5
+  ],
+  "limitations": "Tap is in internal model units before the soundboard and microphone transfer. It is not an acoustic solo stem or a calibrated sound pressure."
+}

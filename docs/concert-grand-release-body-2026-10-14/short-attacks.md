@@ -1,5 +1,10 @@
 # Campanella: los dos ataques cerca de 00:49
 
+**Corrección posterior del usuario:** el audio al que se refería era
+Nocturno. Este informe conserva un hallazgo independiente sobre Campanella;
+no diagnostica el pasaje que el usuario había escuchado. El análisis correcto
+del reporte está en [Nocturno: Fa5 repetidos](nocturne-attacks.md).
+
 El usuario describe notas cortas con demasiado «tick» respecto del tono,
 en particular una nota repetida alrededor de 00:49. Se analiza la versión
 `1ce58df6` que acaba de escuchar. **No se modifica el DSP en este diagnóstico.**

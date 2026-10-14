@@ -1,0 +1,36 @@
+{
+  "scope": "Add a test-only observer to a frozen source copy; trace Nocturne voices.\n\nThe production tree remains untouched. The observer must reproduce the entire\n53-second public-probe render byte for byte before its state data are used.\n",
+  "production_source_sha256": "cb6d553c638f06fb43010984b6321ebcb9fa6f137832e755ba47eb9fa5e16b77",
+  "observer_source_sha256": "3658343a25f66895e3969cf8da799eafd965993f57934e126cf46045b988442a",
+  "generator_sha256": "c81661e1afafbf35cb8e2a0c8deb228bb74feb800724ef0467f71fd00e715383",
+  "compile_command": [
+    "rustc",
+    "+1.98.0-x86_64-pc-windows-msvc",
+    "--edition=2024",
+    "--test",
+    "-O",
+    "-L",
+    "dependency=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14",
+    "--extern",
+    "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\observer\\lib.rs",
+    "-o",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\observer\\tests.exe"
+  ],
+  "test_command": [
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\observer\\tests.exe",
+    "--exact",
+    "tests::export_nocturne_context",
+    "--ignored",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "test_output": "\nrunning 1 test\ntest tests::export_nocturne_context ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 151 filtered out; finished in 5.83s\n\n",
+  "context_audio_bit_identical_to_public_probe": true,
+  "raw_sha256": "8f017fed891e9b2e467f03e13d4512bb588173c829c105f85565264fbb9d3c99",
+  "trace_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\context.csv",
+  "trace_sha256": "deca1ec03b833e9d7acd9b95d65603386f5a4fa87c2aa18dca58cf609ad2b9b0",
+  "observer_source_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\observer\\lib.rs",
+  "test_executable_sha256": "b2b02c5846f04d4218230cb6b8f44a09edb10eb6239e31e2a93a75ac842cd0df",
+  "limitations": "Block-end observations every 256 samples; internal modal norms are not SI energy. No changes to production synthesis."
+}

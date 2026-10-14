@@ -1,0 +1,41 @@
+{
+  "scope": "Diagnostic: replace repeat merge by the existing fresh-voice path globally, not a selected correction",
+  "command": [
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\probe.exe",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\original-0-53s.txt",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\fresh-voice.f32",
+    "44100",
+    "2337300",
+    "256",
+    "concert",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\fresh-voice.txt"
+  ],
+  "native": {
+    "frames": 2337300,
+    "rate": 44100,
+    "block": 256,
+    "warmup_frames": 8820,
+    "events": 1530,
+    "peak": 0.19508548,
+    "rms": 0.02107459231770068,
+    "wall_seconds": 6.3111464
+  },
+  "files_sha256": {
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\probe.exe": "6014b6d260b388083afe49657a5a4e1f9754516a02432d12210064aafbddb38d",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\fresh-voice.txt": "fbccadbcb993219de31e70fe92fc2b4803dea2d38c3fded91ee86b51e3a48d3a",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\fresh-voice.f32": "7229eb90271b611c00ebc57480c7aee8b726fc89cf3b27c3c42825e86d34ea01",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs": "cb6d553c638f06fb43010984b6321ebcb9fa6f137832e755ba47eb9fa5e16b77"
+  },
+  "output": {
+    "path": "C:\\SHARED\\Piano-Ticks-Nocturno-2026-10-14\\Melodia-49.55-50.55-voz-nueva.wav",
+    "sha256": "f655b304940522212981faf16e99b5e7e0975fa6d104217ed49faac5a5be2556",
+    "source_seconds": [
+      49.55,
+      50.55
+    ],
+    "repeats": 3,
+    "gap_seconds": 0.35,
+    "export_gain": 1
+  },
+  "limitations": "Global fresh-voice intervention also changes preceding voice allocation, strike state and tails. It is not a reciprocal moving-string hammer model or an additive stem."
+}

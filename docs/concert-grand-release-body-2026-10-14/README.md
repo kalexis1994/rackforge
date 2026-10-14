@@ -14,12 +14,18 @@ El usuario escucha esta corrección y responde «Suena bien, sigamos»:
 Se corrige después el [cálculo común de tensión por cuerdas separadas](string-tension.md):
 82 pruebas pasan y se vuelven a renderizar ambas piezas completas. El efecto
 medido es pequeño y no resuelve los déficits de cuerpo; la escucha queda disponible.
-El usuario señala dos «ticks» cerca de 00:49 de Campanella. El
-[diagnóstico del pasaje](short-attacks.md) los localiza en C#7 y apunta a
+El informe inicial se interpreta como dos «ticks» cerca de 00:49 de Campanella. El
+[diagnóstico de ese pasaje](short-attacks.md) localiza dos C#7 y apunta a
 caída tonal rápida, con una contribución importante del canal de pérdida
 viscoelástica. Apagar ruidos mecánicos apenas cambia su ataque; la normalización
 del acoplamiento agravó la separación ataque/cola en este par respecto de la
 release. Se conserva esa regresión medida y se prepara la revisión de pérdidas.
+**El usuario aclara después que escuchaba Nocturno y confirma que los ticks
+son de la melodía.** El [análisis del reporte correcto](nocturne-attacks.md)
+localiza dos Fa5 en 49,749 y 50,191 s. El tono sigue presente; no reproduce
+el agotamiento extremo de C#7. Se estudia la repetición sobre la cuerda viva
+y se preparan contactos finitos para comparar, con efecto medido modesto.
+No se cambia el DSP ni se declara resuelta esa escucha.
 
 2026-10-14. El usuario confirma que quiere continuar desde el piano incluido
 en la release y prioriza **cuerpo y sostenido**. Base: RackForge v0.1.32,

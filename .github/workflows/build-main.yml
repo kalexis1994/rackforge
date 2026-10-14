@@ -150,10 +150,6 @@ jobs:
             -p rackforge-gain \
             -p rackforge-gain-portable \
             -p rackforge-vst3
-          # Concert Grand tests share a process-global live knob registry.
-          # Run that crate's tests serially so a test cannot change a knob
-          # between the two renders of the exact-equivalence assertion.
-          cargo test --locked -p rackforge-concert-grand -- --test-threads=1
 
       # The two equivalence tests that hold a REAL packaged instrument to
       # its sequential fallback need their component built for wasm32, so
@@ -167,30 +163,13 @@ jobs:
           RUST_MIN_STACK: "16777216"
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo build --locked --release --target wasm32-unknown-unknown             -p rackforge-concert-grand             -p rackforge-parallel-demo-synth
+          cargo build --locked --release --target wasm32-unknown-unknown -p rackforge-parallel-demo-synth
+          python3 tools/fetch-official-plugins.py --plugin-id org.rackforge.concert-grand --output-directory target/test-packages/official --extract-directory target/test-plugins
           # The example instrument's native build, held to its component.
           cargo build --locked -p rackforge-parallel-demo-synth
           # `--ignored` runs ONLY these, which is the whole point of the step.
           cargo test --locked -p rackforge-core --test parallel_render -- --ignored
 
-      # The instrument's two render fingerprints: every sample of a fixed
-      # scenario folded into one number, asserted against what it has always
-      # been. They are `#[ignore]`d because the model's knobs are
-      # process-wide atomics that eighteen other tests write, so they cannot
-      # share a parallel harness -- which is why this is their own
-      # invocation, single threaded. The number is stable across debug,
-      # release, x86 and the appliance's aarch64; all four were checked.
-      - name: Test the instrument's render fingerprints
-        shell: bash
-        env:
-          RUST_MIN_STACK: "16777216"
-        run: |
-          cargo test --locked --release -p rackforge-concert-grand --             --ignored --test-threads=1 render_fingerprint
-
-      # Keep the native driver harness in its own Cargo graph. On Windows GNU,
-      # feature unification with the full plugin-validation graph can produce
-      # an invalid test executable before the harness starts; the driver itself
-      # has no dependency on that graph.
       - name: Test bundled controller driver
         shell: bash
         run: cargo test --locked -p rackforge-controller-arturia-keylab-essential-mk3
@@ -241,22 +220,6 @@ jobs:
         shell: pwsh
         run: cargo clippy --locked -p rackforge-desktop -p rackforge-vst3 --all-targets --all-features -- -D warnings
 
-      # The bundled instrument is developed in this repository, so it is
-      # packaged from the same commit that builds the host: no fetch, no
-      # version skew, no checksum ceremony for code the tree already controls.
-      - name: Package the bundled Concert Grand
-        shell: pwsh
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-          New-Item -ItemType Directory -Force dist/bundled-plugins | Out-Null
-          cargo run --release -p rackforge-store -- pack-wasm `
-            plugins/concert-grand/package `
-            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-            dist/bundled-plugins/RF-Concert-Grand.rfplugin
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Concert-Grand.rfplugin'
-          "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
-
       - name: Build RackForge Desktop Standard
         shell: pwsh
         run: >-
@@ -278,11 +241,9 @@ jobs:
         run: |
           python tools/verify-release-edition.py --edition standard `
             --manifest dist/windows-x86_64/standard/bundled-plugins.txt `
-            --expect-plugin RF-Concert-Grand.rfplugin `
             --expect-official
           python tools/verify-release-edition.py --edition standard `
             --manifest dist/windows-x86_64/vst3-standard/bundled-plugins.txt `
-            --expect-plugin RF-Concert-Grand.rfplugin
 
       - name: Upload Windows Standard executable
         if: github.event_name != 'pull_request'
@@ -356,19 +317,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: Package the bundled Concert Grand
-        shell: bash
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-          mkdir -p dist/bundled-plugins
-          cargo run --release -p rackforge-store -- pack-wasm \
-            plugins/concert-grand/package \
-            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm \
-            dist/bundled-plugins/RF-Concert-Grand.rfplugin
-          printf 'RACKFORGE_BUNDLED_PLUGIN=%s/dist/bundled-plugins/RF-Concert-Grand.rfplugin\n' \
-            "$GITHUB_WORKSPACE" >>"$GITHUB_ENV"
-
       - name: Build Linux x86-64 Standard bundle
         shell: bash
         run: >-
@@ -381,7 +329,6 @@ jobs:
           python3 tools/verify-release-edition.py \
             --edition standard \
             --archive dist/linux-x86_64/standard/RackForge-Linux-x86_64.tar.gz \
-            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
 
       - name: Upload Linux x86-64 Standard bundle
@@ -454,7 +401,6 @@ jobs:
           python3 tools/verify-release-edition.py \
             --edition standard \
             --manifest dist/linux-flatpak/standard/bundled-plugins.txt \
-            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
 
       - name: Upload Linux Flatpak Standard bundle
@@ -538,22 +484,6 @@ jobs:
             "ndk;27.0.12077973"
           test -x "$sdk_root/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
 
-      # The bundled instrument is developed in this repository, so it is
-      # packaged from the same commit that builds the host: no fetch, no
-      # version skew, no checksum ceremony for code the tree already controls.
-      - name: Package the bundled Concert Grand
-        shell: pwsh
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-          New-Item -ItemType Directory -Force dist/bundled-plugins | Out-Null
-          cargo run --release -p rackforge-store -- pack-wasm `
-            plugins/concert-grand/package `
-            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-            dist/bundled-plugins/RF-Concert-Grand.rfplugin
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Concert-Grand.rfplugin'
-          "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
-
       - name: Build Android Standard APK
         shell: bash
         run: >-
@@ -566,7 +496,6 @@ jobs:
           python3 tools/verify-release-edition.py \
             --edition standard \
             --archive dist/android/standard/RackForge-debug.apk \
-            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
 
       - name: Verify Android application ID
@@ -648,22 +577,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # The bundled instrument is developed in this repository, so it is
-      # packaged from the same commit that builds the host: no fetch, no
-      # version skew, no checksum ceremony for code the tree already controls.
-      - name: Package the bundled Concert Grand
-        shell: pwsh
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-          New-Item -ItemType Directory -Force dist/bundled-plugins | Out-Null
-          cargo run --release -p rackforge-store -- pack-wasm `
-            plugins/concert-grand/package `
-            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-            dist/bundled-plugins/RF-Concert-Grand.rfplugin
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Concert-Grand.rfplugin'
-          "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
-
       - name: Build Raspberry Pi Standard bundle
         shell: bash
         run: >-
@@ -676,7 +589,6 @@ jobs:
           python3 tools/verify-release-edition.py \
             --edition standard \
             --archive dist/raspberry-pi/standard/RackForge-RaspberryPi-arm64.tar.gz \
-            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
 
       - name: Upload Raspberry Pi Standard bundle

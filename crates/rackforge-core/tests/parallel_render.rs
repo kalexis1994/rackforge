@@ -1443,13 +1443,15 @@ fn load_packaged(plugin_directory: &str, component: &str) -> &'static LoadedPlug
     // its metadata -- the Concert Grand's manifest names branding assets and
     // loading refuses the package without them.
     copy_tree(&package_source, &root);
-    fs::copy(
-        workspace
-            .join("target/wasm32-unknown-unknown/release")
-            .join(component),
-        root.join("component.wasm"),
-    )
-    .unwrap();
+    if !component.is_empty() {
+        fs::copy(
+            workspace
+                .join("target/wasm32-unknown-unknown/release")
+                .join(component),
+            root.join("component.wasm"),
+        )
+        .unwrap();
+    }
     let package = PluginPackage::open(&root).unwrap();
     // SAFETY: portable wasm-v1 packages execute inside the sandbox.
     let loaded = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), None) }.unwrap();
@@ -1472,12 +1474,9 @@ fn load_packaged(plugin_directory: &str, component: &str) -> &'static LoadedPlug
 /// runs. A real instrument's per-unit state lives in four separate wasm
 /// instances here, and every byte it needs has to survive the round trip.
 #[test]
-#[ignore = "requires the wasm32 build of rackforge-concert-grand"]
+#[ignore = "requires the pinned external Concert Grand package in target/test-plugins"]
 fn the_packaged_concert_grand_matches_its_sequential_fallback() {
-    let plugin = load_packaged(
-        "plugins/concert-grand/package",
-        "rackforge_concert_grand.wasm",
-    );
+    let plugin = load_packaged("target/test-plugins/concert-grand", "");
     let layout = plugin
         .parallel_layout()
         .expect("the Concert Grand is parallel");

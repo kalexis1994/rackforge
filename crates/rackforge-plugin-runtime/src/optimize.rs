@@ -5,7 +5,7 @@
 //! blocks a simplifier would merge -- Cranelift mostly lowers as it finds it.
 //! `wasm-opt -O3` does that cleaning at the WebAssembly level, where it does
 //! not cost the host a thing at render time. Measured on the Concert Grand
-//! (`plugins/concert-grand/examples/wasm-tax.rs`, x86_64): the host's path
+//! (`rackforge-plugin-concert-grand/plugin/examples/wasm-tax.rs`, x86_64): the host's path
 //! went from 66 to 72 against the same code compiled natively, with audio
 //! identical to the bit.
 //!

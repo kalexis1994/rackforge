@@ -50,29 +50,6 @@ if (-not (Test-Path -LiteralPath $libclang)) {
 
 $defaultPlugin = ""
 $rf106 = ""
-if ($Edition -eq "Standard" -and -not $env:RACKFORGE_BUNDLED_PLUGIN) {
-    $bundled = Join-Path $repository "dist/bundled-plugins/RF-Concert-Grand.rfplugin"
-    if (-not (Test-Path -LiteralPath $bundled -PathType Leaf)) {
-        Push-Location $repository
-        try {
-            & rustup target add wasm32-unknown-unknown
-            if ($LASTEXITCODE -ne 0) { throw "Could not install the WebAssembly Rust target." }
-            & cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-            if ($LASTEXITCODE -ne 0) { throw "Concert Grand WebAssembly build failed." }
-            New-Item -ItemType Directory -Force (Split-Path -Parent $bundled) | Out-Null
-            & cargo run --release -p rackforge-store -- pack-wasm `
-                plugins/concert-grand/package `
-                target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-                $bundled
-            if ($LASTEXITCODE -ne 0) { throw "Concert Grand package build failed." }
-        } finally {
-            Pop-Location
-        }
-    }
-    $defaultPlugin = $bundled
-} elseif ($Edition -eq "Standard") {
-    $defaultPlugin = $env:RACKFORGE_BUNDLED_PLUGIN
-}
 
 if ($Edition -eq "Standard") {
     $officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
@@ -81,6 +58,7 @@ if ($Edition -eq "Standard") {
     if ($LASTEXITCODE -ne 0) {
         throw "RackForge official plugin download failed."
     }
+    $defaultPlugin = if ($env:RACKFORGE_BUNDLED_PLUGIN) { $env:RACKFORGE_BUNDLED_PLUGIN } else { Join-Path $repository "dist/bundled-plugins/RF-Concert-Grand.rfplugin" }
     $carried = @(Get-ChildItem -LiteralPath $officialPlugins -Filter *.rfplugin -File -ErrorAction SilentlyContinue)
     if ($carried.Count -eq 0) {
         throw "No pinned official plugins were produced in $officialPlugins"

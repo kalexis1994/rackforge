@@ -1,6 +1,7 @@
 import importlib.util
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -67,6 +68,34 @@ class RewritePinTests(unittest.TestCase):
         self.assertNotIn("v0.5.1", text)
         self.assertIn('"sha256": "dddd"', text)
         self.assertIn('"sha256": "aaaa"', text)
+
+
+class DefaultPackageRoutingTests(unittest.TestCase):
+    def test_default_is_carried_once_outside_the_other_packages(self):
+        default = {"filename": "Piano.rfplugin", "plugin_id": "piano", "default": True}
+        other = {"filename": "Other.rfplugin", "plugin_id": "other"}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "official"
+            extracted = Path(directory) / "plugins"
+            with mock.patch.object(MODULE, "OFFICIAL_PLUGINS", (default, other)), \
+                 mock.patch.object(MODULE, "fetch") as fetch, \
+                 mock.patch.object(MODULE, "extract") as extract, \
+                 mock.patch("sys.argv", ["fetch", "--output-directory", str(output),
+                                         "--extract-directory", str(extracted)]):
+                MODULE.main()
+            self.assertEqual(fetch.call_args_list, [mock.call(output.parent, default), mock.call(output, other)])
+            self.assertEqual(extract.call_args_list, [mock.call(output.parent, extracted, default), mock.call(output, extracted, other)])
+
+    def test_a_single_plugin_can_be_fetched_for_host_contract_tests(self):
+        selected = {"filename": "Selected.rfplugin", "plugin_id": "selected"}
+        other = {"filename": "Other.rfplugin", "plugin_id": "other"}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "official"
+            with mock.patch.object(MODULE, "OFFICIAL_PLUGINS", (selected, other)), \
+                 mock.patch.object(MODULE, "fetch") as fetch, \
+                 mock.patch("sys.argv", ["fetch", "--output-directory", str(output), "--plugin-id", "selected"]):
+                MODULE.main()
+            fetch.assert_called_once_with(output, selected)
 
 
 if __name__ == "__main__":

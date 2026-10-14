@@ -54,7 +54,6 @@ use rackforge_core::parallel_render::{
 use rackforge_core::{LoadedPlugin, PluginInstance, PluginPackage};
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -176,15 +175,11 @@ fn plugin() -> &'static LoadedPlugin {
                 .nth(2)
                 .unwrap()
                 .to_path_buf();
-            let root = std::env::temp_dir().join("rackforge-overhead-bench");
-            let _ = fs::remove_dir_all(&root);
-            copy_tree(&workspace.join("plugins/concert-grand/package"), &root);
-            fs::copy(
-                workspace
-                    .join("target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm"),
-                root.join("component.wasm"),
-            )
-            .expect("build the component first: cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand");
+            let root = workspace.join("target/test-plugins/concert-grand");
+            assert!(
+                root.join("component.wasm").is_file(),
+                "fetch the pinned package with tools/fetch-official-plugins.py --plugin-id org.rackforge.concert-grand --extract-directory target/test-plugins"
+            );
             root
         }
     };
@@ -192,19 +187,6 @@ fn plugin() -> &'static LoadedPlugin {
     // SAFETY: portable wasm-v1 packages execute inside the sandbox.
     let loaded = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), None) }.unwrap();
     Box::leak(Box::new(loaded))
-}
-
-fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
-    fs::create_dir_all(to).unwrap();
-    for entry in fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let target = to.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
-            copy_tree(&entry.path(), &target);
-        } else {
-            fs::copy(entry.path(), target).unwrap();
-        }
-    }
 }
 
 /// Mean nanoseconds per block, warm-up discarded.

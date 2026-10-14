@@ -16,7 +16,7 @@
 // one executes it -- wasmtime on desktop, Raspberry Pi and Android, and every
 // browser since 2021 -- so the flag costs nothing, and without it LLVM cannot
 // vectorise anything: on the Concert Grand that is 58 per cent of native
-// speed against 74 (plugins/concert-grand/examples/wasm-tax.rs). A plugin
+// speed against 74 (rackforge-plugin-concert-grand/plugin/examples/wasm-tax.rs). A plugin
 // with nothing to vectorise loses nothing by having it. Only the plugin
 // target is held to this; the browser host builds for wasm32-wasip1 and is
 // not a plugin.

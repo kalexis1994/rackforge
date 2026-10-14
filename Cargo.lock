@@ -3799,18 +3799,6 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
 ]
 
-[[package]]
-name = "rackforge-concert-grand"
-version = "0.1.32"
-dependencies = [
- "cpal",
- "midir",
- "rackforge-core",
- "rackforge-plugin-api",
- "rackforge-plugin-sdk",
- "rackforge-ump",
- "wasmtime",
-]
 
 [[package]]
 name = "rackforge-control-api"

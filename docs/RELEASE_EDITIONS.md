@@ -28,9 +28,10 @@ every release.
 
 ## Concert Grand ownership
 
-Source ownership and release bundling are independent. A future migration to a
-dedicated `rackforge-plugin-concert-grand` repository would make its release
-lifecycle match the other official plugins, but should be handled separately.
-After that migration, builds can consume a pinned, checksummed release the same
-way they consume the other official instruments, and the expected set would
-follow from the pins with no further edit.
+Concert Grand is developed in
+[rackforge-plugin-concert-grand](https://github.com/kalexis1994/rackforge-plugin-concert-grand).
+Its DSP, interface, tests and laboratory reports live there. RackForge consumes
+its versioned, checksummed release through `tools/fetch-official-plugins.py`,
+as it does the other official instruments. The pin marked `default` is stored
+beside the other official packages so native hosts embed the startup instrument
+once. The browser receives that same package under its declared extraction name.

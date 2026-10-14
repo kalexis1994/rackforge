@@ -40,7 +40,7 @@ they use.
 A component runs as portable WebAssembly, and portable code is slower than
 the same code built natively. How much slower is partly the host's doing and
 partly the plugin's. On the Concert Grand, played through
-`plugins/concert-grand/examples/wasm-tax.rs` with the audio checked identical
+[`plugin/examples/wasm-tax.rs`](https://github.com/kalexis1994/rackforge-plugin-concert-grand/blob/main/plugin/examples/wasm-tax.rs) with the audio checked identical
 on every path (x86_64, native = 100):
 
 | Component | Speed |

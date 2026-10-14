@@ -2,12 +2,15 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signer, SigningKey};
 use rackforge_plugin_api::PluginManifest;
 use rackforge_repository::{
-    BundledInstall, RepositoryConfig, RepositoryFile, fetch_repository, install_archive,
-    install_bundled_official_archive, install_local_archive, repository_platform_key,
-    set_plugin_enabled, uninstall_plugin, verify_catalog,
+    BundledInstall, REPOSITORY_CONFIG_SCHEMA_VERSION, RETAINED_OFFICIAL_VERSIONS, RepositoryConfig,
+    RepositoryFile, VerifiedRepository, fetch_repository, install_archive,
+    install_bundled_official_archive, install_local_archive, official_repository,
+    repository_platform_key, retain_newest_versions, set_plugin_enabled, uninstall_plugin,
+    verify_catalog,
 };
 use semver::Version;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -53,6 +56,11 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
             version,
         ] if command == "install" => {
             install(config, repository_id, plugin_id, store_root, Some(version))
+        }
+        [command, config, store_root] if command == "outdated" => outdated(config, store_root),
+        [command, config, store_root] if command == "update" => update(config, store_root, None),
+        [command, config, store_root, plugin_id] if command == "update" => {
+            update(config, store_root, Some(plugin_id))
         }
         [command, package, store_root, flag]
             if command == "install-local" && flag == "--official" =>
@@ -231,6 +239,83 @@ fn install(
         installed.path.display(),
         installed.already_installed
     );
+    Ok(())
+}
+
+/// Every enabled repository in `config_path`, fetched and verified.
+fn verified_repositories(config_path: &str) -> Result<Vec<VerifiedRepository>, String> {
+    load_config(config_path)?
+        .repositories
+        .iter()
+        .filter(|repository| repository.enabled)
+        .map(|repository| fetch_repository(repository).map_err(|error| error.to_string()))
+        .collect()
+}
+
+fn outdated(config_path: &str, store_root: &str) -> Result<(), String> {
+    let platform = repository_platform_key().map_err(|error| error.to_string())?;
+    let mut found = 0;
+    for verified in verified_repositories(config_path)? {
+        for update in verified
+            .available_updates(store_root, platform)
+            .map_err(|error| error.to_string())?
+        {
+            found += 1;
+            println!(
+                "PLUGIN_UPDATE id={} installed={} available={} repository={}",
+                update.plugin_id,
+                update.installed_version,
+                update.selected.release.version,
+                verified.index.repository_id
+            );
+        }
+    }
+    if found == 0 {
+        println!("PLUGINS_CURRENT");
+    }
+    Ok(())
+}
+
+/// Installs the newest stable release of every outdated plugin, or of one.
+/// The new version goes in beside the old one, which stays as the version
+/// to go back to; anything older than that is pruned. Whether the plugin is
+/// enabled does not change.
+fn update(config_path: &str, store_root: &str, only: Option<&str>) -> Result<(), String> {
+    let platform = repository_platform_key().map_err(|error| error.to_string())?;
+    // The first repository in the file that offers an update wins.
+    let mut updated = BTreeSet::new();
+    for verified in verified_repositories(config_path)? {
+        for update in verified
+            .available_updates(store_root, platform)
+            .map_err(|error| error.to_string())?
+        {
+            if only.is_some_and(|plugin_id| plugin_id != update.plugin_id)
+                || updated.contains(&update.plugin_id)
+            {
+                continue;
+            }
+            let bytes = verified
+                .download(&update.selected)
+                .map_err(|error| error.to_string())?;
+            let installed = install_archive(store_root, &update.selected, &bytes)
+                .map_err(|error| error.to_string())?;
+            let pruned =
+                retain_newest_versions(store_root, &update.plugin_id, RETAINED_OFFICIAL_VERSIONS)
+                    .map_err(|error| error.to_string())?;
+            println!(
+                "PLUGIN_UPDATED id={} from={} to={} repository={} pruned_versions={}",
+                update.plugin_id,
+                update.installed_version,
+                installed.record.version,
+                installed.record.repository_id,
+                pruned
+            );
+            updated.insert(update.plugin_id);
+        }
+    }
+    if updated.is_empty() {
+        println!("PLUGINS_CURRENT");
+    }
     Ok(())
 }
 
@@ -540,7 +625,14 @@ fn collect_files(root: &Path, current: &Path, output: &mut Vec<PathBuf>) -> Resu
     Ok(())
 }
 
+/// A repositories file, or `official` for RackForge's own catalog alone.
 fn load_config(path: &str) -> Result<RepositoryFile, String> {
+    if path == "official" {
+        return Ok(RepositoryFile {
+            schema_version: REPOSITORY_CONFIG_SCHEMA_VERSION,
+            repositories: vec![official_repository().map_err(|error| error.to_string())?],
+        });
+    }
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
     RepositoryFile::parse_toml(&bytes).map_err(|error| error.to_string())
 }
@@ -586,7 +678,7 @@ fn hex_digest(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store install-local PACKAGE.rfplugin STORE_ROOT [--official]\n  rackforge-store enable PLUGIN_ID STORE_ROOT\n  rackforge-store disable PLUGIN_ID STORE_ROOT\n  rackforge-store uninstall PLUGIN_ID STORE_ROOT\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin [--native PLATFORM=LIBRARY]..."
+    "REPOSITORIES_TOML may be `official` for RackForge's own catalog.\nusage:\n  rackforge-store keygen SECRET_KEY PUBLIC_KEY\n  rackforge-store sign INDEX_JSON SECRET_KEY INDEX_SIG\n  rackforge-store verify INDEX_JSON INDEX_SIG REPOSITORIES_TOML REPOSITORY_ID\n  rackforge-store list REPOSITORIES_TOML\n  rackforge-store install REPOSITORIES_TOML REPOSITORY_ID PLUGIN_ID STORE_ROOT [VERSION]\n  rackforge-store outdated REPOSITORIES_TOML STORE_ROOT\n  rackforge-store update REPOSITORIES_TOML STORE_ROOT [PLUGIN_ID]\n  rackforge-store install-local PACKAGE.rfplugin STORE_ROOT [--official]\n  rackforge-store enable PLUGIN_ID STORE_ROOT\n  rackforge-store disable PLUGIN_ID STORE_ROOT\n  rackforge-store uninstall PLUGIN_ID STORE_ROOT\n  rackforge-store pack PACKAGE_DIRECTORY OUTPUT.rfplugin\n  rackforge-store pack-wasm PACKAGE_DIRECTORY COMPONENT_WASM OUTPUT.rfplugin [--native PLATFORM=LIBRARY]..."
 }
 
 #[cfg(test)]

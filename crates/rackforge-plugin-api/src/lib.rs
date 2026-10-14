@@ -12,7 +12,8 @@ pub mod program;
 pub mod state;
 
 pub use install::{
-    InstallationRecord, LOCAL_REPOSITORY_ID, OFFICIAL_REPOSITORY_ID, installation_record_for,
+    InstallationRecord, LOCAL_REPOSITORY_ID, OFFICIAL_CATALOG_ID, OFFICIAL_REPOSITORY_ID,
+    installation_record_for,
 };
 pub use manifest::{
     ApiRequirement, AudioBus, AudioBusLayout, BrandingAssetKind, Capability, MAIN_AUDIO_BUS_ID,

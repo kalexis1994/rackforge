@@ -3,8 +3,10 @@
     python tools/assemble-release.py <run-id> <tag> <notes.md> [--notes-header] [--publish]
 
 Downloads every artifact of the run, renames them to the asset names the
-previous releases used, zips the VST3 bundles, writes SHA256SUMS.txt, copies
-THIRD_PARTY_NOTICES.md, and (with --publish) creates the GitHub release.
+previous releases used, zips the VST3 bundles, attaches the Concert Grand
+package the Linux archive carries (the official plugin catalog reads it from
+there), writes SHA256SUMS.txt, copies THIRD_PARTY_NOTICES.md, and (with
+--publish) creates the GitHub release.
 
 With --notes-header, <notes.md> carries only what changed in this release and
 the opening — commit, editions, and the bundled package list with versions —
@@ -74,6 +76,31 @@ def packaged_plugins(archive: str) -> dict[str, str]:
                 raise SystemExit(f"{member.name} declares no version")
             found[os.path.basename(member.name)] = declared.group(1)
     return found
+
+
+CONCERT_GRAND_ASSET = "RF-Concert-Grand.rfplugin"
+
+
+def extract_concert_grand(archive: str, destination: str) -> None:
+    """Copies the Concert Grand package out of a release archive.
+
+    The other official plugins are released by their own repositories, and the
+    plugin catalog lists them from there. Concert Grand is built here, so a
+    RackForge release is its release: attached beside the platform builds, it
+    is what the catalog offers to every installation, the ones that never
+    install this release included.
+    """
+    with tarfile.open(archive, "r:gz") as tar:
+        for member in tar.getmembers():
+            if os.path.basename(member.name) != CONCERT_GRAND_ASSET or not member.isfile():
+                continue
+            source = tar.extractfile(member)
+            if source is None:
+                break
+            with open(destination, "wb") as output:
+                shutil.copyfileobj(source, output)
+            return
+    raise SystemExit(f"{os.path.basename(archive)} carries no {CONCERT_GRAND_ASSET}")
 
 
 def check_pins_against_artifact(pins: tuple, assets: str) -> None:
@@ -189,6 +216,10 @@ def main() -> None:
             shutil.copy2(os.path.join(folder, "RackForge-debug.apk"), os.path.join(assets, "RackForge-Android-arm64.apk"))
     if seen != expected:
         raise SystemExit("missing release artifacts: " + ", ".join(sorted(expected - seen)))
+    extract_concert_grand(
+        os.path.join(assets, "RackForge-Linux-x86_64.tar.gz"),
+        os.path.join(assets, CONCERT_GRAND_ASSET),
+    )
 
     shutil.copy2(notices, os.path.join(assets, "THIRD_PARTY_NOTICES.md"))
     with open(os.path.join(assets, "SHA256SUMS.txt"), "w", newline="\n") as sums:

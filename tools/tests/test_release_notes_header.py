@@ -70,6 +70,21 @@ MATCHING = {
 }
 
 
+class ConcertGrandAssetTests(unittest.TestCase):
+    def test_the_package_the_archive_carries_is_attached(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = standard_archive(Path(directory), MATCHING)
+            destination = Path(directory) / "RF-Concert-Grand.rfplugin"
+            MODULE.extract_concert_grand(str(archive), str(destination))
+            self.assertEqual(destination.read_bytes(), package("RF-Concert-Grand", "0.171.34"))
+
+    def test_an_archive_without_it_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = standard_archive(Path(directory), {"RF-106.rfplugin": "0.2.19"})
+            with self.assertRaises(SystemExit):
+                MODULE.extract_concert_grand(str(archive), str(Path(directory) / "out"))
+
+
 class PackagedPluginTests(unittest.TestCase):
     def test_versions_are_read_from_each_package(self):
         with tempfile.TemporaryDirectory() as directory:

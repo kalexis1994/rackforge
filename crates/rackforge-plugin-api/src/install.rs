@@ -16,6 +16,10 @@ use std::path::Path;
 pub const OFFICIAL_REPOSITORY_ID: &str = "official";
 /// The source of a package a user installed from a file.
 pub const LOCAL_REPOSITORY_ID: &str = "local";
+/// RackForge's own signed catalog. Only RackForge's key may use this id (see
+/// `rackforge-repository`), and it publishes the same official plugins the
+/// release carries, so a package installed from it is trusted alike.
+pub const OFFICIAL_CATALOG_ID: &str = "org.rackforge.official";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -29,9 +33,10 @@ pub struct InstallationRecord {
 }
 
 impl InstallationRecord {
-    /// Whether the release's official set laid this package down.
+    /// Whether the release's official set, or RackForge's own signed
+    /// catalog, laid this package down.
     pub fn is_official(&self) -> bool {
-        self.repository_id == OFFICIAL_REPOSITORY_ID
+        self.repository_id == OFFICIAL_REPOSITORY_ID || self.repository_id == OFFICIAL_CATALOG_ID
     }
 
     /// The same installation from another source: everything but where it
@@ -120,6 +125,29 @@ mod tests {
         assert_eq!(
             installation_record_for(&package, "org.example.synth", "1.2.4"),
             None
+        );
+
+        // RackForge's own signed catalog is trusted alike; another
+        // repository is not.
+        std::fs::write(
+            &record_path,
+            serde_json::to_vec(&record(OFFICIAL_CATALOG_ID)).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            installation_record_for(&package, "org.example.synth", "1.2.3")
+                .unwrap()
+                .is_official()
+        );
+        std::fs::write(
+            &record_path,
+            serde_json::to_vec(&record("org.example.repository")).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !installation_record_for(&package, "org.example.synth", "1.2.3")
+                .unwrap()
+                .is_official()
         );
 
         std::fs::write(&record_path, serde_json::to_vec(&record("local")).unwrap()).unwrap();

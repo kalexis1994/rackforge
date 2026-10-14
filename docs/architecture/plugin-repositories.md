@@ -118,15 +118,84 @@ The signed JSON document uses this shape:
 }
 ```
 
-Artifact URLs are resolved relative to `v1/index.json`. Cross-origin artifact
-URLs are rejected in v1, keeping credentials, redirects and trust boundaries
-simple.
+Artifact URLs are resolved relative to `v1/index.json`. An artifact on
+another origin is rejected unless the repository configuration lists that
+origin in `artifact_origins`: a catalog on a static site can then point at
+packages on a release host. The signed catalog fixes each artifact's length
+and SHA-256, so the origin decides only which servers a client asks.
+Downloads follow redirects but never to plain HTTP unless
+`allow_insecure_http` is set, and a server that stops answering fails the
+request.
+
+Without a version asked for, a client installs the newest stable release; a
+prerelease is installed only by naming its version.
+
+## The official catalog
+
+RackForge's own catalog, `org.rackforge.official`, is built into RackForge
+(`official_repository()`) and published with the project's GitHub Pages site:
+
+```text
+https://kalexis1994.github.io/rackforge/repository/v1/index.json
+https://kalexis1994.github.io/rackforge/repository/v1/index.json.sig
+```
+
+Its packages stay where their plugins release them, on GitHub
+(`artifact_origins = ["https://github.com"]`). Packages installed from it are
+trusted like the ones a release carries: their record names the official
+catalog, which lets a host run a package's native build. Only RackForge's key
+may use the id; a configuration that claims it with another key is refused.
+
+`config/plugin-catalog.toml` lists the plugins, each by its GitHub repository
+and release asset. `tools/build-plugin-catalog.py` reads the newest stable
+releases of each (three by default), downloads and checks every package -- a
+safe archive, the plugin it claims to be, a portable component -- and writes
+`v1/index.json`. Names, versions and summaries come from the packages'
+manifests; a license from their `SPDX-License-Identifier` line unless the
+configuration names one. A plugin that cannot be read or checked is left out
+with a warning. Concert Grand is built here, so `tools/assemble-release.py`
+attaches `RF-Concert-Grand.rfplugin` to every RackForge release and the
+catalog reads it from there.
+
+`.github/workflows/pages.yml` builds the catalog, signs it with
+`rackforge-store sign` and verifies the signature against the key the hosts
+trust before deploying, on every push to `main`, daily, and on a
+`plugin-released` repository_dispatch. When nothing can be built or signed,
+the catalog already published is kept.
+
+Setting up the key, once:
+
+1. On a trusted machine, `rackforge-store keygen catalog.key catalog.pub`.
+2. Store the contents of `catalog.key` as the `RACKFORGE_CATALOG_SIGNING_KEY`
+   Actions secret of the RackForge repository, then delete the file. Pull
+   requests never see it: only the push, schedule and dispatch runs sign.
+3. Put the contents of `catalog.pub` in `OFFICIAL_CATALOG_PUBLIC_KEY` in
+   `crates/rackforge-repository/src/lib.rs`.
+
+A plugin repository can announce a release so the catalog does not wait for
+the daily run, with a token that may dispatch to the RackForge repository:
+
+```sh
+gh api repos/kalexis1994/rackforge/dispatches -f event_type=plugin-released
+```
+
+`rackforge-store` drives the catalog headlessly; `official` stands for the
+built-in identity wherever a repositories file is expected:
+
+```sh
+rackforge-store list official
+rackforge-store outdated official STORE_ROOT
+rackforge-store update official STORE_ROOT [PLUGIN_ID]
+```
+
+An update installs the new version beside the old one and keeps the two
+newest, as a release's install does; whether the plugin is enabled does not
+change.
 
 ## Product integration status
 
-RackForge hosts do not expose repository configuration, remote catalog
-browsing, or remote package installation in LITTLE, Web, Desktop, or Android.
-Plugins are installed from user-selected local `.rfplugin` packages. The
-protocol and signing tools in this document are retained for publisher tooling
-and possible future distribution work, but are disconnected from the runtime
-product surfaces.
+The official catalog is published and `rackforge-store` lists, installs and
+updates from it. The hosts' own surfaces -- LITTLE, Web, Desktop and Android
+-- do not browse it or offer its updates yet; there, plugins are installed
+from user-selected local `.rfplugin` packages and from the set each release
+carries.

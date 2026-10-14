@@ -1,0 +1,83 @@
+# RackForge's official plugin catalog: the plugins tools/build-plugin-catalog.py
+# publishes, signed, at https://kalexis1994.github.io/rackforge/repository/.
+#
+# Every plugin is read from its own GitHub releases, so publishing a plugin
+# release is all it takes to offer it: the Pages workflow rebuilds the
+# catalog daily and whenever a plugin repository sends it a
+# `plugin-released` repository_dispatch. Nothing here pins a version.
+#
+# The name and the version come from each package's own manifest. The
+# summary does too, unless one is given here; the license is read from the
+# package's `SPDX-License-Identifier` line unless one is given here.
+
+schema_version = 1
+repository_id = "org.rackforge.official"
+name = "RackForge Official"
+# How many of each plugin's newest releases the catalog lists: more than one,
+# so a player can go back.
+releases = 3
+
+[[plugins]]
+id = "org.rackforge.concert-grand"
+# Built in this repository and attached to every RackForge release.
+repository = "kalexis1994/rackforge"
+asset = "RF-Concert-Grand.rfplugin"
+summary = "Physically modelled concert grand piano: no samples, every note computed as it is played."
+license = "GPL-2.0-or-later"
+
+[[plugins]]
+id = "org.rackforge.rf-106"
+repository = "kalexis1994/rackforge-plugin-rf-106"
+asset = "RF-106.rfplugin"
+summary = "Portable virtual-analog synthesizer with its own PLAY interface and program cassettes."
+
+[[plugins]]
+id = "org.rackforge.rf-5"
+repository = "kalexis1994/rackforge-plugin-rf-5"
+asset = "RF-5.rfplugin"
+summary = "Five-voice programmable polyphonic synthesizer."
+
+[[plugins]]
+id = "org.rackforge.rf7"
+repository = "kalexis1994/RF-7"
+asset = "RF-7.rfplugin"
+
+[[plugins]]
+id = "org.rackforge.organ"
+repository = "kalexis1994/RF-Organ"
+asset = "RF-Organ.rfplugin"
+license = "GPL-2.0-or-later"
+
+[[plugins]]
+id = "org.rackforge.rftines"
+repository = "kalexis1994/RF-Tines"
+asset = "RF-Tines.rfplugin"
+license = "LicenseRef-RackForge-Proprietary"
+
+[[plugins]]
+id = "org.rackforge.musette"
+repository = "kalexis1994/RF-Musette"
+asset = "RF-Musette.rfplugin"
+
+[[plugins]]
+id = "org.rackforge.rf-limiter"
+repository = "kalexis1994/rackforge-plugin-rf-limiter"
+asset = "RF-Limiter.rfplugin"
+
+[[plugins]]
+id = "org.rackforge.rf-eq"
+repository = "kalexis1994/rackforge-plugin-rf-eq"
+asset = "RF-EQ.rfplugin"
+
+[[plugins]]
+id = "org.rackforge.rf-comp"
+repository = "kalexis1994/rackforge-plugin-rf-comp"
+asset = "RF-Comp.rfplugin"
+
+# Not carried by any release: installed from the catalog only.
+[[plugins]]
+id = "org.rackforge.rf-soundfonts"
+repository = "kalexis1994/rackforge-plugin-rf-soundfonts"
+asset = "RF-Soundfonts.rfplugin"
+summary = "SoundFont instrument with the sampled YDP Grand Piano."
+license = "GPL-3.0-only"

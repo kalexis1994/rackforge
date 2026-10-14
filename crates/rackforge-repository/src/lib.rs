@@ -7,8 +7,9 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature, VerifyingKey};
 use rackforge_plugin_api::{
-    ParameterSchema, PluginKind, PluginManifest, PresetCatalog, RuntimeDescriptor,
-    validate_branding_asset, validate_branding_assets, validate_plugin_identifier,
+    OFFICIAL_CATALOG_ID, ParameterSchema, PluginKind, PluginManifest, PresetCatalog,
+    RuntimeDescriptor, validate_branding_asset, validate_branding_assets,
+    validate_plugin_identifier,
 };
 use semver::Version;
 use serde::de::DeserializeOwned;
@@ -19,6 +20,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Cursor, Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 use thiserror::Error;
 use url::Url;
 use zip::ZipArchive;
@@ -42,6 +44,17 @@ pub const RETAINED_OFFICIAL_VERSIONS: usize = 2;
 
 static TEMP_SERIAL: AtomicU64 = AtomicU64::new(0);
 
+/// Where RackForge's own signed catalog is published: the project's GitHub
+/// Pages site, built by `.github/workflows/pages.yml`.
+pub const OFFICIAL_CATALOG_URL: &str = "https://kalexis1994.github.io/rackforge/repository/";
+/// The Ed25519 key RackForge's catalog is signed with, base64. Its secret half
+/// is the `RACKFORGE_CATALOG_SIGNING_KEY` secret of the RackForge repository;
+/// see docs/architecture/plugin-repositories.md. Empty until that key exists,
+/// and the official catalog is unavailable while it is.
+pub const OFFICIAL_CATALOG_PUBLIC_KEY: &str = "";
+/// The official packages are attached to the plugins' own GitHub releases.
+pub const OFFICIAL_CATALOG_ARTIFACT_ORIGINS: &[&str] = &["https://github.com"];
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepositoryFile {
@@ -60,6 +73,13 @@ pub struct RepositoryConfig {
     pub enabled: bool,
     #[serde(default)]
     pub allow_insecure_http: bool,
+    /// Origins besides the catalog's own that its artifacts may be served
+    /// from, such as the release host of a catalog published on a static
+    /// site. The signed catalog fixes every artifact's length and SHA-256,
+    /// so where the bytes come from does not change what is installed; the
+    /// list only bounds which servers a client is willing to ask.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_origins: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -119,6 +139,15 @@ pub struct SelectedArtifact {
     pub release: PluginRelease,
     pub artifact: PluginArtifact,
     pub url: Url,
+}
+
+/// A newer release of an installed plugin, and the artifact that installs it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AvailableUpdate {
+    pub plugin_id: String,
+    /// The newest version the store holds.
+    pub installed_version: String,
+    pub selected: SelectedArtifact,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -463,22 +492,84 @@ impl RepositoryConfig {
                 "repository URL cannot contain credentials or a fragment".into(),
             ));
         }
-        match url.scheme() {
-            "https" => {}
-            "http" if self.allow_insecure_http => {}
-            "http" => {
-                return Err(RepositoryError::UnsafeTransport(
-                    "HTTP requires allow_insecure_http = true".into(),
-                ));
-            }
-            scheme => {
-                return Err(RepositoryError::UnsafeTransport(format!(
-                    "unsupported URL scheme {scheme:?}"
-                )));
-            }
+        self.validate_scheme(&url)?;
+        if self.id == OFFICIAL_CATALOG_ID && self.public_key != OFFICIAL_CATALOG_PUBLIC_KEY {
+            // A package from the official catalog may run its native build,
+            // so the id is RackForge's key's alone: a repository that claims
+            // it with another key would be trusted with native code.
+            return Err(RepositoryError::InvalidConfig(format!(
+                "only RackForge's own key may sign the {OFFICIAL_CATALOG_ID} catalog"
+            )));
+        }
+        for origin in &self.artifact_origins {
+            self.artifact_origin(origin)?;
         }
         Ok(url)
     }
+
+    fn validate_scheme(&self, url: &Url) -> Result<(), RepositoryError> {
+        match url.scheme() {
+            "https" => Ok(()),
+            "http" if self.allow_insecure_http => Ok(()),
+            "http" => Err(RepositoryError::UnsafeTransport(
+                "HTTP requires allow_insecure_http = true".into(),
+            )),
+            scheme => Err(RepositoryError::UnsafeTransport(format!(
+                "unsupported URL scheme {scheme:?}"
+            ))),
+        }
+    }
+
+    /// One configured artifact origin: a scheme and host, nothing else.
+    fn artifact_origin(&self, origin: &str) -> Result<url::Origin, RepositoryError> {
+        let url = Url::parse(origin)
+            .map_err(|error| RepositoryError::InvalidConfig(format!("artifact origin: {error}")))?;
+        self.validate_scheme(&url)?;
+        if url.host().is_none()
+            || url.username() != ""
+            || url.password().is_some()
+            || url.path() != "/"
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(RepositoryError::InvalidConfig(format!(
+                "artifact origin {origin:?} must be a scheme and host only"
+            )));
+        }
+        Ok(url.origin())
+    }
+
+    fn allows_artifact_from(&self, index_url: &Url, url: &Url) -> bool {
+        url.origin() == index_url.origin()
+            || self
+                .artifact_origins
+                .iter()
+                .filter_map(|origin| self.artifact_origin(origin).ok())
+                .any(|origin| origin == url.origin())
+    }
+}
+
+/// RackForge's own catalog, as every host trusts it.
+pub fn official_repository() -> Result<RepositoryConfig, RepositoryError> {
+    if OFFICIAL_CATALOG_PUBLIC_KEY.is_empty() {
+        return Err(RepositoryError::InvalidConfig(
+            "the official catalog has no signing key yet".into(),
+        ));
+    }
+    let config = RepositoryConfig {
+        id: OFFICIAL_CATALOG_ID.into(),
+        name: "RackForge Official".into(),
+        base_url: OFFICIAL_CATALOG_URL.into(),
+        public_key: OFFICIAL_CATALOG_PUBLIC_KEY.into(),
+        enabled: true,
+        allow_insecure_http: false,
+        artifact_origins: OFFICIAL_CATALOG_ARTIFACT_ORIGINS
+            .iter()
+            .map(|origin| (*origin).to_owned())
+            .collect(),
+    };
+    config.validate()?;
+    Ok(config)
 }
 
 impl RepositoryIndex {
@@ -604,8 +695,8 @@ pub fn fetch_repository(config: &RepositoryConfig) -> Result<VerifiedRepository,
         .map_err(|error| {
             RepositoryError::InvalidConfig(format!("cannot form signature URL: {error}"))
         })?;
-    let index_bytes = download_limited(&index_url, MAX_INDEX_BYTES)?;
-    let signature_bytes = download_limited(&signature_url, 1024)?;
+    let index_bytes = download_limited(&index_url, MAX_INDEX_BYTES, config.allow_insecure_http)?;
+    let signature_bytes = download_limited(&signature_url, 1024, config.allow_insecure_http)?;
     let index = verify_catalog(config, &index_bytes, &signature_bytes)?;
     Ok(VerifiedRepository {
         config: config.clone(),
@@ -630,7 +721,14 @@ impl VerifiedRepository {
         let mut candidates: Vec<_> = plugin
             .releases
             .iter()
-            .filter(|release| requested_version.is_none_or(|value| release.version == value))
+            .filter(|release| match requested_version {
+                Some(value) => release.version == value,
+                // Without a version asked for, only a stable release: a
+                // prerelease is something a player opts into by name.
+                None => {
+                    Version::parse(&release.version).is_ok_and(|version| version.pre.is_empty())
+                }
+            })
             .filter_map(|release| {
                 release
                     .artifacts
@@ -660,9 +758,9 @@ impl VerifiedRepository {
         let url = self.index_url.join(&artifact.url).map_err(|error| {
             RepositoryError::InvalidCatalog(format!("invalid artifact URL: {error}"))
         })?;
-        if url.origin() != self.index_url.origin() {
+        if !self.config.allows_artifact_from(&self.index_url, &url) {
             return Err(RepositoryError::UnsafeTransport(
-                "cross-origin artifact URL rejected".into(),
+                "artifact URL is outside the repository's origins".into(),
             ));
         }
         Ok(SelectedArtifact {
@@ -674,10 +772,38 @@ impl VerifiedRepository {
         })
     }
 
+    /// Every plugin installed in `store_root` that this catalog has a newer
+    /// stable release of, for `platform`. A plugin the catalog does not list,
+    /// or lists with nothing this host can install, is not an update.
+    pub fn available_updates(
+        &self,
+        store_root: impl AsRef<Path>,
+        platform: &str,
+    ) -> Result<Vec<AvailableUpdate>, RepositoryError> {
+        let root = ensure_real_directory(store_root.as_ref())?;
+        let mut updates = Vec::new();
+        for plugin in &self.index.plugins {
+            let Some(installed) = installed_versions(&root, &plugin.id).into_iter().max() else {
+                continue;
+            };
+            let Ok(selected) = self.select(&plugin.id, None, platform) else {
+                continue;
+            };
+            if Version::parse(&selected.release.version).is_ok_and(|version| version > installed) {
+                updates.push(AvailableUpdate {
+                    plugin_id: plugin.id.clone(),
+                    installed_version: installed.to_string(),
+                    selected,
+                });
+            }
+        }
+        Ok(updates)
+    }
+
     pub fn download(&self, selected: &SelectedArtifact) -> Result<Vec<u8>, RepositoryError> {
         let limit = usize::try_from(selected.artifact.size)
             .map_err(|_| RepositoryError::Integrity("artifact is too large".into()))?;
-        let bytes = download_limited(&selected.url, limit)?;
+        let bytes = download_limited(&selected.url, limit, self.config.allow_insecure_http)?;
         verify_artifact_bytes(&selected.artifact, &bytes)?;
         Ok(bytes)
     }
@@ -875,6 +1001,32 @@ pub fn install_bundled_official_archive(
             })
         }
     }
+}
+
+/// Takes every version of `plugin_id` but the `keep` newest out of the store,
+/// as a release's install does after laying a version down; an update from a
+/// repository calls this once the new version is in. Best effort, as there:
+/// a version a running process still maps stays. Returns how many left.
+pub fn retain_newest_versions(
+    store_root: impl AsRef<Path>,
+    plugin_id: &str,
+    keep: usize,
+) -> Result<usize, RepositoryError> {
+    validate_plugin_identifier(plugin_id)
+        .map_err(|error| RepositoryError::InvalidPackage(error.to_string()))?;
+    let root = ensure_real_directory(store_root.as_ref())?;
+    Ok(prune_plugin_versions(&root, plugin_id, keep, ""))
+}
+
+/// The versions of `plugin_id` the store holds, by their directory names.
+fn installed_versions(root: &Path, plugin_id: &str) -> Vec<Version> {
+    fs::read_dir(root.join("packages").join(plugin_id))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| Version::parse(entry.file_name().to_str()?).ok())
+        .collect()
 }
 
 /// Takes every version of `plugin_id` but the `keep` newest, and `protected`,
@@ -1539,8 +1691,26 @@ fn selected_repository_id(selected: &SelectedArtifact) -> String {
     selected.repository_id.clone()
 }
 
-fn download_limited(url: &Url, limit: usize) -> Result<Vec<u8>, RepositoryError> {
-    let mut response = ureq::get(url.as_str())
+/// Fetches at most `limit` bytes. Redirects are followed -- a release host
+/// hands a download to its storage -- but never to plain HTTP unless the
+/// repository allows it, and a server that stops answering fails the request
+/// rather than holding it forever. The body has no deadline: a large package
+/// on a slow link takes as long as it takes.
+fn download_limited(
+    url: &Url,
+    limit: usize,
+    allow_insecure_http: bool,
+) -> Result<Vec<u8>, RepositoryError> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .https_only(!allow_insecure_http)
+        .max_redirects(5)
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .user_agent(concat!("RackForge/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .into();
+    let mut response = agent
+        .get(url.as_str())
         .call()
         .map_err(|error| RepositoryError::Request(error.to_string()))?;
     response
@@ -2020,6 +2190,7 @@ mod tests {
             public_key: STANDARD.encode(signing_key().verifying_key().as_bytes()),
             enabled: true,
             allow_insecure_http: true,
+            artifact_origins: Vec::new(),
         }
     }
 
@@ -2178,6 +2349,164 @@ preset_catalog = "metadata/presets.json"
             selected.url.as_str(),
             "http://127.0.0.1:8788/packages/synth.rfplugin"
         );
+    }
+
+    fn repository_with(catalog: RepositoryIndex, config: RepositoryConfig) -> VerifiedRepository {
+        VerifiedRepository {
+            config,
+            index_url: Url::parse("http://127.0.0.1:8788/v1/index.json").unwrap(),
+            index: catalog,
+        }
+    }
+
+    fn release(version: &str, url: &str) -> PluginRelease {
+        PluginRelease {
+            version: version.into(),
+            published_at: "2026-10-01T00:00:00Z".into(),
+            artifacts: vec![PluginArtifact {
+                platform: "wasm-v1".into(),
+                url: url.into(),
+                size: 4,
+                sha256: hex_digest(Sha256::digest(b"test").as_slice()),
+            }],
+        }
+    }
+
+    /// A catalog on a static site with its packages on a release host: the
+    /// artifacts are on another origin, which only a configured origin allows.
+    #[test]
+    fn an_artifact_on_another_origin_needs_that_origin_configured() {
+        let mut catalog = index();
+        catalog.plugins[0].releases = vec![release(
+            "1.2.3",
+            "https://github.com/rackforge/synth/releases/download/v1.2.3/Synth.rfplugin",
+        )];
+        let refused = repository_with(catalog.clone(), config());
+        assert!(matches!(
+            refused.select("org.rackforge.synth", None, "linux-aarch64"),
+            Err(RepositoryError::UnsafeTransport(_))
+        ));
+
+        let mut allowed = config();
+        allowed.artifact_origins = vec!["https://github.com".into()];
+        allowed.validate().unwrap();
+        let selected = repository_with(catalog, allowed)
+            .select("org.rackforge.synth", None, "linux-aarch64")
+            .unwrap();
+        assert_eq!(selected.url.host_str(), Some("github.com"));
+
+        for origin in [
+            "https://github.com/rackforge",
+            "https://user@github.com",
+            "http://github.com",
+            "github.com",
+        ] {
+            let mut config = config();
+            config.allow_insecure_http = false;
+            config.base_url = "https://example.com/".into();
+            config.artifact_origins = vec![origin.into()];
+            assert!(config.validate().is_err(), "{origin} was accepted");
+        }
+    }
+
+    /// The official id is trusted with native code, so another key cannot
+    /// claim it.
+    #[test]
+    fn only_rackforge_may_sign_the_official_catalog() {
+        let mut impostor = config();
+        impostor.id = OFFICIAL_CATALOG_ID.into();
+        assert!(matches!(
+            impostor.validate(),
+            Err(RepositoryError::InvalidConfig(_))
+        ));
+        if OFFICIAL_CATALOG_PUBLIC_KEY.is_empty() {
+            assert!(official_repository().is_err());
+        } else {
+            let official = official_repository().unwrap();
+            assert_eq!(official.id, OFFICIAL_CATALOG_ID);
+            assert!(official.base_url.starts_with("https://"));
+        }
+    }
+
+    #[test]
+    fn a_prerelease_is_installed_only_by_name() {
+        let mut catalog = index();
+        catalog.plugins[0].releases = vec![
+            release("1.2.3", "../packages/stable.rfplugin"),
+            release("2.0.0-beta.1", "../packages/beta.rfplugin"),
+        ];
+        let repository = repository_with(catalog, config());
+        let stable = repository
+            .select("org.rackforge.synth", None, "linux-aarch64")
+            .unwrap();
+        assert_eq!(stable.release.version, "1.2.3");
+        let beta = repository
+            .select("org.rackforge.synth", Some("2.0.0-beta.1"), "linux-aarch64")
+            .unwrap();
+        assert_eq!(beta.release.version, "2.0.0-beta.1");
+    }
+
+    #[test]
+    fn an_update_is_a_newer_stable_release_of_an_installed_plugin() {
+        let root = store_root("updates");
+        let mut catalog = index();
+        catalog.plugins[0].releases = vec![
+            release("1.2.3", "../packages/synth-1.2.3.rfplugin"),
+            release("1.10.0", "../packages/synth-1.10.0.rfplugin"),
+            release("2.0.0-beta.1", "../packages/synth-beta.rfplugin"),
+        ];
+        catalog.plugins.push(RepositoryPlugin {
+            id: "org.rackforge.other".into(),
+            name: "Other".into(),
+            summary: "Not installed".into(),
+            license: "GPL-3.0-only".into(),
+            homepage: None,
+            releases: vec![release("9.0.0", "../packages/other.rfplugin")],
+        });
+        let repository = repository_with(catalog, config());
+        assert!(
+            repository
+                .available_updates(&root, "linux-aarch64")
+                .unwrap()
+                .is_empty()
+        );
+
+        for version in ["1.2.3", "1.9.0"] {
+            fs::create_dir_all(root.join("packages/org.rackforge.synth").join(version)).unwrap();
+        }
+        let updates = repository
+            .available_updates(&root, "linux-aarch64")
+            .unwrap();
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].plugin_id, "org.rackforge.synth");
+        assert_eq!(updates[0].installed_version, "1.9.0");
+        assert_eq!(updates[0].selected.release.version, "1.10.0");
+
+        fs::create_dir_all(root.join("packages/org.rackforge.synth/1.10.0")).unwrap();
+        assert!(
+            repository
+                .available_updates(&root, "linux-aarch64")
+                .unwrap()
+                .is_empty()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retaining_versions_keeps_the_newest() {
+        let root = store_root("retain");
+        for version in ["1.0.0", "1.2.0", "1.10.0"] {
+            install_local_archive(&root, &portable_at(version)).unwrap();
+        }
+        assert_eq!(
+            retain_newest_versions(&root, "org.rackforge.synth", 2).unwrap(),
+            1
+        );
+        let packages = root.join("packages/org.rackforge.synth");
+        assert!(!packages.join("1.0.0").exists());
+        assert!(packages.join("1.2.0").is_dir());
+        assert!(packages.join("1.10.0").is_dir());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -48,6 +48,9 @@ class HybridMidiNative(unittest.TestCase):
         cls.body_exe=cls.folder/'body.exe'
         subprocess.run(['rustc','--edition=2021','-O',str(root/'tools/render-concert-grand-force-body.rs'),
             '-o',str(cls.body_exe)],check=True)
+        cls.native_exe=cls.folder/'native.exe'
+        subprocess.run(['rustc','--edition=2021','-O',str(root/'tools/concert-grand-native-strings.rs'),
+            '-o',str(cls.native_exe)],check=True)
 
     @classmethod
     def tearDownClass(cls):cls.temp.cleanup()
@@ -86,6 +89,22 @@ class HybridMidiNative(unittest.TestCase):
         np.testing.assert_allclose(actual,expected,rtol=2e-11,atol=1e-18)
         self.assertEqual(data['frames'],1200);self.assertFalse(data['body_feedback'])
         self.assertGreater(np.linalg.norm(actual[200:]),0.)
+
+    def test_contact_bridge_force_includes_direct_felt_load_on_endpoint_lift(self):
+        data,_=self.render('0 0 28\n0.009 1 0\n',soft=0,duration=.01)
+        segment=data['contact_segments'][0];force=np.fromfile(segment['path'],dtype='<f8')[0]
+        f=fixture(note=63,transverse=12,rate=512000,velocity=28,duration=1/512000)
+        path=self.folder/'micro.bin';write_fixture(path,f)
+        micro=json.loads(subprocess.check_output([str(self.native_exe),str(path),'verify'],text=True))
+        # A second spatial AVF audit reads the same before/after positions.
+        f['q'][-1]=0.;f['endpoint']=np.asarray(micro['q']);f['parameters'][9:11]=0.
+        path2=self.folder/'kernel.bin';write_fixture(path2,f)
+        kernel=json.loads(subprocess.check_output([str(self.native_exe),str(path2),'kernel'],text=True))
+        nt=12;mass=f['parameters'][0]*f['parameters'][1]/2;n=np.arange(1,nt+1)
+        cross=f['parameters'][0]*f['parameters'][1]*(-1.)**(n+1)/(np.pi*n*np.sqrt(mass))
+        expected=.125*micro['force_trace'][0]-sum(kernel['boundary_gradient'])
+        for i in range(3):expected-=cross @ np.asarray(micro['v'])[i*48+24:i*48+36]*512000
+        self.assertAlmostEqual(force,expected,delta=max(abs(expected)*1e-9,1e-18))
 
 
 if __name__=='__main__':unittest.main()

@@ -12,5 +12,9 @@
       "retained": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-2026-10-14\\discarded-NL12.wav",
       "sha256": "66227b277075f33c1c7701f2c573317bb168ce299bce50f326da6abee7c3736a"
     }
+  ],
+  "additional_corrections": [
+    "Restore total felt stiffness divided equally among three wires.",
+    "Resolve cold-prefix pedal conditions before first attack."
   ]
 }

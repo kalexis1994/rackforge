@@ -1,0 +1,38 @@
+{
+  "measurement_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\audicion-midi-v2.json",
+  "measurement_sha256": "8bd95c8e14abe0ee3cf9ac78984dfe676b0894c1a9f91776b422bb009afbb190",
+  "verifier_sha256": "e5c55202fc02a4bd844a0e98541c1706ba734df731ceefd9c8b4b25945963a6d",
+  "all_artifact_hashes_passed": true,
+  "original_MIDI_events_preserved": true,
+  "no_clipping": true,
+  "common_gain_verified": true,
+  "body_feedback": false,
+  "complete_reciprocal_piano": false,
+  "perceptual_quality_decided_by_listener": true,
+  "variants": [
+    {
+      "nonlinear_transverse": 8,
+      "strikes": 37,
+      "frames": 436800,
+      "rate_hz": 48000,
+      "stereo": true,
+      "float32": true,
+      "common_gain_exact": true,
+      "peak": 0.07439429312944412,
+      "render_wall_seconds": 86.99842859999626,
+      "wav_path": "C:\\SHARED\\Piano-hibrido-MIDI-2026-10-14\\Campanella-hibrido-NL8.wav"
+    },
+    {
+      "nonlinear_transverse": 12,
+      "strikes": 37,
+      "frames": 436800,
+      "rate_hz": 48000,
+      "stereo": true,
+      "float32": true,
+      "common_gain_exact": true,
+      "peak": 0.07439420372247696,
+      "render_wall_seconds": 102.9904669000025,
+      "wav_path": "C:\\SHARED\\Piano-hibrido-MIDI-2026-10-14\\Campanella-hibrido-NL12.wav"
+    }
+  ]
+}

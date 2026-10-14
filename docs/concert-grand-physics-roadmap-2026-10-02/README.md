@@ -54,6 +54,13 @@ numéricos y el presupuesto de tiempo real sirven como diagnóstico; no se
 exige aprobarlos antes de entregar una escucha. Sigue como objetivo posterior
 el instrumento tocable. El primer ensayo está en la
 [escucha MIDI híbrida](RESULTADOS-P7-escucha-MIDI-hibrida.md).
+Ya están renderizados ocho segundos del comienzo de La Campanella, 37 golpes
+y cuatro alturas, más un segundo de apagado. Las versiones de 8/12 modos no
+lineales tardan **87,0/103,0 s** con cuatro voces en paralelo y salida estéreo
+continua, ganancia común y ataques de fieltro nuevos. La tabla se usa en un
+solo sentido y el drenaje es diagonal aproximado; no se presenta como cierre
+recíproco completo. Pasan 67 pruebas Python y dos controles Rust. Los WAVs
+corregidos están sólo en `C:/SHARED/Piano-hibrido-MIDI-2026-10-14/`.
 
 El usuario pide avanzar hacia una prueba tocable. El
 [cuerpo con presión estéreo nativa](RESULTADOS-P7-presion-realtime.md)

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from scipy.linalg import solve
 from scipy.io import wavfile
@@ -27,6 +28,7 @@ def main():
     parser.add_argument('--audio-dir',type=Path,required=True)
     parser.add_argument('--cut',type=float,default=8.);parser.add_argument('--tail',type=float,default=1.)
     parser.add_argument('--modes',type=int,nargs='+',default=[8,12])
+    parser.add_argument('--workers',type=int,default=4)
     args=parser.parse_args();root=Path(__file__).resolve().parents[1]
     if args.local.exists() or args.report.exists() or args.audio_dir.exists():raise ValueError('fresh paths required')
     started=time.perf_counter();doc=root/'docs/concert-grand-physics-roadmap-2026-10-02'
@@ -70,7 +72,11 @@ def main():
         high_coast_observation_limit_hz=20000,low_readout='cubic Hermite interval acceleration plus linearly interpolated nonlinear boundary gradient',
         coast_contact_switch='same q/v, full nonlinear potential during contact, projected nonlinear potential during coast',
         acoustic_pressure=True,complete_reciprocal_piano=False,full_piano_realtime=False,
-        inherited_body_fidelity_failures_preserved=True,variants=[])
+        inherited_body_fidelity_failures_preserved=True,parallel_voice_workers=min(args.workers,len(window['keys'])),
+        direct_felt_bridge_lever_arm=.125,cold_prefix_controls='settled before the first strike',
+        felt_total_stiffness_split_equally_between_wires=True,
+        rejected_predecessor_path=str(doc/'medidas-P7-cuerdas-nativas-2026-10-14/audicion-midi.json'),
+        rejected_predecessor_sha256=digest(doc/'medidas-P7-cuerdas-nativas-2026-10-14/audicion-midi.json'),variants=[])
     prepared={}
     for key in window['keys']:
         rate=16000*2**max(0,int(np.ceil((key-60)/12)))
@@ -91,7 +97,8 @@ def main():
         prepared[key]=(f,path,events,loss)
     for low in args.modes:
         begin=time.perf_counter();frames=round(window['duration_s']*48000);latent=np.zeros((frames,mapping.shape[1]));voices=[]
-        for key,(f,inp,events,loss) in prepared.items():
+        def render_voice(item):
+            key,(f,inp,events,loss)=item
             label=f'NL{low}-key-{key}';force_path=args.local/(label+'.force.f64');result_path=args.local/(label+'.json')
             command=[str(exe),str(inp.resolve()),'midi-voice',str(low),'16',str(events.resolve()),str(force_path.resolve()),str(loss.resolve())]
             start=time.perf_counter()
@@ -101,7 +108,6 @@ def main():
             coast=np.fromfile(force_path,dtype='<f8')
             force=bridge_force(coast,data['contact_segments'],data['contact_rate_hz'],data['capture_rate_hz'])
             if len(force)!=frames:raise ValueError('force duration changed')
-            latent+=force[:,None]*mapping[key-21]
             expected_attacks=sum(k==0 for _,k,_ in voice_events(window,key))
             if data['attacks']!=expected_attacks or data['felt_heat_j']<0:raise ValueError('event or felt loss mismatch')
             entry=dict(key=key,command=command,result_path=str(result_path.resolve()),result_sha256=digest(result_path),
@@ -112,7 +118,13 @@ def main():
                 coast_rate_hz=data['coast_rate_hz'],capture_rate_hz=data['capture_rate_hz'],contact_rate_hz=data['contact_rate_hz'],
                 sigma_min=float(np.fromfile(loss,dtype='<f8').min()),sigma_max=float(np.fromfile(loss,dtype='<f8').max()),
                 native_seconds=data['seconds'],voice_wall_seconds=time.perf_counter()-start)
-            voices.append(entry);print(label,'attacks',data['attacks'],'wall s',round(entry['voice_wall_seconds'],2),flush=True)
+            print(label,'attacks',data['attacks'],'wall s',round(entry['voice_wall_seconds'],2),flush=True)
+            return key,entry,force
+        # Only independent fixed-bridge voices run in parallel. The common
+        # body processes their sum once, in a deterministic key order.
+        with ThreadPoolExecutor(max_workers=record['parallel_voice_workers']) as pool:
+            for key,entry,force in pool.map(render_voice,prepared.items()):
+                latent+=force[:,None]*mapping[key-21];voices.append(entry)
         input_path=args.local/f'NL{low}-body-input.f64';latent.astype('<f8').tofile(input_path)
         raw=args.local/f'NL{low}-pressure.f64'
         command=[str(body_exe),coefficients['coefficient_path'],str(input_path.resolve()),str(mapping.shape[1]),str(raw.resolve())]

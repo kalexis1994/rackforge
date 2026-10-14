@@ -1,0 +1,2072 @@
+{
+  "stage": "rendered and WAV format verified",
+  "baseline_commit": "f42618a8",
+  "source_sha256": {
+    "concert-grand-phase-trajectory.rs": "cfabc8042fe93c445687c1b26a75eec472e351627dcafcd52eb0b359ba6f4b91",
+    "concert-grand-hybrid.rs": "f66e09357ec926cfa37648288dc92a17f73338fcdcc57c64a7cd9341269af37f",
+    "concert-grand-hybrid-audition.rs": "9e1eed6745daedff38f99eb59a849576f272035660361ffbc4b8ae560bc4de09",
+    "concert-grand-native-strings.rs": "c894d288cc6555f306052c389d5b9e8fa84ac8ef6792d764f17c670d7c421601",
+    "concert-grand-phase-forces.rs": "bc0b26414bf85003642575a64062901779a7f25cb3884cea196e313a1d05be8c",
+    "concert-grand-batch-cosine.rs": "bc46baffebbd45ad7731f7e8691b77f1707a44febc854baee8707277a8b635da",
+    "concert-grand-collocation.rs": "2cc85ef167a67df950002d37e21cc81540e1fd2e302c884d8cdd28de944ee3ff",
+    "concert-grand-phase-profile.rs": "97c718ea92dc386be7ad2861dacce259cadfe844218da64142e4d4ec8a54f7f6",
+    "concert-grand-observation.rs": "f5c4d16217f73bc36656a6a5dfa10204b4fa40a3929f69ce839538d7bcf26bac",
+    "concert-grand-pressure-body.rs": "2b02c1960872adf4a49fc2c14e29e91914e7348b53dcd47dde4f03f321f6783f",
+    "render-concert-grand-force-body.rs": "d73be114f3e11c22b4331769165ee29daf205c5d20d003977e620f817005846a",
+    "concert_grand_hybrid_midi.py": "1c3d4de7892b27ce4daf4212ebc628daaf4983b5b1650c4438d21f2a608ddee4",
+    "concert_grand_native_strings.py": "4c0cae8d1155dab1a97c3ddbfa2afa6f6f08afb1e90167edbdfe7d14f78be450",
+    "concert_grand_modal_viability.py": "d87db6d0acfc8e4cde6e0e3718acc05e7b708e65dd476507252b0f8ba63b9870",
+    "tests/test_concert_hybrid_midi.py": "19791ff4c05d6dff45d339438efdae2048e43852fe66da7fdd8d669497fffd7b",
+    "render-concert-grand-hybrid-midi.py": "62d11a647c0249ded87848d17520dc5bb5ec1d6f1d3e2ae83f4f00bbd501488a"
+  },
+  "midi_path": "C:\\Users\\kalex\\OneDrive\\Documents\\piano-comparacion\\09-midi\\liszt-la-campanella.mid",
+  "midi_sha256": "af07dbf66a65bbb761ca0ef261e3657267350f62bb963d6f298d2ea46684122a",
+  "plan_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P6-entrada-MIDI-2026-10-11\\plan.json",
+  "plan_sha256": "55c92764fc7f9e370d2e31c0ecd3297d73cbcb921bcef9192098f4a3dd6577e5",
+  "body_report_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerpo-cargado-2026-10-12\\residual-161.json",
+  "body_report_sha256": "56cc42e6177589de2ddd2fc1b1fa55cade96c3e25a8fac565a9583df254d6f25",
+  "body_model_sha256": "7fc971178834d655fe00a5a58fac4055e63733fb37769015e521f2d532fef906",
+  "pressure_report_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-presion-realtime-2026-10-13\\estados-DC.json",
+  "pressure_report_sha256": "73c307dc8d6af183fd1d73311f9e7b0e516412f9f549d681f5d486654d41c9be",
+  "pressure_coefficients": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-presion-DC-2026-10-13\\body-pressure-48000.bin",
+  "pressure_coefficients_sha256": "9bbe7cb3792a87e0a81a202a28651bff7921c1afa5d8f575e7fb710edb4f22e3",
+  "strings_executable_sha256": "a30ede85763f54be3c06a9e122327ac03ac7bd142a85999cf98481e9393122db",
+  "body_executable_sha256": "65de864f2de94b661bcb307f38a85614f9b87ffe8de43083dfec0c900f847e57",
+  "excerpt": {
+    "keys": [
+      63,
+      75,
+      87,
+      99
+    ],
+    "events": [
+      {
+        "tick": 0,
+        "kind": "program",
+        "key": 0,
+        "value": 0,
+        "channel": 0,
+        "time_s": 0.0
+      },
+      {
+        "tick": 0,
+        "kind": "cc",
+        "key": 64,
+        "value": 127,
+        "channel": 0,
+        "time_s": 0.0
+      },
+      {
+        "tick": 0,
+        "kind": "cc",
+        "key": 67,
+        "value": 127,
+        "channel": 0,
+        "time_s": 0.0
+      },
+      {
+        "tick": 262667,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0,
+        "time_s": 0.0
+      },
+      {
+        "tick": 268000,
+        "kind": "on",
+        "key": 75,
+        "value": 14,
+        "channel": 0,
+        "time_s": 0.02083203125
+      },
+      {
+        "tick": 302000,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 0.15364453125
+      },
+      {
+        "tick": 314333,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 0.2018203125
+      },
+      {
+        "tick": 395667,
+        "kind": "on",
+        "key": 75,
+        "value": 33,
+        "channel": 0,
+        "time_s": 0.51953125
+      },
+      {
+        "tick": 405000,
+        "kind": "on",
+        "key": 63,
+        "value": 21,
+        "channel": 0,
+        "time_s": 0.55598828125
+      },
+      {
+        "tick": 427667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 0.64453125
+      },
+      {
+        "tick": 440667,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 0.6953125
+      },
+      {
+        "tick": 502000,
+        "kind": "on",
+        "key": 75,
+        "value": 36,
+        "channel": 0,
+        "time_s": 0.93489453125
+      },
+      {
+        "tick": 513000,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0,
+        "time_s": 0.97786328125
+      },
+      {
+        "tick": 583333,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.2526015625
+      },
+      {
+        "tick": 617000,
+        "kind": "on",
+        "key": 99,
+        "value": 54,
+        "channel": 0,
+        "time_s": 1.38411328125
+      },
+      {
+        "tick": 622000,
+        "kind": "on",
+        "key": 87,
+        "value": 39,
+        "channel": 0,
+        "time_s": 1.40364453125
+      },
+      {
+        "tick": 650333,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.5143203125
+      },
+      {
+        "tick": 651333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.5182265625
+      },
+      {
+        "tick": 677333,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.6197890625
+      },
+      {
+        "tick": 711000,
+        "kind": "on",
+        "key": 99,
+        "value": 56,
+        "channel": 0,
+        "time_s": 1.75130078125
+      },
+      {
+        "tick": 715667,
+        "kind": "on",
+        "key": 87,
+        "value": 48,
+        "channel": 0,
+        "time_s": 1.76953125
+      },
+      {
+        "tick": 730333,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.8268203125
+      },
+      {
+        "tick": 743333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.8776015625
+      },
+      {
+        "tick": 799667,
+        "kind": "on",
+        "key": 99,
+        "value": 52,
+        "channel": 0,
+        "time_s": 2.09765625
+      },
+      {
+        "tick": 804667,
+        "kind": "on",
+        "key": 87,
+        "value": 47,
+        "channel": 0,
+        "time_s": 2.1171875
+      },
+      {
+        "tick": 820667,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.1796875
+      },
+      {
+        "tick": 833333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.2291640625
+      },
+      {
+        "tick": 888333,
+        "kind": "on",
+        "key": 75,
+        "value": 31,
+        "channel": 0,
+        "time_s": 2.4440078125
+      },
+      {
+        "tick": 893333,
+        "kind": "on",
+        "key": 63,
+        "value": 22,
+        "channel": 0,
+        "time_s": 2.4635390625
+      },
+      {
+        "tick": 920667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.5703125
+      },
+      {
+        "tick": 931667,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.61328125
+      },
+      {
+        "tick": 969000,
+        "kind": "on",
+        "key": 75,
+        "value": 22,
+        "channel": 0,
+        "time_s": 2.75911328125
+      },
+      {
+        "tick": 976667,
+        "kind": "on",
+        "key": 63,
+        "value": 25,
+        "channel": 0,
+        "time_s": 2.7890625
+      },
+      {
+        "tick": 1008667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.9140625
+      },
+      {
+        "tick": 1014667,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.9375
+      },
+      {
+        "tick": 1057000,
+        "kind": "on",
+        "key": 75,
+        "value": 39,
+        "channel": 0,
+        "time_s": 3.10286328125
+      },
+      {
+        "tick": 1062333,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0,
+        "time_s": 3.1236953125
+      },
+      {
+        "tick": 1117333,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.3385390625
+      },
+      {
+        "tick": 1130000,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.38801953125
+      },
+      {
+        "tick": 1147000,
+        "kind": "on",
+        "key": 99,
+        "value": 49,
+        "channel": 0,
+        "time_s": 3.45442578125
+      },
+      {
+        "tick": 1152000,
+        "kind": "on",
+        "key": 87,
+        "value": 36,
+        "channel": 0,
+        "time_s": 3.47395703125
+      },
+      {
+        "tick": 1174667,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.5625
+      },
+      {
+        "tick": 1190333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.6236953125
+      },
+      {
+        "tick": 1233333,
+        "kind": "on",
+        "key": 99,
+        "value": 49,
+        "channel": 0,
+        "time_s": 3.7916640625
+      },
+      {
+        "tick": 1240667,
+        "kind": "on",
+        "key": 87,
+        "value": 43,
+        "channel": 0,
+        "time_s": 3.8203125
+      },
+      {
+        "tick": 1259000,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.89192578125
+      },
+      {
+        "tick": 1268333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.9283828125
+      },
+      {
+        "tick": 1322333,
+        "kind": "on",
+        "key": 99,
+        "value": 54,
+        "channel": 0,
+        "time_s": 4.1393203125
+      },
+      {
+        "tick": 1326667,
+        "kind": "on",
+        "key": 87,
+        "value": 50,
+        "channel": 0,
+        "time_s": 4.15625
+      },
+      {
+        "tick": 1339667,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 4.20703125
+      },
+      {
+        "tick": 1360000,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 4.28645703125
+      },
+      {
+        "tick": 1420667,
+        "kind": "on",
+        "key": 75,
+        "value": 32,
+        "channel": 0,
+        "time_s": 4.5234375
+      },
+      {
+        "tick": 1424667,
+        "kind": "on",
+        "key": 63,
+        "value": 29,
+        "channel": 0,
+        "time_s": 4.5390625
+      },
+      {
+        "tick": 1480667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 4.7578125
+      },
+      {
+        "tick": 1495000,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 4.81380078125
+      },
+      {
+        "tick": 1522333,
+        "kind": "on",
+        "key": 99,
+        "value": 43,
+        "channel": 0,
+        "time_s": 4.9205703125
+      },
+      {
+        "tick": 1526333,
+        "kind": "on",
+        "key": 87,
+        "value": 35,
+        "channel": 0,
+        "time_s": 4.9361953125
+      },
+      {
+        "tick": 1547000,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 5.01692578125
+      },
+      {
+        "tick": 1559000,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 5.06380078125
+      },
+      {
+        "tick": 1631000,
+        "kind": "on",
+        "key": 99,
+        "value": 48,
+        "channel": 0,
+        "time_s": 5.34505078125
+      },
+      {
+        "tick": 1633667,
+        "kind": "on",
+        "key": 87,
+        "value": 39,
+        "channel": 0,
+        "time_s": 5.35546875
+      },
+      {
+        "tick": 1655000,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 5.43880078125
+      },
+      {
+        "tick": 1672000,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 5.50520703125
+      },
+      {
+        "tick": 1747667,
+        "kind": "on",
+        "key": 75,
+        "value": 27,
+        "channel": 0,
+        "time_s": 5.80078125
+      },
+      {
+        "tick": 1755333,
+        "kind": "on",
+        "key": 63,
+        "value": 21,
+        "channel": 0,
+        "time_s": 5.8307265625
+      },
+      {
+        "tick": 1842667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 6.171875
+      },
+      {
+        "tick": 1880667,
+        "kind": "on",
+        "key": 99,
+        "value": 42,
+        "channel": 0,
+        "time_s": 6.3203125
+      },
+      {
+        "tick": 1884667,
+        "kind": "on",
+        "key": 87,
+        "value": 40,
+        "channel": 0,
+        "time_s": 6.3359375
+      },
+      {
+        "tick": 1901667,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 6.40234375
+      },
+      {
+        "tick": 1908667,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 6.4296875
+      },
+      {
+        "tick": 1922667,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 6.484375
+      },
+      {
+        "tick": 2039000,
+        "kind": "on",
+        "key": 99,
+        "value": 38,
+        "channel": 0,
+        "time_s": 6.93880078125
+      },
+      {
+        "tick": 2042000,
+        "kind": "on",
+        "key": 87,
+        "value": 25,
+        "channel": 0,
+        "time_s": 6.95051953125
+      },
+      {
+        "tick": 2090333,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 7.1393203125
+      },
+      {
+        "tick": 2092000,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 7.14583203125
+      },
+      {
+        "tick": 2295667,
+        "kind": "on",
+        "key": 75,
+        "value": 20,
+        "channel": 0,
+        "time_s": 7.94140625
+      },
+      {
+        "time_s": 8.0,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "synthetic": true
+      },
+      {
+        "time_s": 8.0,
+        "kind": "cc",
+        "key": 64,
+        "value": 0,
+        "channel": 0,
+        "synthetic": true
+      }
+    ],
+    "original_events": [
+      {
+        "tick": 262667,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0,
+        "time_s": 0.0
+      },
+      {
+        "tick": 268000,
+        "kind": "on",
+        "key": 75,
+        "value": 14,
+        "channel": 0,
+        "time_s": 0.02083203125
+      },
+      {
+        "tick": 302000,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 0.15364453125
+      },
+      {
+        "tick": 314333,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 0.2018203125
+      },
+      {
+        "tick": 395667,
+        "kind": "on",
+        "key": 75,
+        "value": 33,
+        "channel": 0,
+        "time_s": 0.51953125
+      },
+      {
+        "tick": 405000,
+        "kind": "on",
+        "key": 63,
+        "value": 21,
+        "channel": 0,
+        "time_s": 0.55598828125
+      },
+      {
+        "tick": 427667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 0.64453125
+      },
+      {
+        "tick": 440667,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 0.6953125
+      },
+      {
+        "tick": 502000,
+        "kind": "on",
+        "key": 75,
+        "value": 36,
+        "channel": 0,
+        "time_s": 0.93489453125
+      },
+      {
+        "tick": 513000,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0,
+        "time_s": 0.97786328125
+      },
+      {
+        "tick": 583333,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.2526015625
+      },
+      {
+        "tick": 617000,
+        "kind": "on",
+        "key": 99,
+        "value": 54,
+        "channel": 0,
+        "time_s": 1.38411328125
+      },
+      {
+        "tick": 622000,
+        "kind": "on",
+        "key": 87,
+        "value": 39,
+        "channel": 0,
+        "time_s": 1.40364453125
+      },
+      {
+        "tick": 650333,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.5143203125
+      },
+      {
+        "tick": 651333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.5182265625
+      },
+      {
+        "tick": 677333,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.6197890625
+      },
+      {
+        "tick": 711000,
+        "kind": "on",
+        "key": 99,
+        "value": 56,
+        "channel": 0,
+        "time_s": 1.75130078125
+      },
+      {
+        "tick": 715667,
+        "kind": "on",
+        "key": 87,
+        "value": 48,
+        "channel": 0,
+        "time_s": 1.76953125
+      },
+      {
+        "tick": 730333,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.8268203125
+      },
+      {
+        "tick": 743333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 1.8776015625
+      },
+      {
+        "tick": 799667,
+        "kind": "on",
+        "key": 99,
+        "value": 52,
+        "channel": 0,
+        "time_s": 2.09765625
+      },
+      {
+        "tick": 804667,
+        "kind": "on",
+        "key": 87,
+        "value": 47,
+        "channel": 0,
+        "time_s": 2.1171875
+      },
+      {
+        "tick": 820667,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.1796875
+      },
+      {
+        "tick": 833333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.2291640625
+      },
+      {
+        "tick": 888333,
+        "kind": "on",
+        "key": 75,
+        "value": 31,
+        "channel": 0,
+        "time_s": 2.4440078125
+      },
+      {
+        "tick": 893333,
+        "kind": "on",
+        "key": 63,
+        "value": 22,
+        "channel": 0,
+        "time_s": 2.4635390625
+      },
+      {
+        "tick": 920667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.5703125
+      },
+      {
+        "tick": 931667,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.61328125
+      },
+      {
+        "tick": 969000,
+        "kind": "on",
+        "key": 75,
+        "value": 22,
+        "channel": 0,
+        "time_s": 2.75911328125
+      },
+      {
+        "tick": 976667,
+        "kind": "on",
+        "key": 63,
+        "value": 25,
+        "channel": 0,
+        "time_s": 2.7890625
+      },
+      {
+        "tick": 1008667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.9140625
+      },
+      {
+        "tick": 1014667,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 2.9375
+      },
+      {
+        "tick": 1057000,
+        "kind": "on",
+        "key": 75,
+        "value": 39,
+        "channel": 0,
+        "time_s": 3.10286328125
+      },
+      {
+        "tick": 1062333,
+        "kind": "on",
+        "key": 63,
+        "value": 28,
+        "channel": 0,
+        "time_s": 3.1236953125
+      },
+      {
+        "tick": 1117333,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.3385390625
+      },
+      {
+        "tick": 1130000,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.38801953125
+      },
+      {
+        "tick": 1147000,
+        "kind": "on",
+        "key": 99,
+        "value": 49,
+        "channel": 0,
+        "time_s": 3.45442578125
+      },
+      {
+        "tick": 1152000,
+        "kind": "on",
+        "key": 87,
+        "value": 36,
+        "channel": 0,
+        "time_s": 3.47395703125
+      },
+      {
+        "tick": 1174667,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.5625
+      },
+      {
+        "tick": 1190333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.6236953125
+      },
+      {
+        "tick": 1233333,
+        "kind": "on",
+        "key": 99,
+        "value": 49,
+        "channel": 0,
+        "time_s": 3.7916640625
+      },
+      {
+        "tick": 1240667,
+        "kind": "on",
+        "key": 87,
+        "value": 43,
+        "channel": 0,
+        "time_s": 3.8203125
+      },
+      {
+        "tick": 1259000,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.89192578125
+      },
+      {
+        "tick": 1268333,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 3.9283828125
+      },
+      {
+        "tick": 1322333,
+        "kind": "on",
+        "key": 99,
+        "value": 54,
+        "channel": 0,
+        "time_s": 4.1393203125
+      },
+      {
+        "tick": 1326667,
+        "kind": "on",
+        "key": 87,
+        "value": 50,
+        "channel": 0,
+        "time_s": 4.15625
+      },
+      {
+        "tick": 1339667,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 4.20703125
+      },
+      {
+        "tick": 1360000,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 4.28645703125
+      },
+      {
+        "tick": 1420667,
+        "kind": "on",
+        "key": 75,
+        "value": 32,
+        "channel": 0,
+        "time_s": 4.5234375
+      },
+      {
+        "tick": 1424667,
+        "kind": "on",
+        "key": 63,
+        "value": 29,
+        "channel": 0,
+        "time_s": 4.5390625
+      },
+      {
+        "tick": 1480667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 4.7578125
+      },
+      {
+        "tick": 1495000,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 4.81380078125
+      },
+      {
+        "tick": 1522333,
+        "kind": "on",
+        "key": 99,
+        "value": 43,
+        "channel": 0,
+        "time_s": 4.9205703125
+      },
+      {
+        "tick": 1526333,
+        "kind": "on",
+        "key": 87,
+        "value": 35,
+        "channel": 0,
+        "time_s": 4.9361953125
+      },
+      {
+        "tick": 1547000,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 5.01692578125
+      },
+      {
+        "tick": 1559000,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 5.06380078125
+      },
+      {
+        "tick": 1631000,
+        "kind": "on",
+        "key": 99,
+        "value": 48,
+        "channel": 0,
+        "time_s": 5.34505078125
+      },
+      {
+        "tick": 1633667,
+        "kind": "on",
+        "key": 87,
+        "value": 39,
+        "channel": 0,
+        "time_s": 5.35546875
+      },
+      {
+        "tick": 1655000,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 5.43880078125
+      },
+      {
+        "tick": 1672000,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 5.50520703125
+      },
+      {
+        "tick": 1747667,
+        "kind": "on",
+        "key": 75,
+        "value": 27,
+        "channel": 0,
+        "time_s": 5.80078125
+      },
+      {
+        "tick": 1755333,
+        "kind": "on",
+        "key": 63,
+        "value": 21,
+        "channel": 0,
+        "time_s": 5.8307265625
+      },
+      {
+        "tick": 1842667,
+        "kind": "off",
+        "key": 63,
+        "value": 0,
+        "channel": 0,
+        "time_s": 6.171875
+      },
+      {
+        "tick": 1880667,
+        "kind": "on",
+        "key": 99,
+        "value": 42,
+        "channel": 0,
+        "time_s": 6.3203125
+      },
+      {
+        "tick": 1884667,
+        "kind": "on",
+        "key": 87,
+        "value": 40,
+        "channel": 0,
+        "time_s": 6.3359375
+      },
+      {
+        "tick": 1901667,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 6.40234375
+      },
+      {
+        "tick": 1908667,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "time_s": 6.4296875
+      },
+      {
+        "tick": 1922667,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 6.484375
+      },
+      {
+        "tick": 2039000,
+        "kind": "on",
+        "key": 99,
+        "value": 38,
+        "channel": 0,
+        "time_s": 6.93880078125
+      },
+      {
+        "tick": 2042000,
+        "kind": "on",
+        "key": 87,
+        "value": 25,
+        "channel": 0,
+        "time_s": 6.95051953125
+      },
+      {
+        "tick": 2090333,
+        "kind": "off",
+        "key": 87,
+        "value": 0,
+        "channel": 0,
+        "time_s": 7.1393203125
+      },
+      {
+        "tick": 2092000,
+        "kind": "off",
+        "key": 99,
+        "value": 0,
+        "channel": 0,
+        "time_s": 7.14583203125
+      },
+      {
+        "tick": 2295667,
+        "kind": "on",
+        "key": 75,
+        "value": 20,
+        "channel": 0,
+        "time_s": 7.94140625
+      }
+    ],
+    "synthetic_events": [
+      {
+        "time_s": 8.0,
+        "kind": "off",
+        "key": 75,
+        "value": 0,
+        "channel": 0,
+        "synthetic": true
+      },
+      {
+        "time_s": 8.0,
+        "kind": "cc",
+        "key": 64,
+        "value": 0,
+        "channel": 0,
+        "synthetic": true
+      }
+    ],
+    "source_first_attack_tick": 262667,
+    "removed_cold_silence_s": 1.02604296875,
+    "cut_s": 8.0,
+    "tail_s": 1.0,
+    "duration_s": 9.0
+  },
+  "sampled_notes_used": false,
+  "eq_or_compression": false,
+  "body_feedback": false,
+  "natural_loss": "diagonal weak-load approximation: sigma_n = cross_n^2 * omega_n^2 * Re(Y_key(omega_n))",
+  "damper": "diagonal of the same uniform 0.3L / 0.08L patch, 0.6 N s/m; 30 ms engagement",
+  "soft_pedal": "contact areas [1-u,1,1]; instantaneous prescribed shift, no velocity/volume substitution",
+  "high_coast_observation_limit_hz": 20000,
+  "low_readout": "cubic Hermite interval acceleration plus linearly interpolated nonlinear boundary gradient",
+  "coast_contact_switch": "same q/v, full nonlinear potential during contact, projected nonlinear potential during coast",
+  "acoustic_pressure": true,
+  "complete_reciprocal_piano": false,
+  "full_piano_realtime": false,
+  "inherited_body_fidelity_failures_preserved": true,
+  "parallel_voice_workers": 4,
+  "direct_felt_bridge_lever_arm": 0.125,
+  "cold_prefix_controls": "settled before the first strike",
+  "felt_total_stiffness_split_equally_between_wires": true,
+  "rejected_predecessor_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\audicion-midi.json",
+  "rejected_predecessor_sha256": "70dc1bc42e0c6f3b5541f026cbf42cc54c6eda779194a27f3875596fdab55b4c",
+  "variants": [
+    {
+      "nonlinear_transverse": 8,
+      "voices": [
+        {
+          "key": 63,
+          "command": [
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\strings.exe",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.bin",
+            "midi-voice",
+            "8",
+            "16",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.events",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.loss.f64"
+          ],
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.json",
+          "result_sha256": "1df3a3e4fe2171b719e01791d488810a37841824b7d44344ab3f13888402fea1",
+          "fixture_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.bin",
+          "fixture_sha256": "f3f3aff5dc11cabec9105b5eeac7a0cee6c0e927cdb99ad999c65206f5a4b26d",
+          "events_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.events",
+          "events_sha256": "2b718ec4ec7ee1972662779f5f80c16c9913834c13d26dc800581e29ec468cff",
+          "loss_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.loss.f64",
+          "loss_sha256": "57347eb600e52e1cde819802aecaf9168ff3d3beb7e5fc6f2a58ed10bb7939b9",
+          "force_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64",
+          "force_sha256": "119fb1bbced0b7ca15804806e0e0bd5c388ee16f33da2453defd008fcdee0864",
+          "contact_segments": [
+            {
+              "start_capture_frame": 0,
+              "frames": 1584,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64.contact-0.f64",
+              "sha256": "9f5b9033489fa4bc7d2ebb47f6e3da121ff9848b590bcebef2ba59fd1135d3bb"
+            },
+            {
+              "start_capture_frame": 71168,
+              "frames": 1888,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64.contact-1.f64",
+              "sha256": "a133a1e0e611317d2978dd147ea48ec1c542908dd9611f95a373d5ca83458c03"
+            },
+            {
+              "start_capture_frame": 125168,
+              "frames": 1632,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64.contact-2.f64",
+              "sha256": "af01c6779ca9cbbe23bf53e3698ad3e409b96ca82050047d260a7aabf5508e97"
+            },
+            {
+              "start_capture_frame": 315332,
+              "frames": 1840,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64.contact-3.f64",
+              "sha256": "0d4018e8be940b3dbe88578fc6265f5db891b64b765d9452b7a93f67b566ac27"
+            },
+            {
+              "start_capture_frame": 357000,
+              "frames": 1760,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64.contact-4.f64",
+              "sha256": "d310b75f1447b15e740bb7822d09f8fa1b6080ff04d86152e53324841997a2ed"
+            },
+            {
+              "start_capture_frame": 399832,
+              "frames": 1648,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64.contact-5.f64",
+              "sha256": "394f7126643d4ce8b71d04dfd9f56aa2783d5b55aaaf5270a7b1f61af0aaad22"
+            },
+            {
+              "start_capture_frame": 581000,
+              "frames": 1568,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64.contact-6.f64",
+              "sha256": "95f214398622813b73099818fdccd2c846a6a35774ff456d749b79718118fa46"
+            },
+            {
+              "start_capture_frame": 746332,
+              "frames": 1856,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-63.force.f64.contact-7.f64",
+              "sha256": "950f1ed9af29de96d47d3a0bc4d56b030d591982a3e79268ccab6b1794a2030b"
+            }
+          ],
+          "attacks": 8,
+          "coast_steps": 287139,
+          "contact_steps": 13776,
+          "coast_rate_hz": 32000,
+          "capture_rate_hz": 128000,
+          "contact_rate_hz": 512000,
+          "sigma_min": 0.05270269130734276,
+          "sigma_max": 3.3308472459988816,
+          "native_seconds": 17.2977072,
+          "voice_wall_seconds": 17.45294809999905
+        },
+        {
+          "key": 75,
+          "command": [
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\strings.exe",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.bin",
+            "midi-voice",
+            "8",
+            "16",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.events",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.loss.f64"
+          ],
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.json",
+          "result_sha256": "6f6b6bd4dedef3079d28112d517c0c103b45b57f9a56538e9251e625096790f7",
+          "fixture_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.bin",
+          "fixture_sha256": "df45148ee9ce1f3b836874677fd06ac66b70e6fc7cb4fadbb8fc819623245a53",
+          "events_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.events",
+          "events_sha256": "1fb58c951a2677dea6ba7d7eba263b7f5d152b3c671d92faf2fc218cf1ea81d8",
+          "loss_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.loss.f64",
+          "loss_sha256": "b7f6ca5985060a247b6cce95bb0f9f05938e33fd88950bb554f96e034c5c4036",
+          "force_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64",
+          "force_sha256": "171713670d2347da3ac64b36883239a97660dd7937df1acf81e5dc17d8d1c9b6",
+          "contact_segments": [
+            {
+              "start_capture_frame": 2666,
+              "frames": 4704,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64.contact-0.f64",
+              "sha256": "d6d6420162767233822637adb7de00c486c9032292079fd10e83f0cc9c048eed"
+            },
+            {
+              "start_capture_frame": 66500,
+              "frames": 2768,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64.contact-1.f64",
+              "sha256": "2131f59b1592b8fbb70e4ffee200e2dab587c1c5338ddaac2eb022be442b296b"
+            },
+            {
+              "start_capture_frame": 119666,
+              "frames": 2624,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64.contact-2.f64",
+              "sha256": "424dcc558127dca7d99dece59f71af0f22317f13e5a0fbfe7ee08f627064a16b"
+            },
+            {
+              "start_capture_frame": 312834,
+              "frames": 2864,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64.contact-3.f64",
+              "sha256": "60dc10188b591672f017b300969cb73d27a6b9fbe2003796200bcc974ac14970"
+            },
+            {
+              "start_capture_frame": 353166,
+              "frames": 3520,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64.contact-4.f64",
+              "sha256": "b2fef9a3bbb6b05699ffa8fbc1100edd351d5658a349cc41c2537e93b7e874fe"
+            },
+            {
+              "start_capture_frame": 397166,
+              "frames": 2528,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64.contact-5.f64",
+              "sha256": "4650de57e3efc480a605e190398cc50491deedf70c59179489ef00ec1641d14c"
+            },
+            {
+              "start_capture_frame": 579000,
+              "frames": 2832,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64.contact-6.f64",
+              "sha256": "34ef57d08b1c258bb78c3cf46982c398ad9d7673ebb86d5cca8206f596677de8"
+            },
+            {
+              "start_capture_frame": 742500,
+              "frames": 3120,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64.contact-7.f64",
+              "sha256": "3c1aecdfa900e7327cf96f9673bde8b8d50944fef9ed2f95dcb3380ca80b0f8a"
+            },
+            {
+              "start_capture_frame": 1016500,
+              "frames": 3744,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-75.force.f64.contact-8.f64",
+              "sha256": "ab90f60f14c319c2a4488c55e2a74b1f48b29898ade20c96ab685a44c7167d80"
+            }
+          ],
+          "attacks": 9,
+          "coast_steps": 572873,
+          "contact_steps": 28704,
+          "coast_rate_hz": 64000,
+          "capture_rate_hz": 128000,
+          "contact_rate_hz": 1024000,
+          "sigma_min": 0.03608473405143063,
+          "sigma_max": 6.0804888681373175,
+          "native_seconds": 32.9026554,
+          "voice_wall_seconds": 33.060261400001764
+        },
+        {
+          "key": 87,
+          "command": [
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\strings.exe",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.bin",
+            "midi-voice",
+            "8",
+            "16",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.events",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.loss.f64"
+          ],
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.json",
+          "result_sha256": "810bcc4f8b18a655289d5b25a2ff759c3ed283d5674ba4bec81132e2f319e372",
+          "fixture_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.bin",
+          "fixture_sha256": "8d88febea9115e7ab875c4b5de72f659ad19c2dc217c0652e87053bed86f33d1",
+          "events_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.events",
+          "events_sha256": "8bbf99c39f9801fb0f5862b2d0e9616e483720138c9f7c936cb9928b025a9ce1",
+          "loss_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.loss.f64",
+          "loss_sha256": "6197dc81e81d102cf43f71d74c7ebab844359eb559e702c249ab625bca36bb82",
+          "force_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64",
+          "force_sha256": "6ba05b42a251f772d293401c00107713d28de4c3ae01dff759d5714c5cde0822",
+          "contact_segments": [
+            {
+              "start_capture_frame": 179667,
+              "frames": 4832,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-0.f64",
+              "sha256": "16d5f66a7bef327cda26cb2d933e22b3437ab3724220e0cca59ddba210588605"
+            },
+            {
+              "start_capture_frame": 226500,
+              "frames": 4256,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-1.f64",
+              "sha256": "3548ab23c45b18fac2db2c39420b683c4d76f0a55f31885bbf73a7da2d2814b7"
+            },
+            {
+              "start_capture_frame": 271000,
+              "frames": 4320,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-2.f64",
+              "sha256": "12b6a3fe29ad7dd732179955dc8c9079a33003932becc3f9df0a313e03c5ac13"
+            },
+            {
+              "start_capture_frame": 444667,
+              "frames": 5088,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-3.f64",
+              "sha256": "5315ee11d3510791b1a03d454a87c0f7c0d03daaacdd146a9653c6f26bc1219a"
+            },
+            {
+              "start_capture_frame": 489000,
+              "frames": 4560,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-4.f64",
+              "sha256": "279da1fd176f6fa7786d5b3e7632da2361b9037756da08581ae490380cd65f18"
+            },
+            {
+              "start_capture_frame": 532000,
+              "frames": 4160,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-5.f64",
+              "sha256": "b763f233d43ca02a51b05db2dfbe06b82fd6c597bee9cc28a042d489680cb6a8"
+            },
+            {
+              "start_capture_frame": 631833,
+              "frames": 5168,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-6.f64",
+              "sha256": "e72dee60ca790f7f75efe7b44fbf93c52df4bb1d5a73606e71306df3312f599a"
+            },
+            {
+              "start_capture_frame": 685500,
+              "frames": 4832,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-7.f64",
+              "sha256": "dd9a0324edb36e3103b270541a7abd81c811305271f541b900891d986c0d6b83"
+            },
+            {
+              "start_capture_frame": 811000,
+              "frames": 4768,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-8.f64",
+              "sha256": "e5f3b3520934f31394bbebc53d3357863f2223f116e74510be5728968564af0e"
+            },
+            {
+              "start_capture_frame": 889667,
+              "frames": 6400,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-87.force.f64.contact-9.f64",
+              "sha256": "3da6370e0fcc817afeedf7d1fe5f291f71fe9c242ff2cd13b04941838f5defb9"
+            }
+          ],
+          "attacks": 10,
+          "coast_steps": 969309,
+          "contact_steps": 48384,
+          "coast_rate_hz": 128000,
+          "capture_rate_hz": 128000,
+          "contact_rate_hz": 2048000,
+          "sigma_min": 0.023775090929211904,
+          "sigma_max": 8.481708140130436,
+          "native_seconds": 47.8140851,
+          "voice_wall_seconds": 47.96987330000411
+        },
+        {
+          "key": 99,
+          "command": [
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\strings.exe",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.bin",
+            "midi-voice",
+            "8",
+            "16",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.events",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.loss.f64"
+          ],
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.json",
+          "result_sha256": "16596851e486540c43fcaced2101b267f56d3a25a510b0815c1d8e66dae16832",
+          "fixture_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.bin",
+          "fixture_sha256": "2f8bb8f6e0b4fbb61c86482912c70ab226962cce4dd01a3775765b17d3d28448",
+          "events_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.events",
+          "events_sha256": "03a87ed2428e5bd88bee9168ed51dd57a1a286fe760fa083f51aca052a15d076",
+          "loss_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.loss.f64",
+          "loss_sha256": "f32a0091f933c31029e7ee432f010fa3e4351070c4401e7dbc1d62b43293ba18",
+          "force_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64",
+          "force_sha256": "54e3421646cf5e26f40fd017c1d5d4f1f70cee9513d22562e1fcc74dd3acb437",
+          "contact_segments": [
+            {
+              "start_capture_frame": 354333,
+              "frames": 7776,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-0.f64",
+              "sha256": "1b00a75508628ec77e48d18afbb15e05e3244706a0fafd482bae323d92370d41"
+            },
+            {
+              "start_capture_frame": 448333,
+              "frames": 7600,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-1.f64",
+              "sha256": "d50c372ca0e2133c9e71d775fe013221ec27c9b85236a849eb0ff01768a2e935"
+            },
+            {
+              "start_capture_frame": 537000,
+              "frames": 7968,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-2.f64",
+              "sha256": "258d9153ad1861bc263a09bd44a637868083c46287468db54ad6a4733b78b5b7"
+            },
+            {
+              "start_capture_frame": 884333,
+              "frames": 8272,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-3.f64",
+              "sha256": "e3f20712a3d4b5cff7feb283815df79ee28efb48b322e4c3df2aec26269b4e0a"
+            },
+            {
+              "start_capture_frame": 970666,
+              "frames": 8272,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-4.f64",
+              "sha256": "2c9a16e218990577d2cf67aab9a52f5e6dbf18e025be6251f7e1c9f429eb7164"
+            },
+            {
+              "start_capture_frame": 1059666,
+              "frames": 7776,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-5.f64",
+              "sha256": "6bfeb70a920e4508d5f063d953fe0d5c67990db6444f9c4be82e1e2358fa24bc"
+            },
+            {
+              "start_capture_frame": 1259666,
+              "frames": 8976,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-6.f64",
+              "sha256": "5c2fd156d7c63b04423b4a05997ba3dbf96e68cae4a40fd4602a9826a4de2e4d"
+            },
+            {
+              "start_capture_frame": 1368333,
+              "frames": 8368,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-7.f64",
+              "sha256": "04f6d79d162519fa830954848d31ba82cd6e00f10d3d027a5f53502656b80f99"
+            },
+            {
+              "start_capture_frame": 1618000,
+              "frames": 9104,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-8.f64",
+              "sha256": "70005c13eada6f7d2a9b0050163a93fb0ecd8529397a962bfc4729bb495ca164"
+            },
+            {
+              "start_capture_frame": 1776333,
+              "frames": 9712,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-key-99.force.f64.contact-9.f64",
+              "sha256": "606628d24d296d86e59b2694d7218f1bfe2d9aed8d85eb5069c5fef4d9368dc3"
+            }
+          ],
+          "attacks": 10,
+          "coast_steps": 1944428,
+          "contact_steps": 83824,
+          "coast_rate_hz": 256000,
+          "capture_rate_hz": 256000,
+          "contact_rate_hz": 4096000,
+          "sigma_min": 0.013055921424929501,
+          "sigma_max": 18.884433245907484,
+          "native_seconds": 85.4345777,
+          "voice_wall_seconds": 85.61659789999976
+        }
+      ],
+      "body_input_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-body-input.f64",
+      "body_input_sha256": "82e7d7b1aa16d26d8ff596217736fb088894f4e1101f488d4689a3e86b0c7177",
+      "raw_pressure_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL8-pressure.f64",
+      "raw_pressure_sha256": "73c915b9936101e6376d55396cd2450765342a0c680ea30e1220c5e5f31190e6",
+      "body": {
+        "frames": 432000,
+        "rate_hz": 48000,
+        "seconds": 1.1156574,
+        "peak_pa": 0.2975771631451303,
+        "body_feedback": false
+      },
+      "render_wall_seconds": 86.99842859999626,
+      "pressure_peak_pa": 0.2975771631451303,
+      "wav_path": "C:\\SHARED\\Piano-hibrido-MIDI-2026-10-14\\Campanella-hibrido-NL8.wav",
+      "wav_sha256": "19411c3ea3a9bbe33c1d81e7d9c2374fadab271e9f1c275790c99fe6e88a99c4",
+      "audio_duration_s": 9.1,
+      "audio_peak": 0.07439429312944412,
+      "audio_rms": 0.015514330938458443
+    },
+    {
+      "nonlinear_transverse": 12,
+      "voices": [
+        {
+          "key": 63,
+          "command": [
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\strings.exe",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.bin",
+            "midi-voice",
+            "12",
+            "16",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.events",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.loss.f64"
+          ],
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.json",
+          "result_sha256": "279305a1a0bafc2eba732444874de2cc824150c7642d120837ace8831c83ae3a",
+          "fixture_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.bin",
+          "fixture_sha256": "f3f3aff5dc11cabec9105b5eeac7a0cee6c0e927cdb99ad999c65206f5a4b26d",
+          "events_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.events",
+          "events_sha256": "2b718ec4ec7ee1972662779f5f80c16c9913834c13d26dc800581e29ec468cff",
+          "loss_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-63.loss.f64",
+          "loss_sha256": "57347eb600e52e1cde819802aecaf9168ff3d3beb7e5fc6f2a58ed10bb7939b9",
+          "force_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64",
+          "force_sha256": "4466996592692f4baf0eb0e350ad6a4274ee224a887f6b3aa09af7f91d2748e7",
+          "contact_segments": [
+            {
+              "start_capture_frame": 0,
+              "frames": 1584,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64.contact-0.f64",
+              "sha256": "9f5b9033489fa4bc7d2ebb47f6e3da121ff9848b590bcebef2ba59fd1135d3bb"
+            },
+            {
+              "start_capture_frame": 71168,
+              "frames": 1888,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64.contact-1.f64",
+              "sha256": "cbd159993ed2aa9945c1f9afac452b36947e7e6f04eaaecd3f367f067aeaddce"
+            },
+            {
+              "start_capture_frame": 125168,
+              "frames": 1632,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64.contact-2.f64",
+              "sha256": "62f71083501c18cb938b1fb684e5b7ae59e7868c78e2d3694b745ec389e09909"
+            },
+            {
+              "start_capture_frame": 315332,
+              "frames": 1840,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64.contact-3.f64",
+              "sha256": "8c77debe48a69c6715cbc5ad85a8337731afcc3423d249b9e8d7b58f10e7a1a6"
+            },
+            {
+              "start_capture_frame": 357000,
+              "frames": 1760,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64.contact-4.f64",
+              "sha256": "590beb85c4875fa205e0076046446caf3de27fc23db05ee2b0ca03b9d80cb595"
+            },
+            {
+              "start_capture_frame": 399832,
+              "frames": 1648,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64.contact-5.f64",
+              "sha256": "d28fc1e0f9e526850aed033ce225aa09cc6791963335fc305e0ef01684ba78bb"
+            },
+            {
+              "start_capture_frame": 581000,
+              "frames": 1568,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64.contact-6.f64",
+              "sha256": "5d81e61ff267548f724047c326dd305aaae689c2284e2defd2467e6b2b6530c6"
+            },
+            {
+              "start_capture_frame": 746332,
+              "frames": 1856,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-63.force.f64.contact-7.f64",
+              "sha256": "d75aa27ab8775ff5963325dc20da944ce8b01e747aea26ed34268cafce9a0417"
+            }
+          ],
+          "attacks": 8,
+          "coast_steps": 287139,
+          "contact_steps": 13776,
+          "coast_rate_hz": 32000,
+          "capture_rate_hz": 128000,
+          "contact_rate_hz": 512000,
+          "sigma_min": 0.05270269130734276,
+          "sigma_max": 3.3308472459988816,
+          "native_seconds": 22.2025828,
+          "voice_wall_seconds": 22.265821900000446
+        },
+        {
+          "key": 75,
+          "command": [
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\strings.exe",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.bin",
+            "midi-voice",
+            "12",
+            "16",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.events",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.loss.f64"
+          ],
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.json",
+          "result_sha256": "9146dde0c5fc209cbb7fedf1b53656280f6974b25660d4a149a9540c72d33c16",
+          "fixture_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.bin",
+          "fixture_sha256": "df45148ee9ce1f3b836874677fd06ac66b70e6fc7cb4fadbb8fc819623245a53",
+          "events_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.events",
+          "events_sha256": "1fb58c951a2677dea6ba7d7eba263b7f5d152b3c671d92faf2fc218cf1ea81d8",
+          "loss_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-75.loss.f64",
+          "loss_sha256": "b7f6ca5985060a247b6cce95bb0f9f05938e33fd88950bb554f96e034c5c4036",
+          "force_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64",
+          "force_sha256": "8eff3fcf02f0a6e92d1dd49548934e08279bd35c0d8498f3a6e98a2adf1e61c9",
+          "contact_segments": [
+            {
+              "start_capture_frame": 2666,
+              "frames": 4704,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64.contact-0.f64",
+              "sha256": "d6d6420162767233822637adb7de00c486c9032292079fd10e83f0cc9c048eed"
+            },
+            {
+              "start_capture_frame": 66500,
+              "frames": 2768,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64.contact-1.f64",
+              "sha256": "baf14a548fb644ee0cd3e29d1d059f48297d41cf97d433e1bd91907627cc7cbf"
+            },
+            {
+              "start_capture_frame": 119666,
+              "frames": 2624,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64.contact-2.f64",
+              "sha256": "a92e49d7c418babf532f472e7b1a1065cdc2356c099ced3ed107390454e8cbab"
+            },
+            {
+              "start_capture_frame": 312834,
+              "frames": 2864,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64.contact-3.f64",
+              "sha256": "4a42e1fe0e450c3ed9853c9c32d53d475a9ad09e6f1d55040f3acb6341513d34"
+            },
+            {
+              "start_capture_frame": 353166,
+              "frames": 3520,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64.contact-4.f64",
+              "sha256": "18fe68824ca3fd18412b4dec40cf9696d1aa5591b9b117bd54ced7c001820c46"
+            },
+            {
+              "start_capture_frame": 397166,
+              "frames": 2528,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64.contact-5.f64",
+              "sha256": "32e49372298bb1944e963fa0a4d419b272b6abf6e55da56eb4af9773a1b8d47d"
+            },
+            {
+              "start_capture_frame": 579000,
+              "frames": 2832,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64.contact-6.f64",
+              "sha256": "69831680ef34cb924cffca1060e172d82dae290c944cb5d6d76efe64f793bb50"
+            },
+            {
+              "start_capture_frame": 742500,
+              "frames": 3120,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64.contact-7.f64",
+              "sha256": "15a52fde19cb3d1faf6708738de3ce8f5b015fd0896136c4bc4620ae5953aea6"
+            },
+            {
+              "start_capture_frame": 1016500,
+              "frames": 3744,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-75.force.f64.contact-8.f64",
+              "sha256": "9539ab22d62dcb5be64aec2218b9bf561e45764186e18b60884033f695e6f85b"
+            }
+          ],
+          "attacks": 9,
+          "coast_steps": 572873,
+          "contact_steps": 28704,
+          "coast_rate_hz": 64000,
+          "capture_rate_hz": 128000,
+          "contact_rate_hz": 1024000,
+          "sigma_min": 0.03608473405143063,
+          "sigma_max": 6.0804888681373175,
+          "native_seconds": 41.3510254,
+          "voice_wall_seconds": 41.40892560000066
+        },
+        {
+          "key": 87,
+          "command": [
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\strings.exe",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.bin",
+            "midi-voice",
+            "12",
+            "16",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.events",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.loss.f64"
+          ],
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.json",
+          "result_sha256": "ea88cde6dc05a7966c8e7acb8e9cd34c4c675a2661304ec45283def1a86c2438",
+          "fixture_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.bin",
+          "fixture_sha256": "8d88febea9115e7ab875c4b5de72f659ad19c2dc217c0652e87053bed86f33d1",
+          "events_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.events",
+          "events_sha256": "8bbf99c39f9801fb0f5862b2d0e9616e483720138c9f7c936cb9928b025a9ce1",
+          "loss_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-87.loss.f64",
+          "loss_sha256": "6197dc81e81d102cf43f71d74c7ebab844359eb559e702c249ab625bca36bb82",
+          "force_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64",
+          "force_sha256": "6a8748a55aeb5cab702dd6efb12e1c953770cd04ed180d654cc133edcc8b4d99",
+          "contact_segments": [
+            {
+              "start_capture_frame": 179667,
+              "frames": 4832,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-0.f64",
+              "sha256": "16d5f66a7bef327cda26cb2d933e22b3437ab3724220e0cca59ddba210588605"
+            },
+            {
+              "start_capture_frame": 226500,
+              "frames": 4256,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-1.f64",
+              "sha256": "14b40b371bdd6b51e58c6a1de65ff7866ec1e42c9d788444ef853858e1d1a61f"
+            },
+            {
+              "start_capture_frame": 271000,
+              "frames": 4320,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-2.f64",
+              "sha256": "aec49c6031000526e2fd81e39f5e42b6afd872842e6a4f9e3c4203eac4495b41"
+            },
+            {
+              "start_capture_frame": 444667,
+              "frames": 5088,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-3.f64",
+              "sha256": "7a95bc57d586f2305fe8fd8294810dd103fc682ab6b5ab586459d756b8793953"
+            },
+            {
+              "start_capture_frame": 489000,
+              "frames": 4560,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-4.f64",
+              "sha256": "84ca84ce2937cbf848c523c20add2d90e1737d76af3439916b0d91d3b3d320c5"
+            },
+            {
+              "start_capture_frame": 532000,
+              "frames": 4160,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-5.f64",
+              "sha256": "bc8608ca63853ffad9eeb68cf07a52f0875d7d66f1476e095fd82a0d9a83f196"
+            },
+            {
+              "start_capture_frame": 631833,
+              "frames": 5168,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-6.f64",
+              "sha256": "58d46dd8270d45ffee51a8f62bc957a47d699d79bb01057ff37e68649d718b03"
+            },
+            {
+              "start_capture_frame": 685500,
+              "frames": 4832,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-7.f64",
+              "sha256": "8dca12d1d044dd8d51585bbb5ee93f9e5efaa6bd72c50fbea2ae118356d34c70"
+            },
+            {
+              "start_capture_frame": 811000,
+              "frames": 4768,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-8.f64",
+              "sha256": "2f3f1bf183c173a5b183758c40b18a0ae54e0242249291f5ad9c69364f4bd7ce"
+            },
+            {
+              "start_capture_frame": 889667,
+              "frames": 6400,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-87.force.f64.contact-9.f64",
+              "sha256": "47d14f59d34da0b6bad2c4e54c28a7ab021c229e0a216938fc27a047422aa08b"
+            }
+          ],
+          "attacks": 10,
+          "coast_steps": 969309,
+          "contact_steps": 48384,
+          "coast_rate_hz": 128000,
+          "capture_rate_hz": 128000,
+          "contact_rate_hz": 2048000,
+          "sigma_min": 0.023775090929211904,
+          "sigma_max": 8.481708140130436,
+          "native_seconds": 57.8835572,
+          "voice_wall_seconds": 57.944436400000995
+        },
+        {
+          "key": 99,
+          "command": [
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\strings.exe",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.bin",
+            "midi-voice",
+            "12",
+            "16",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.events",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64",
+            "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.loss.f64"
+          ],
+          "result_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.json",
+          "result_sha256": "741a5fd8f0d5ea8f29e411e7bdde6c879cdc3de5dd6523dd38e11832c2b4dfb5",
+          "fixture_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.bin",
+          "fixture_sha256": "2f8bb8f6e0b4fbb61c86482912c70ab226962cce4dd01a3775765b17d3d28448",
+          "events_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.events",
+          "events_sha256": "03a87ed2428e5bd88bee9168ed51dd57a1a286fe760fa083f51aca052a15d076",
+          "loss_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\key-99.loss.f64",
+          "loss_sha256": "f32a0091f933c31029e7ee432f010fa3e4351070c4401e7dbc1d62b43293ba18",
+          "force_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64",
+          "force_sha256": "65a86f74d8934bbaf21b7090e947ca10e8e5a94b6404edd91bb3311f06cbf680",
+          "contact_segments": [
+            {
+              "start_capture_frame": 354333,
+              "frames": 7776,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-0.f64",
+              "sha256": "1b00a75508628ec77e48d18afbb15e05e3244706a0fafd482bae323d92370d41"
+            },
+            {
+              "start_capture_frame": 448333,
+              "frames": 7600,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-1.f64",
+              "sha256": "96a61ddf9c16ebf69cfbdd57acb1435364e682eef69062419e283fe37a1c230b"
+            },
+            {
+              "start_capture_frame": 537000,
+              "frames": 7968,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-2.f64",
+              "sha256": "9a183a5a02a144cee42ed4e25e3f46dac2235ba855bc6a4931dff27a2d83a231"
+            },
+            {
+              "start_capture_frame": 884333,
+              "frames": 8272,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-3.f64",
+              "sha256": "2c4b2741626ec04415c1816f8f12f06a5dd9cb786f2ae41de680d7ca60525a7c"
+            },
+            {
+              "start_capture_frame": 970666,
+              "frames": 8272,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-4.f64",
+              "sha256": "82ffd7ab2c27b361713fad4a3f1779a1b90c6740bf8ddccff01aa1716cf53027"
+            },
+            {
+              "start_capture_frame": 1059666,
+              "frames": 7776,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-5.f64",
+              "sha256": "2d545322e0df99ecce34e6b3b3bd2c7afcc03aa339fcbdfeb1b05f9ce19d0af3"
+            },
+            {
+              "start_capture_frame": 1259666,
+              "frames": 8976,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-6.f64",
+              "sha256": "482aa0b5c96d0b023f42adbf8a35a702646b03d8840c372558b87d8cff31566f"
+            },
+            {
+              "start_capture_frame": 1368333,
+              "frames": 8368,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-7.f64",
+              "sha256": "c2c495ecaba3c8b2b710998918f480a35ed06d1e1df9a5a44f58d4b550c83952"
+            },
+            {
+              "start_capture_frame": 1618000,
+              "frames": 9104,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-8.f64",
+              "sha256": "c37373ea9b85c3bef1a1b133681d1067da00ea715127ec76b14fe169a324122a"
+            },
+            {
+              "start_capture_frame": 1776333,
+              "frames": 9712,
+              "path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-key-99.force.f64.contact-9.f64",
+              "sha256": "57ad03a767fed509e2b408b2fbb7909e4f141291d3c617d8bb0ef8b503cfd6a7"
+            }
+          ],
+          "attacks": 10,
+          "coast_steps": 1944428,
+          "contact_steps": 83824,
+          "coast_rate_hz": 256000,
+          "capture_rate_hz": 256000,
+          "contact_rate_hz": 4096000,
+          "sigma_min": 0.013055921424929501,
+          "sigma_max": 18.884433245907484,
+          "native_seconds": 101.6283569,
+          "voice_wall_seconds": 101.71923460000107
+        }
+      ],
+      "body_input_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-body-input.f64",
+      "body_input_sha256": "e3aa1bed2b550a56a2f18a9a3f7789f9893a6e789646cd0f78a4fcde4fc20797",
+      "raw_pressure_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-v2-2026-10-14\\NL12-pressure.f64",
+      "raw_pressure_sha256": "0e948c640f6c3921b0f787f719cd206be8a1bf3abbfa0816a9a8d7124da0d36a",
+      "body": {
+        "frames": 432000,
+        "rate_hz": 48000,
+        "seconds": 1.0847624,
+        "peak_pa": 0.29757681960106963,
+        "body_feedback": false
+      },
+      "render_wall_seconds": 102.9904669000025,
+      "pressure_peak_pa": 0.29757681960106963,
+      "wav_path": "C:\\SHARED\\Piano-hibrido-MIDI-2026-10-14\\Campanella-hibrido-NL12.wav",
+      "wav_sha256": "e92e32a265a190f6c2bb5731e36d9bb6ce59878daa5b0d57356715cb219cea34",
+      "audio_duration_s": 9.1,
+      "audio_peak": 0.07439420372247696,
+      "audio_rms": 0.015514330938458443
+    }
+  ],
+  "common_listening_gain_per_pa": 0.25,
+  "sources_unchanged": true,
+  "total_wall_seconds": 194.4268749000039
+}

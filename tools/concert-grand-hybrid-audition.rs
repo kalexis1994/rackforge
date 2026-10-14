@@ -183,7 +183,7 @@ pub(super) fn run(
         full_wires,
         1. / contact_rate as f64,
         p[5],
-        p[6],
+        p[6] / 3.,
         p[7],
         p[8],
         data[11..11 + 3 * nt].to_vec(),
@@ -264,7 +264,9 @@ pub(super) fn run(
             }
             let target = if held > 0 { 0. } else { (1. - pedal).powf(1.5) };
             if target != damper_target {
-                damper_start = damper;
+                // Cold-prefix controls have already settled during the
+                // analytically removed silence before the first strike.
+                damper_start = if frame == 0 { target } else { damper };
                 damper_target = target;
                 damper_time = time;
             }
@@ -301,6 +303,9 @@ pub(super) fn run(
                             * contact_rate as f64;
                     }
                 }
+                // The applied felt load also acts on the endpoint lift x/L.
+                // Q_bridge = x_strike*F - M_cross*q_ddot - dV_nl/db.
+                force += 0.125 * stats.force;
                 contact_force.push(force);
                 contact_steps += 1;
             }

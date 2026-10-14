@@ -1,0 +1,83 @@
+{
+  "scope": "Render a piano MIDI through an authenticated existing native production build.\n\nPreserves original timing, velocities, channel messages and final pedal state.\nThe explicit Concert preset replaces only the initial piano program-0 message.\n",
+  "model": "Sum squared modal slopes separately across strings and polarisations for the existing scalar tension glide; omit nonphysical cross-string products and onset bloom",
+  "tuning": {
+    "path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\contacto_4ms.txt",
+    "sha256": "6426d298e9aaa546cfa050b722d6316692b149ae3cbe2dcef7c5b3ae802917f8",
+    "text": "MERGE_RAMP_S = 0.004\n"
+  },
+  "git_head": "0eb0d9f78e34c48327adc9340bcd7d77d1144191",
+  "files_sha256": {
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\render-concert-grand-midi.py": "fab8e7e497c974602a3a40a1fe5c41e5b4426fe183134828fad90d488406f001",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\render-concert-grand-release-midi.py": "be9050450f23128766a3dd77d1c8c2a0c26c9dc159d138f5c443035a233e3d8b",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\piano-comparacion\\09-midi\\liszt-la-campanella.mid": "af07dbf66a65bbb761ca0ef261e3657267350f62bb963d6f298d2ea46684122a",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\docs\\concert-grand-release-body-2026-10-14\\string-tension-verification.json": "4d570bdbd8cc8994858537ca7b8278fdd7aca56d9ed1557061c77b17166f2f72",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\probe.exe": "6014b6d260b388083afe49657a5a4e1f9754516a02432d12210064aafbddb38d",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs": "cb6d553c638f06fb43010984b6321ebcb9fa6f137832e755ba47eb9fa5e16b77",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\math.rs": "8fcbef468ccce24de475503793ee778f715f419c31bb2300d0cc0ffd4bd472ee",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\contacto_4ms.txt": "6426d298e9aaa546cfa050b722d6316692b149ae3cbe2dcef7c5b3ae802917f8"
+  },
+  "midi_duration_seconds": 275.1588541666667,
+  "audio_duration_seconds": 280.15884353741495,
+  "rate": 44100,
+  "channels": 2,
+  "block": 256,
+  "tail_seconds": 5,
+  "export_gain": 1,
+  "counts": {
+    "cc64": 2872,
+    "cc67": 11,
+    "strikes": 4249,
+    "releases": 4249
+  },
+  "original_events": 11382,
+  "rendered_events": 11381,
+  "skipped_initial_program": [
+    {
+      "seconds": 0,
+      "program": 0,
+      "reason": "Concert preset explicitly loaded"
+    }
+  ],
+  "final_original_controllers": {
+    "64": 0,
+    "67": 0
+  },
+  "synthetic_events": [],
+  "events_sha256": "3fe9e3a7b11805cefd31fae5c6375ebdb9a9cd59385b57cf0a6406a7ea5d22b5",
+  "command": [
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\probe.exe",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-campanella-contact-4ms-2026-10-14\\events.txt",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-campanella-contact-4ms-2026-10-14\\performance.f32",
+    "44100",
+    "12355005",
+    "256",
+    "concert",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\contacto_4ms.txt"
+  ],
+  "native": {
+    "frames": 12355005,
+    "rate": 44100,
+    "block": 256,
+    "warmup_frames": 8820,
+    "events": 11381,
+    "peak": 0.9248338,
+    "rms": 0.05200867765318893,
+    "wall_seconds": 26.7618094
+  },
+  "render_process_seconds": 26.794162699996377,
+  "peak": 0.9248337745666504,
+  "last_100ms_rms": 2.612137771915119e-12,
+  "output": "C:\\SHARED\\Piano-Campanella-contacto-4ms-2026-10-14\\Campanella-contacto-4ms.wav",
+  "output_sha256": "0beb113c81846271e027005b156e361ed84b8f2b446d0eec38b47b10ac648085",
+  "raw_sha256": "7a4a81813117303279b5d61a1274d5e2d42e05766961474cdbccc13eeb837955",
+  "validation": [
+    "Authenticated current production sources and executable",
+    "Original MIDI messages and rational timing preserved",
+    "All note releases present; original final pedal state retained",
+    "One continuous instance; no note samples",
+    "Finite stereo float audio below full scale",
+    "Exact WAV/raw equality",
+    "Tail below -100 dBFS RMS"
+  ]
+}

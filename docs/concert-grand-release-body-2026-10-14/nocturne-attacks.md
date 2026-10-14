@@ -141,6 +141,14 @@ al ejecutable autenticado, sin cambiar todavía los valores de producción.
 [Comando, configuración y hashes del render](nocturne-contact-4ms-render.json).
 [Verificación contra el recorte](nocturne-contact-4ms-verification.json).
 
+El usuario pide después **La Campanella completa** con esta misma configuración.
+Archivo: `C:/SHARED/Piano-Campanella-contacto-4ms-2026-10-14/Campanella-contacto-4ms.wav`.
+Duración **280,159 s**, incluidos cinco segundos de cola; render **26,79 s**,
+pico **0,92484**, RMS final de 100 ms **2,61e-12**. Se verifican los 4249
+golpes y sus liberaciones, la identidad de la configuración de 4 ms con la del
+Nocturno, los hashes de fuentes y salida, y la igualdad WAV/crudo.
+[Comando, MIDI completo y hashes](campanella-contact-4ms-render.json).
+
 Datos y reproducción:
 
 - [MIDI, ablaciones y recortes](nocturne-attacks.json):

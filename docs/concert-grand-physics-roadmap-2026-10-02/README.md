@@ -63,6 +63,16 @@ balance y costo sobre la versión publicada, sin atribuirle defectos medidos
 sólo en 0.172.0. La investigación nativa se conserva;
 la siguiente etapa deja de perseguir su sustitución integral de la release.
 
+La continuación está en el worktree
+`C:/Users/kalex/.codex/worktrees/concert-grand-release-base/rackforge`, rama
+`codex/concert-grand-release-improvements`, commit **fc8fa523**. Su documento
+`docs/concert-grand-release-body-2026-10-14/README.md` registra doce casos con
+el motor publicado sin modificar y su identidad con la huella de CI. C4 sí
+pierde más fundamental que la referencia; A3 muestra el comportamiento opuesto.
+Se rechaza el primer control de tabla inicial desactivada: no recupera C4 y
+empeora C5. Sigue separar pérdida y cancelación del unísono en la release,
+conservando ataque/captación, antes de elegir un cambio localizado.
+
 ### Historial: escucha MIDI del prototipo offline
 
 El 2026-10-14 el usuario prioriza escuchar un fragmento MIDI en un tiempo

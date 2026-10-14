@@ -145,3 +145,20 @@ esta rama de investigación conserva los experimentos y esta revisión.
 El [registro de procedencia y comprobaciones](revision-release-2026-10-14.json)
 conserva los hashes de los diez archivos, del ejecutable de prueba y de la
 fuente local comparada, los filtros ejecutados y la identidad del worktree.
+
+## Primera continuación sobre la base publicada
+
+Commit **fc8fa523** en `codex/concert-grand-release-improvements`: se añaden
+herramientas y mediciones sin modificar el piano ni su SDK. El consumidor
+nativo de producción reproduce la huella publicada al igualar la inicialización
+de CI; el medidor de envolventes pasa un control exponencial analítico con
+cápsulas en oposición de fase.
+
+Se comparan doce notas/intensidades de 0.171.35, 0.172.0 y las grabaciones
+Steinway autenticadas. En C4/60, H1 cae 16,09 dB frente a 5,78 de la referencia;
+en A3/60 sólo cae 3,76 dB frente a 19,46. No corresponde alargar todo el piano.
+Una ablación de `PROMPT_MEASURED_POWER` se rechaza: no recupera C4 y empeora C5.
+El detalle, fuentes y datos están en
+`docs/concert-grand-release-body-2026-10-14/README.md` de esa rama.
+Sigue discriminar magnitudes internas y suma proyectada del unísono antes
+de retocar pérdidas: una caída acústica no identifica por sí sola disipación.

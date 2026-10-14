@@ -82,5 +82,14 @@
     "clean": true,
     "source_matches_snapshot": true
   },
-  "user_selected_priority": "Body and sustain"
+  "user_selected_priority": "Body and sustain",
+  "continuation": {
+    "branch": "codex/concert-grand-release-improvements",
+    "commit": "fc8fa523",
+    "document": "docs/concert-grand-release-body-2026-10-14/README.md",
+    "published_dsp_unchanged": true,
+    "cases": 12,
+    "rejected_control": "Disable empirical fundamental prompt table globally",
+    "next_step": "Separate unison magnitudes from projected cancellation around C4"
+  }
 }

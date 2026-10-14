@@ -1,0 +1,50 @@
+{
+  "scope": "Only the final fundamental narrowing is disabled. The other two substitutions update test assertions only, to the known accepted hashes. The accepted treble residual is preserved.",
+  "source_changes": [
+    [
+      "const C4_FUNDAMENTAL_UNISON_NARROWING: f32 = 0.30;",
+      "const C4_FUNDAMENTAL_UNISON_NARROWING: f32 = 0.0;"
+    ],
+    [
+      "const RENDER_FINGERPRINT: u64 = 0x24e6_2f09_90d1_8637;",
+      "const RENDER_FINGERPRINT: u64 = 0xe74d_f301_16b3_9a5a;"
+    ],
+    [
+      "const RENDER_FINGERPRINT_PEDALS: u64 = 0x7e53_7f27_7662_ea34;",
+      "const RENDER_FINGERPRINT_PEDALS: u64 = 0x9b9b_d2cb_b324_52f0;"
+    ]
+  ],
+  "source_sha256": "7ffe30fc536d2c8e883f40a2137885797edf7393cb6097bdbcfe9fddbaebeb22",
+  "original_source_sha256": "39df52c045248a0ea86a5b7f71f34d263c2e7ff108f9f411c631b19ed97889bc",
+  "temporary_source": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-body-candidate-2026-10-14\\zero-fundamental-control\\src\\lib.rs",
+  "command": [
+    "rustc",
+    "+1.98.0-x86_64-pc-windows-msvc",
+    "--edition=2024",
+    "--test",
+    "-O",
+    "-L",
+    "dependency=local/concert-grand-release-campanella-2026-10-14",
+    "--extern",
+    "rackforge_plugin_sdk=local/concert-grand-release-campanella-2026-10-14/librackforge_plugin_sdk.rlib",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-body-candidate-2026-10-14\\zero-fundamental-control\\src\\lib.rs",
+    "-o",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-body-candidate-2026-10-14\\zero-fundamental-control\\zero-tests.exe"
+  ],
+  "cases": [
+    {
+      "case": "bench::render_fingerprint",
+      "passed": true,
+      "output": "\nrunning 1 test\ntest bench::render_fingerprint ... huella del render: 0xe74df30116b39a5a\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.24s\n\n"
+    },
+    {
+      "case": "bench::render_fingerprint_pedals",
+      "passed": true,
+      "output": "\nrunning 1 test\ntest bench::render_fingerprint_pedals ... huella con pedales: 0x9b9bd2cbb32452f0\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 146 filtered out; finished in 0.34s\n\n"
+    }
+  ],
+  "expected": [
+    "e74df30116b39a5a",
+    "9b9bd2cbb32452f0"
+  ]
+}

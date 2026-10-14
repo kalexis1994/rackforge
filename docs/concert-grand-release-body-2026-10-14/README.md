@@ -266,3 +266,70 @@ El siguiente candidato aplica una reducción suave y local de separación
 alrededor de C4, con A3 y D#4 fuera del ajuste. Se conserva la excitación,
 la captación y las leyes de pérdida; se comprobarán ataque, notas vecinas,
 controles fuera de la zona y La Campanella antes de seleccionar por escucha.
+
+## Candidato de cuerpo: corrección limitada al fundamental
+
+La primera prueba redujo la separación de **todos** los parciales de las
+notas afectadas. Aunque recuperaba H1, empeoraba la caída de H2 en C4 unos
+6,1 dB frente a la base; **se rechaza**. Sus medidas y la diferencia exacta
+de fuente respecto del commit de diagnóstico quedan en
+[body-all-partials-rejected.json](body-all-partials-rejected.json).
+Que sus pruebas numéricas pasaran no bastaba para seleccionarla.
+
+El candidato final usa la afinación independiente por parcial que ya tiene
+el motor y estrecha **sólo el grupo del fundamental**, en las notas MIDI
+58/59/60/61/62 (A#3/B3/C4/C#4/D4), con factores 0,9/0,8/0,7/0,8/0,9.
+Fuera de esa zona se conserva la base aceptada, incluido el nuevo residuo
+agudo. Es un ajuste local de voicing dentro de la representación existente,
+no una identificación de la tensión o de la geometría de un piano real.
+No se alarga globalmente ninguna ley de pérdida ni se cambia el martillo,
+el receptor, las ganancias o las rutas auxiliares.
+
+| C4, caída de H1 entre 100–200 y 500–1400 ms | Base aceptada | Candidato | Referencia conocida |
+| --- | ---: | ---: | ---: |
+| Velocidad 60 | −16,09 dB | −13,32 dB | −5,78 dB |
+| Velocidad 110 | −16,11 dB | −13,33 dB | −6,64 dB |
+
+Se recuperan **2,76–2,78 dB** en esta medida de caída del fundamental; es un
+avance parcial y no corrige todo el déficit. En esas dos notas H2/H3 cambian
+menos de 0,0002 dB en la misma medida. El mayor cambio de nivel RMS de los
+primeros 100 ms, sobre veinte casos, es **0,0076 dB**. Los diez controles de
+C3/A3/D#4/C5/C6, velocidades 60 y 110, son idénticos muestra por muestra.
+Las cinco alturas modificadas se conservan en el informe para revisar sus
+vecinas; la mejora frente a la referencia se exige en C4 a ambas intensidades.
+
+Se renderizó La Campanella completa contra la base aceptada del unísono
+agudo, con los mismos eventos, preset Concert y ganancia de exportación 1.
+El nuevo WAV dura **280,159 s** y se renderizó en **25,97 s**:
+`C:/SHARED/Piano-Campanella-cuerpo-medio-2026-10-14/fundamental/Campanella-B-cuerpo-medio.wav`.
+
+En esa carpeta, `Do-central-A-B.wav` dura 13 s: base y candidato a velocidad
+60, luego base y candidato a 110, con tres segundos por toma y 250 ms de
+silencio después de cada una. `Notas-A-base-aceptada.wav` y
+`Notas-B-cuerpo-medio.wav` permiten escuchar A3/B3/C4/C#4/D#4/C5 primero a
+velocidad 60 y luego a 110. Se conserva la misma ganancia, sin normalización
+individual ni EQ de exportación. Los audios de la variante rechazada están
+en la carpeta superior y no son los WAV de `fundamental/`.
+
+Pasan **diez comprobaciones nativas** (las ocho anteriores, más caída en dos
+etapas y caída inicial del fundamental) y la compilación WASM con SIMD128 y
+pila de 8 MiB. No se ejecutó aquí una prueba de combustible o reparto entre
+instancias WASM. Las nuevas huellas son `24e62f0990d18637` y
+`7e537f277662ea34`, porque ambos guiones incluyen la zona modificada. Un
+control temporal que pone sólo la nueva corrección a cero reproduce las
+dos huellas de la base aceptada, conservando el residuo agudo. Las otras dos
+sustituciones del control son únicamente los valores esperados de los asserts.
+
+No se agregan osciladores ni trabajo por muestra: el ajuste se calcula al
+crear los parciales de una nota. Tres ejecuciones alternadas de un guion
+nativo de 14 s dan medianas de **0,7338 s** para la base y **0,7318 s** para
+el candidato; la diferencia queda dentro de la variación de las mediciones.
+
+- [Comparación final, audios y procedencia](body-candidate-comparison.json).
+- [Diez pruebas nativas](body-candidate-tests.json).
+- [Compilación WASM](body-candidate-wasm.json).
+- [Reversión de las huellas con la corrección en cero](body-fundamental-zero-control.json).
+- `tools/compare-concert-grand-body-candidate.py`: reproducción del candidato.
+
+**Pendiente de escucha del usuario.** La rama contiene el candidato, con el
+diagnóstico previo separado en `29ea9c5e`. No se publica ni instala un paquete.

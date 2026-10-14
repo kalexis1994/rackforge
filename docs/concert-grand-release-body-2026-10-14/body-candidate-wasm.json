@@ -1,0 +1,8 @@
+{
+  "wasm_sha256": "a0ab7a2b4f96c23c4f26f48e635e304ce09afd6566b924a0917b4c7866a8465c",
+  "stack_bytes": 8388608,
+  "source_sha256": "39df52c045248a0ea86a5b7f71f34d263c2e7ff108f9f411c631b19ed97889bc",
+  "scope": "Compilation only; no WASM runtime fuel or multi-instance test in this stage",
+  "target": "wasm32-unknown-unknown",
+  "simd128": true
+}

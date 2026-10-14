@@ -26,3 +26,4 @@ docs/concert-grand-physics-roadmap-2026-10-02/medidas-P7-cuerdas-nativas-2026-10
 # Rejected candidate patches are hashed too; a blank context line is a
 # required single space in a unified diff, not source trailing whitespace.
 docs/concert-grand-physics-roadmap-2026-10-02/medidas-P7-cuerdas-nativas-2026-10-13/*.patch -text whitespace=-blank-at-eol
+docs/concert-grand-physics-roadmap-2026-10-02/medidas-P7-cuerdas-nativas-2026-10-14/*.patch -text whitespace=-blank-at-eol

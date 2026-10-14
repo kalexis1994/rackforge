@@ -1,0 +1,15 @@
+{
+  "accepted": false,
+  "reason": "less than 2 percent mean gain against frozen executable in longer runs, with inconsistent maximum latency; no stable CPU improvement established",
+  "base_ref": "52e96a0b",
+  "patch_path": "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\collocation-gathered-modes-rejected.patch",
+  "patch_sha256": "dc4d72d062cf787d42125348b8c8d3da4e619ca1dd3e852cf2586c93901bccca",
+  "patch_reconstructs_measured_sources": true,
+  "patch_apply_config": "core.autocrlf=false",
+  "case_report_path": "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\collocation-gathered-modes.json",
+  "case_report_sha256": "418d6ef7e87d32b2062a91aeb3d995561e0359dda8d0f40384ffb239c42c31a8",
+  "long_benchmark_path": "docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\collocation-gathered-long-bench.json",
+  "long_benchmark_sha256": "9e75a31fe350526390e0a909b033087db91ff24ea1b82ac09ae6f351d50438de",
+  "current_phase_tests_passed": 26,
+  "additional_prepared_buffer_bytes": 18432
+}

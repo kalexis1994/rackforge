@@ -1,0 +1,204 @@
+diff --git a/tools/concert-grand-batch-cosine.rs b/tools/concert-grand-batch-cosine.rs
+index 77388715..887e99cf 100644
+--- a/tools/concert-grand-batch-cosine.rs
++++ b/tools/concert-grand-batch-cosine.rs
+@@ -39,6 +39,7 @@ struct ComplexQuad {
+ }
+ 
+ pub(super) struct BatchCosine {
++    dynamic_stages: bool,
+     packing: Option<PreparedPacking>,
+     fft: Vec<ComplexQuad>,
+     fields: Vec<Quad>,
+@@ -48,6 +49,7 @@ impl BatchCosine {
+     fn new(plan: &CosinePlan, ku: &[f64], kv: &[f64], factor: f64) -> Self {
+         let nodes = plan.nodes;
+         Self {
++            dynamic_stages: false,
+             packing: Some(PreparedPacking::new(plan, ku, kv, factor)),
+             fft: vec![ComplexQuad::default(); nodes / 2],
+             fields: vec![Quad::default(); 3 * nodes],
+@@ -55,6 +57,48 @@ impl BatchCosine {
+         }
+     }
+     fn transform(&mut self, plan: &CosinePlan, inverse: bool) {
++        if self.dynamic_stages {
++            self.transform_dynamic(plan, inverse);
++            return;
++        }
++        // CosinePlan accepts at most 2048 real nodes (1024 packed complex cells).
++        // Fixed widths let LLVM simplify chunk traversal and the small stages.
++        assert!(self.fft.len() <= 1024);
++        macro_rules! stages {
++            ($($width:literal),*) => {$(
++                if self.fft.len() >= $width {
++                    self.transform_stage::<$width>(plan, inverse);
++                }
++            )*};
++        }
++        stages!(2, 4, 8, 16, 32, 64, 128, 256, 512, 1024);
++    }
++    #[inline]
++    fn transform_stage<const WIDTH: usize>(&mut self, plan: &CosinePlan, inverse: bool) {
++        let half = WIDTH / 2;
++        for chunk in self.fft.chunks_exact_mut(WIDTH) {
++            let (left, right) = chunk.split_at_mut(half);
++            for ((u, v), root) in left
++                .iter_mut()
++                .zip(right)
++                .zip(&plan.roots[half - 1..2 * half - 1])
++            {
++                let wr = Quad::splat(root.r);
++                let wi = Quad::splat(if inverse { -root.i } else { root.i });
++                let r = v.r * wr - v.i * wi;
++                let i = v.r * wi + v.i * wr;
++                *v = ComplexQuad {
++                    r: u.r - r,
++                    i: u.i - i,
++                };
++                *u = ComplexQuad {
++                    r: u.r + r,
++                    i: u.i + i,
++                };
++            }
++        }
++    }
++    fn transform_dynamic(&mut self, plan: &CosinePlan, inverse: bool) {
+         let mut width = 2;
+         while width <= self.fft.len() {
+             let half = width / 2;
+@@ -227,6 +271,11 @@ impl BatchCosine {
+     }
+ }
+ impl Wire {
++    pub(crate) fn dynamic_batch_stages(&mut self) {
++        if let Some(batch) = &mut self.batch4 {
++            batch.dynamic_stages = true;
++        }
++    }
+     pub(crate) fn prepare_batch4(&mut self) {
+         self.batch4 = Some(BatchCosine::new(
+             &self.plan,
+diff --git a/tools/concert-grand-phase-trajectory.rs b/tools/concert-grand-phase-trajectory.rs
+index 41b9c425..54f786fe 100644
+--- a/tools/concert-grand-phase-trajectory.rs
++++ b/tools/concert-grand-phase-trajectory.rs
+@@ -595,6 +595,9 @@ fn main() {
+             if args.iter().any(|x| x == "--legacy-batch-packing") {
+                 wire.legacy_batch_packing();
+             }
++            if args.iter().any(|x| x == "--dynamic-batch-stages") {
++                wire.dynamic_batch_stages();
++            }
+             wire.point_nonlinearity_batch4(&inputs[i * width..], stride, &mut batch[i * width..]);
+             for lane in 0..4 {
+                 let range = lane * stride + i * width..lane * stride + (i + 1) * width;
+@@ -737,6 +740,11 @@ fn main() {
+             wire.legacy_batch_packing();
+         }
+     }
++    if args.iter().any(|x| x == "--dynamic-batch-stages") {
++        for wire in &mut model.wires {
++            wire.dynamic_batch_stages();
++        }
++    }
+     if args.iter().any(|x| x == "--legacy-node-updates") {
+         if let Some(collocation) = &mut model.collocation {
+             collocation.legacy_node_updates();
+diff --git a/tools/measure-concert-grand-collocation.py b/tools/measure-concert-grand-collocation.py
+index 43804c40..9ac610d5 100644
+--- a/tools/measure-concert-grand-collocation.py
++++ b/tools/measure-concert-grand-collocation.py
+@@ -23,10 +23,11 @@ def main():
+     parser.add_argument('--batch-forces', action='store_true')
+     parser.add_argument('--node-updates', action='store_true')
+     parser.add_argument('--prepared-packing', action='store_true')
++    parser.add_argument('--fixed-stages', action='store_true')
+     args = parser.parse_args()
+-    if sum([args.reuse_forces,args.batch_forces,args.node_updates,args.prepared_packing])>1:
++    if sum([args.reuse_forces,args.batch_forces,args.node_updates,args.prepared_packing,args.fixed_stages])>1:
+         raise ValueError('choose a single comparison stage')
+-    compare_collocation = args.reuse_forces or args.batch_forces or args.node_updates or args.prepared_packing
++    compare_collocation = args.reuse_forces or args.batch_forces or args.node_updates or args.prepared_packing or args.fixed_stages
+     if args.local.exists() or args.report.exists():
+         raise ValueError('fresh paths required')
+     root = Path(__file__).resolve().parents[1]
+@@ -37,7 +38,7 @@ def main():
+     for name, sha in old['source_sha256'].items():
+         if hashlib.sha256(subprocess.check_output(['git', 'show', args.reference_ref+':tools/'+name], cwd=root)).hexdigest() != sha:
+             raise ValueError('frozen source mismatch: '+name)
+-    prefix = 'blocked' if args.prepared_packing else ('batched' if args.node_updates else ('reused' if args.batch_forces else 'collocation'))
++    prefix = 'prepared' if args.fixed_stages else ('blocked' if args.prepared_packing else ('batched' if args.node_updates else ('reused' if args.batch_forces else 'collocation')))
+     baseline_label = f'{prefix}-512000-O8' if compare_collocation else 'optimized-trajectory'
+     baseline = next(c for c in old['cases'] if c['label'] == baseline_label)
+     labels = [f'{prefix}-{rate}-O{order}' for rate,order in [(128000,24),(256000,16),(512000,8)]]
+@@ -58,7 +59,7 @@ def main():
+     exe = args.local/'trajectory.exe'
+     subprocess.run(['rustc', '--edition=2021', '-O', '-C', 'target-cpu=native', '--cfg', 'concert_phase_library',
+                     str(root/'tools/concert-grand-phase-trajectory.rs'), '-o', str(exe)], check=True)
+-    stage = 'prepared linear maps for batched real FFT packing' if args.prepared_packing else ('block residual traversal and swapped nodal buffers' if args.node_updates else ('four-node batched cosine transforms' if args.batch_forces else ('reuse forces at converged collocation nodes' if args.reuse_forces else 'full nonlinear gradient at interaction collocation nodes')))
++    stage = 'compile-time widths for four-node FFT stages' if args.fixed_stages else ('prepared linear maps for batched real FFT packing' if args.prepared_packing else ('block residual traversal and swapped nodal buffers' if args.node_updates else ('four-node batched cosine transforms' if args.batch_forces else ('reuse forces at converged collocation nodes' if args.reuse_forces else 'full nonlinear gradient at interaction collocation nodes'))))
+     record = dict(stage=stage, source_sha256=sources,
+                   reference_ref=args.reference_ref, reference_sources_authenticated_from_git=True,
+                   reference_report_path=str(args.reference_report.resolve()), reference_report_sha256=digest(args.reference_report),
+@@ -146,6 +147,20 @@ def main():
+             save()
+ 
+         save()
++        if args.fixed_stages:
++            for rate,order in [(128000,24),(256000,16),(512000,8)]:
++                run(f'fixed-{rate}-O{order}',rate,order,['--collocation'])
++                run(f'dynamic-{rate}-O{order}',rate,order,['--collocation','--dynamic-batch-stages'])
++            run('frozen-benchmark',512000,8,['--collocation'],True,old['executable_path'])
++            run('dynamic-benchmark',512000,8,['--collocation','--dynamic-batch-stages'],True)
++            run('fixed-benchmark',512000,8,['--collocation'],True)
++            run('fixed-repeat',512000,8,['--collocation'],True)
++            run('frozen-repeat',512000,8,['--collocation'],True,old['executable_path'])
++            run('fixed-256k-benchmark',256000,16,['--collocation'],True)
++            record['sources_unchanged'] = all(digest(root/'tools'/name)==sha for name,sha in sources.items())
++            record['reference_report_unchanged'] = digest(args.reference_report)==record['reference_report_sha256']
++            save()
++            return
+         if args.prepared_packing:
+             for rate,order in [(128000,24),(256000,16),(512000,8)]:
+                 run(f'prepared-{rate}-O{order}',rate,order,['--collocation'])
+diff --git a/tools/tests/test_concert_phase_trajectory.py b/tools/tests/test_concert_phase_trajectory.py
+index bb914d67..6db69b33 100644
+--- a/tools/tests/test_concert_phase_trajectory.py
++++ b/tools/tests/test_concert_phase_trajectory.py
+@@ -225,7 +225,7 @@ class PhaseTrajectoryTests(unittest.TestCase):
+             self.assertLess(reused['midpoint_residual_relative_max'],1e-11)
+ 
+     def test_four_node_gradient_matches_single_and_independent_spatial_quadrature(self):
+-        for nt in [4,96,256]:
++        for nt in [1,4,12,96,256]:
+             if nt==256:
+                 f=self.coast(4);width=4*nt
+                 f.update(transverse=nt,axial=2*nt,nodes=1024,shapes=np.zeros(3*nt),
+@@ -233,6 +233,8 @@ class PhaseTrajectoryTests(unittest.TestCase):
+                 f['q'][[2*nt-1,3*nt-1,width-1]]=[2e-10,1e-8,-1.2e-8]
+             else:f=self.coast(nt)
+             data=self.run_native(f,'batch-gradient');width=4*nt;nl=2*nt
++            dynamic=self.run_native(f,'batch-gradient',1,8,'--dynamic-batch-stages')
++            np.testing.assert_array_equal(data['gradient'],dynamic['gradient'])
+             legacy=self.run_native(f,'batch-gradient',1,8,'--legacy-batch-packing')
+             np.testing.assert_array_equal(legacy['gradient'],data['single_gradient'])
+             q=np.asarray(data['q_nodes']).reshape(4,3,width)
+@@ -274,6 +276,17 @@ class PhaseTrajectoryTests(unittest.TestCase):
+             self.assertLess(max(abs(final-initial)/np.maximum(initial,1e-30)),1e-9)
+             self.assertEqual(batch['allocations'],0)
+ 
++    def test_fixed_fft_stages_preserve_exact_trajectory_and_work(self):
++        for nt,rate,order in [(4,128000,10),(12,128000,8),(96,128000,24),(96,256000,16),(96,512000,8)]:
++            f=fixture(transverse=nt,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.
++            fixed=self.run_native(f,'verify',1,order,'--collocation')
++            dynamic=self.run_native(f,'verify',1,order,'--collocation','--dynamic-batch-stages')
++            self.assertTrue(fixed['completed'] and dynamic['completed'])
++            for key in ['q','v','work_relative_max','numerical_lambda_abs_max',
++                        'maximum_iterations','midpoint_residual_relative_max','known_prepared_bytes']:
++                self.assertEqual(fixed[key],dynamic[key],key)
++            self.assertEqual(fixed['allocations'],0)
++
+     def test_prepared_packing_preserves_legacy_trajectory_and_work(self):
+         for rate,order in [(128000,24),(256000,16),(512000,8)]:
+             f=fixture(transverse=96,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.

@@ -260,6 +260,18 @@ flag. CPU sigue rechazado frente a 0,125 ms. Ver
 [medición](medidas-P7-cuerdas-nativas-2026-10-14/collocation-prepared-packing.json)
 y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
 
+Tres experimentos posteriores —fusionar etapas FFT, especializar sus tamaños
+y reunir coordenadas modales antes de la síntesis— conservan exactamente
+los tres controles de 6 ms, pero se descartan por CPU. La fusión y la
+especialización empeoran las medias. Reunir coordenadas sólo mejora
+**0,30/1,56 %** frente al congelado en ensayos más largos de 64 buffers,
+con máximos inconsistentes; no se establece una mejora estable. Se mantienen
+las fuentes de **52e96a0b**, con 25 pruebas actuales y suite acumulada 51.
+Mediciones, parches reproducibles y decisión quedan en los
+[resultados](RESULTADOS-P7-colocacion-interaccion.md).
+Los 8 ms del benchmark largo no amplían la validación de fidelidad de 6 ms.
+Sigue medir el costo separado de fuerzas, contracción temporal y raíces.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

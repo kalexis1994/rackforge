@@ -377,3 +377,80 @@ en 983f634a, sin cambios a esos algoritmos aquí. La suite acumulada contiene
 272/270 veces el plazo. El alcance de precisión continúa en el sostenido
 mixto de 6 ms, sin contacto, cuerpo, presión, pedales o polifonía. Sigue
 reducir el costo y extender la validación antes de integrar el instrumento.
+
+## Tres experimentos de FFT y acceso modal descartados — 2026-10-14
+
+Se mantiene **52e96a0b** como implementación vigente. Tres candidatos
+conservan exactamente q/v, ledger, lambda, residual e iteraciones de sus
+tres controles de 6 ms a 128/256/512 kHz, pero no demuestran una mejora de
+CPU suficiente y estable frente al ejecutable congelado. Sus cambios de
+código se retiran y se conservan como parches independientes sobre ese commit.
+
+1. **Fusionar dos etapas radix-2 consecutivas** reduce pasadas por memoria,
+   manteniendo el orden de operaciones de cada mariposa. La media a
+   512 kHz/8 empeora **33,562 → 36,390 ms**; repetición
+   **33,543 → 34,370 ms**. Se descarta. Ver
+   [medición y autenticación del parche](medidas-P7-cuerdas-nativas-2026-10-14/collocation-fused-stages-rejected.json)
+   y [parche](medidas-P7-cuerdas-nativas-2026-10-14/collocation-fused-stages-rejected.patch).
+2. **Especializar los tamaños de etapa al compilar** conserva las mariposas
+   anteriores y expande los diez tamaños complejos admitidos. La media
+   empeora **37,189 → 40,156 ms**; repetición **35,183 → 40,759 ms**.
+   El control dinámico dentro del nuevo ejecutable da 33,944 ms. Se descarta.
+   Ver [medición y autenticación](medidas-P7-cuerdas-nativas-2026-10-14/collocation-fixed-stages-rejected.json)
+   y [parche](medidas-P7-cuerdas-nativas-2026-10-14/collocation-fixed-stages-rejected.patch).
+3. **Reunir una sola vez las coordenadas de cuatro nodos por campo** evita
+   reunirlas de nuevo en las celdas de síntesis que las comparten. El buffer
+   se rellena con posiciones vivas en cada evaluación, sin cambiar operaciones
+   aritméticas. Agrega 18.432 bytes al coro: 1.497.600 bytes contabilizados.
+   En los ensayos cortos la media cambia **33,486 → 33,746 ms** y
+   **37,004 → 32,841 ms**: el resultado depende de la comparación.
+   Ver [medición](medidas-P7-cuerdas-nativas-2026-10-14/collocation-gathered-modes.json),
+   [decisión y hashes](medidas-P7-cuerdas-nativas-2026-10-14/collocation-gathered-modes-rejected.json)
+   y [parche](medidas-P7-cuerdas-nativas-2026-10-14/collocation-gathered-modes-rejected.patch).
+
+Para resolver la incertidumbre del tercer caso se amplía sólo el ensayo
+de CPU a **64 buffers de 0,125 ms: 8 ms físicos por ejecución**, a 512 kHz/8.
+Se ejecuta secuencialmente control congelado, control directo dentro del
+candidato, candidato, candidato repetido, directo repetido y congelado
+repetido. El [productor](../../tools/measure-concert-grand-gather-benchmark.py)
+autentica fuentes, ejecutables y entrada del ensayo corto, y guarda comandos,
+hashes y resultados en el [informe largo](medidas-P7-cuerdas-nativas-2026-10-14/collocation-gathered-long-bench.json).
+
+| Ruta, en orden de ejecución | Media por buffer | P99/máximo |
+|---|---:|---:|
+| Congelado 52e96a0b | 33,074 ms | 35,776 ms |
+| Acceso directo, ejecutable candidato | 33,706 ms | 36,100 ms |
+| Coordenadas reunidas | 32,976 ms | 38,654 ms |
+| Coordenadas reunidas, repetición | 33,214 ms | 36,595 ms |
+| Acceso directo, repetición | 34,669 ms | 45,004 ms |
+| Congelado, repetición | 33,739 ms | 39,225 ms |
+
+La mejora media frente al congelado es **0,30 % / 1,56 %**, con máximos que
+no mejoran consistentemente. No se establece un ahorro estable de CPU y
+se descarta también el buffer adicional. El control directo dentro del
+candidato resulta más lento que el ejecutable anterior: compararlo sólo
+contra ese control sobreestimaría el beneficio. No se adopta aquí un nuevo
+umbral porcentual de aceptación.
+
+Los seis ensayos largos terminan con cero asignaciones y con q/v, ledger,
+lambda, residual, iteraciones y energías individuales exactamente iguales
+al control. Pasan el cierre energético nativo por cuerda y el ledger total.
+La auditoría energética espacial independiente y el contraste con los
+maestros siguen limitados a **6 ms**; los 8 ms del benchmark no amplían la
+validación de fidelidad temporal.
+
+Cada candidato pasa **26 pruebas** de fases/trayectoria, incluyendo comparación
+exacta de gradientes con accesos anteriores, cuadratura espacial independiente,
+canales cero/pequeños y trayectoria con cola escalar. Los parches reconstruyen
+exactamente todos los SHA-256 de fuentes medidos sobre 52e96a0b; se verificó
+su aplicación por separado con `git -c core.autocrlf=false apply`.
+Los archivos de medición corta/larga del tercer caso se mantienen sin
+modificar y la decisión se guarda en un manifiesto separado para preservar
+sus hashes encadenados.
+
+Restaurada la implementación vigente, pasan sus **25 pruebas actuales**;
+suite acumulada 51. Los algoritmos normales de cuerdas/presión no cambian.
+CPU continúa rechazado frente a **0,125 ms** por buffer. Sigue medir el
+costo separado de fuerzas, contracción temporal y raíces energéticas antes
+de otra modificación del núcleo FFT; también sigue pendiente extender la
+duración y añadir contacto/cuerpo/presión/pedales/polifonía.

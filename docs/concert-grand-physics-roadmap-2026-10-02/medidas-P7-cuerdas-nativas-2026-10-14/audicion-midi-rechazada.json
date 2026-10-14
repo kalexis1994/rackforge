@@ -1,0 +1,16 @@
+{
+  "reason": "Missing direct felt force times strike lever arm in fixed-bridge reaction during contact; audio withheld.",
+  "prior_report_sha256": "70dc1bc42e0c6f3b5541f026cbf42cc54c6eda779194a27f3875596fdab55b4c",
+  "retained_rejected_audio": [
+    {
+      "original": "C:\\SHARED\\Piano-hibrido-MIDI-2026-10-14\\Campanella-hibrido-NL8.wav",
+      "retained": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-2026-10-14\\discarded-NL8.wav",
+      "sha256": "01c3d1cfcd2f9e46176a53776105d5f67850ad63bcfdd4d4800f6031195331f7"
+    },
+    {
+      "original": "C:\\SHARED\\Piano-hibrido-MIDI-2026-10-14\\Campanella-hibrido-NL12.wav",
+      "retained": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-audicion-midi-2026-10-14\\discarded-NL12.wav",
+      "sha256": "66227b277075f33c1c7701f2c573317bb168ce299bce50f326da6abee7c3736a"
+    }
+  ]
+}

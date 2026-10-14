@@ -46,7 +46,14 @@ etapa de cobertura estructural.
 
 ## Orden y estado
 
-### Prioridad actual: destilar el maestro a un instrumento realtime
+### Prioridad actual: escuchar un MIDI con render offline reducido
+
+El 2026-10-14 el usuario prioriza escuchar un fragmento MIDI en un tiempo
+razonable y evaluar con el oído las simplificaciones físicas. Los errores
+numéricos y el presupuesto de tiempo real sirven como diagnóstico; no se
+exige aprobarlos antes de entregar una escucha. Sigue como objetivo posterior
+el instrumento tocable. El primer ensayo está en la
+[escucha MIDI híbrida](RESULTADOS-P7-escucha-MIDI-hibrida.md).
 
 El usuario pide avanzar hacia una prueba tocable. El
 [cuerpo con presión estéreo nativa](RESULTADOS-P7-presion-realtime.md)

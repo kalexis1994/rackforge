@@ -431,6 +431,17 @@ impl Wire {
         self.nl + 2 * self.nt
     }
     #[cfg(concert_phase_library)]
+    pub(crate) fn bridge_cross(&self) -> &[f64] { &self.cross }
+    #[cfg(concert_phase_library)]
+    pub(crate) fn bridge_gradient(&mut self, q: &[f64]) -> f64 {
+        self.fields(q, 0., 0);
+        let n = self.nodes;
+        (0..n).map(|j| {
+            let v = self.fields[n+j]; let w = self.fields[2*n+j];
+            (self.fields[j] + 0.5*(v*v+w*w))*v
+        }).sum::<f64>() * self.ea / n as f64
+    }
+    #[cfg(concert_phase_library)]
     pub(crate) fn frequencies2(&self) -> &[f64] {
         &self.omega2
     }
@@ -965,6 +976,7 @@ pub struct Choir {
     dt: f64,
     mass: f64,
     stiffness: f64,
+    contact_area: [f64; 3],
     exponent: f64,
     rate_loss: f64,
     shapes: Vec<f64>,
@@ -1042,7 +1054,7 @@ pub struct Choir {
     reference_local_work_max: f64,
 }
 impl Choir {
-    fn new(
+    pub(crate) fn new(
         wires: Vec<Wire>,
         dt: f64,
         mass: f64,
@@ -1156,6 +1168,7 @@ impl Choir {
             dt,
             mass,
             stiffness,
+            contact_area: [1.; 3],
             exponent,
             rate_loss,
             shapes,
@@ -1242,6 +1255,23 @@ impl Choir {
                 &q[start..start + nt],
             )
     }
+    #[cfg(concert_phase_library)]
+    pub(crate) fn separated(&self) -> bool {
+        self.v[self.size-1] < 0. && (0..3).all(|i| self.contact_area[i] == 0. || self.compression(&self.q, i) < 0.)
+    }
+    #[cfg(concert_phase_library)]
+    pub(crate) fn set_contact_area(&mut self, area: [f64; 3]) {
+        assert!(area.iter().all(|a| a.is_finite() && *a>=0. && *a<=1.));
+        if area!=self.contact_area {self.endpoint_valid=false;self.last_contact_forces.fill(0.);self.contact_area=area;}
+    }
+    #[cfg(concert_phase_library)]
+    pub(crate) fn state(&self) -> (&[f64], &[f64]) { (&self.q, &self.v) }
+    #[cfg(concert_phase_library)]
+    pub(crate) fn set_state(&mut self, q: &[f64], v: &[f64]) {
+        self.q.copy_from_slice(q); self.v.copy_from_slice(v);
+        self.endpoint_valid = false;
+        self.last_contact_forces.fill(0.);
+    }
     fn direction_dot(&self, x: &[f64], wire: usize) -> f64 {
         self.compression(x, wire)
     }
@@ -1258,7 +1288,7 @@ impl Choir {
             let compression = self.compression(&self.q, i).max(0.);
             energy += self.wires[i]
                 .nonlinear_potential(&self.q[i * self.width..(i + 1) * self.width], 0.);
-            energy += self.stiffness / (self.exponent + 1.) * compression.powf(self.exponent + 1.);
+            energy += self.stiffness * self.contact_area[i] / (self.exponent + 1.) * compression.powf(self.exponent + 1.);
         }
         energy
     }
@@ -1266,13 +1296,14 @@ impl Choir {
         if !speed.is_finite() || speed < 0. {
             return Err("invalid hammer speed");
         }
-        if (0..3).any(|i| self.compression(&self.q, i) > 1e-12) {
+        if (0..3).any(|i| self.contact_area[i]>0. && self.compression(&self.q, i) > 1e-12) {
             return Err("hammer must be separated before relaunch");
         }
         let before = self.energy();
         let head = self.size - 1;
         let mut position = f64::INFINITY;
         for i in 0..3 {
+            if self.contact_area[i] == 0. {continue;}
             let nt = self.wires[i].nt;
             let start = i * self.width + self.wires[i].nl;
             position = position.min(
@@ -1293,7 +1324,7 @@ impl Choir {
             *contact = felt(
                 self.compression(&self.q, i),
                 self.compression(candidate, i),
-                self.stiffness,
+                self.stiffness * self.contact_area[i],
                 self.exponent,
                 self.rate_loss,
                 self.dt,
@@ -1389,7 +1420,7 @@ impl Choir {
                     contacts[i] = felt(
                         old[i],
                         next,
-                        self.stiffness,
+                        self.stiffness * self.contact_area[i],
                         self.exponent,
                         self.rate_loss,
                         self.dt,
@@ -1520,7 +1551,7 @@ impl Choir {
                     trial_contacts[i] = felt(
                         old[i],
                         next,
-                        self.stiffness,
+                        self.stiffness * self.contact_area[i],
                         self.exponent,
                         self.rate_loss,
                         self.dt,
@@ -1985,7 +2016,7 @@ impl Choir {
                     .sum::<f64>()
             + potential0;
         for i in 0..3 {
-            energy += self.stiffness / (self.exponent + 1.)
+            energy += self.stiffness * self.contact_area[i] / (self.exponent + 1.)
                 * self
                     .compression(&self.q, i)
                     .max(0.)
@@ -2322,7 +2353,7 @@ impl Choir {
                         0.,
                         1,
                     );
-                    energy1 += self.stiffness / (self.exponent + 1.)
+                    energy1 += self.stiffness * self.contact_area[i] / (self.exponent + 1.)
                         * self
                             .compression(&self.trial, i)
                             .max(0.)

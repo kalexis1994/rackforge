@@ -9,6 +9,8 @@ mod profile;
 mod observation;
 #[path = "concert-grand-hybrid.rs"]
 mod hybrid;
+#[path = "concert-grand-hybrid-audition.rs"]
+mod audition;
 #[allow(dead_code)]
 #[path = "concert-grand-native-strings.rs"]
 mod native;
@@ -598,6 +600,10 @@ fn main() {
         .iter()
         .map(|t| Wire::new(nt, nl, nodes, p[0], p[1], *t, ea, ei))
         .collect::<Vec<_>>();
+    if args.get(2).is_some_and(|x| x == "midi-voice") {
+        audition::run(&args, &data, nt, nl, wires, q, v);
+        return;
+    }
     if args.get(2).is_some_and(|x| x == "batch-gradient") {
         let stride = 3 * width;
         let mut inputs = vec![0.; 4 * stride];

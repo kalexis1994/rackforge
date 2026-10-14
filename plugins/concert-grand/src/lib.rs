@@ -1844,6 +1844,9 @@ struct Partial {
     /// Bridge radiation per control step, as the fraction of the coherent
     /// sum each string loses. Zero for components that bypass the bridge.
     coupling: f32,
+    /// Mechanical participation, independent of how hard the hammer excited
+    /// each string. An absent string has zero weight in BOTH directions.
+    bridge_vertical: [f32; 3],
     /// This partial's weight in the string's slope at the bridge.
     slope: f32,
     /// A re-strike's momentum still arriving: a phasor added to (s, c)
@@ -1917,17 +1920,20 @@ impl Partial {
             *output = s;
         }
         if self.drain > 0.0 {
+            let w = self.bridge_vertical;
+            // The binary inactive coordinates are exactly zero and the
+            // reaction below keeps them zero: avoid six redundant multiplies.
             let sum_s = self.s[0] + self.s[1] + self.s[2] + horizontal * self.s[LANE_HORIZONTAL];
             let sum_c = self.c[0] + self.c[1] + self.c[2] + horizontal * self.c[LANE_HORIZONTAL];
             let take_s = self.drain * sum_s;
             let take_c = self.drain * sum_c;
-            self.s[0] -= take_s;
-            self.s[1] -= take_s;
-            self.s[2] -= take_s;
+            self.s[0] -= w[0] * take_s;
+            self.s[1] -= w[1] * take_s;
+            self.s[2] -= w[2] * take_s;
             self.s[LANE_HORIZONTAL] -= horizontal * take_s;
-            self.c[0] -= take_c;
-            self.c[1] -= take_c;
-            self.c[2] -= take_c;
+            self.c[0] -= w[0] * take_c;
+            self.c[1] -= w[1] * take_c;
+            self.c[2] -= w[2] * take_c;
             self.c[LANE_HORIZONTAL] -= horizontal * take_c;
         }
         out[0] + out[1] + out[2] + out[3] + out[4]
@@ -1935,10 +1941,20 @@ impl Partial {
 
     /// The per-sample drain that reaches the same coherent-mode loss in
     /// `CULL_INTERVAL` samples as the step `coupling` did in one.
-    fn drain_per_sample(coupling: f32, horizontal: f32) -> f32 {
-        let norm = 3.0 + horizontal * horizontal;
+    fn drain_per_sample(coupling: f32, norm: f32) -> f32 {
         let per_step = (1.0 - coupling * norm).clamp(1e-6, 1.0);
         (1.0 - powf(per_step, 1.0 / CULL_INTERVAL as f32)) / norm
+    }
+
+    fn configure_bridge(&mut self, drained: f32, horizontal: f32) {
+        // For C = I - k*w*w^T, the coherent eigenvalue is 1-k*(w.w).
+        // Normalize by the SAME mechanical port used in tick(), never by
+        // the hammer's uneven amplitude shares.
+        let norm = self.bridge_vertical.iter().map(|w| w*w).sum::<f32>()
+            + horizontal * horizontal;
+        assert!(norm > 0.0);
+        self.coupling = drained / norm;
+        self.drain = Self::drain_per_sample(self.coupling, norm);
     }
 }
 
@@ -4600,7 +4616,13 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
         while index < self.partial_count {
             let partial = &mut self.partials[index];
             for lane in 0..LANES {
-                if partial.lane_magnitude_squared(lane) < knob_dead_magnitude_squared {
+                // A coupled string may be momentarily quiet and receive
+                // motion from its neighbours later. Cull the whole partial
+                // by its joint norm instead of deleting such a coordinate.
+                let connected = partial.drain > 0.0
+                    && (lane < 3 && partial.bridge_vertical[lane] > 0.0
+                        || lane == LANE_HORIZONTAL);
+                if !connected && partial.lane_magnitude_squared(lane) < knob_dead_magnitude_squared {
                     partial.retire_lane(lane);
                 }
             }
@@ -8135,16 +8157,6 @@ impl StringUnit {
             let intrinsic = self.engine.decay_per_sample(slow_t60);
             let bridge_rate = (6.907_755 * (1.0 / fast_t60 - 1.0 / slow_t60)).max(0.0);
             let drained = 1.0 - expf(-bridge_rate * CULL_INTERVAL as f32 / sample_rate);
-            // Normalised by the weight vector's square sum: with I - k*w*w^T
-            // the coherent mode loses k*(w.w) per step, so dividing makes it
-            // lose exactly `drained`, and the fast stage means what the
-            // curve says.
-            let weights = shares[0] * 0.0
-                + 1.0
-                + second * second
-                + third_string * third_string
-                + horizontal_bridge * horizontal_bridge;
-            let coupling = drained / weights;
             // How fast a partial reaches its amplitude. It is NOT a swell.
             //
             // This used to read "a bass note does not arrive, it gathers",
@@ -8201,8 +8213,9 @@ impl StringUnit {
                     sample_rate,
                 ),
             );
-            built.coupling = coupling;
-            built.drain = Partial::drain_per_sample(coupling, horizontal_bridge);
+            built.bridge_vertical = [1.0, if second > 0.0 { 1.0 } else { 0.0 },
+                if third_string > 0.0 { 1.0 } else { 0.0 }];
+            built.configure_bridge(drained, horizontal_bridge);
             built.slope = {
                 let h = (n + 1) as f32;
                 let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
@@ -8589,6 +8602,7 @@ impl StringUnit {
                     }
                     existing.coupling = fresh.coupling;
                     existing.drain = fresh.drain;
+                    existing.bridge_vertical = fresh.bridge_vertical;
                 } else if voice.partial_count < MAX_PARTIALS {
                     // A partial the living voice did not have arrives over
                     // the contact too: its velocity quadrature pushed in
@@ -14071,6 +14085,104 @@ mod tests {
     }
 
     #[test]
+    fn coupled_string_port_is_a_passive_normalized_projection() {
+        // Independent f64 matrix exponential for a rank-one dissipative
+        // port, tested on arbitrary complex states and one/two/three strings.
+        // This catches normalization by hammer amplitude and ghost strings.
+        for count in 1..=3 {
+            for horizontal in [0.0f32, 0.12, 1.0] {
+                let mut weights = [0.0f64; 4];
+                weights[..count].fill(1.0);
+                weights[3] = horizontal as f64;
+                let norm = weights.iter().map(|w| w*w).sum::<f64>();
+                for drained in [0.01f32, 0.2, 0.6] {
+                    let k = (1.0-(1.0-drained as f64).powf(1.0/CULL_INTERVAL as f64))/norm;
+                    for seed in 0..32u32 {
+                        let mut p = Partial::default();
+                        p.bridge_vertical[..count].fill(1.0);
+                        for lane in 0..4 {
+                            if lane < count || lane == LANE_HORIZONTAL {
+                                p.s[lane] = hash01(seed*19+lane as u32)*0.2-0.1;
+                                p.c[lane] = hash01(seed*31+lane as u32)*0.2-0.1;
+                                p.rc[lane] = 1.0;
+                            }
+                        }
+                        let before_s = p.s;
+                        let before_c = p.c;
+                        let sum_s = (0..4).map(|i| weights[i]*before_s[i] as f64).sum::<f64>();
+                        let sum_c = (0..4).map(|i| weights[i]*before_c[i] as f64).sum::<f64>();
+                        let before = (0..4).map(|i| p.lane_magnitude_squared(i) as f64).sum::<f64>();
+                        p.configure_bridge(drained, horizontal);
+                        p.tick(horizontal);
+                        let after = (0..4).map(|i| p.lane_magnitude_squared(i) as f64).sum::<f64>();
+                        assert!(after <= before+1e-8, "non-passive port: {before} -> {after}");
+                        for i in 0..4 {
+                            let expected_s = before_s[i] as f64-k*weights[i]*sum_s;
+                            let expected_c = before_c[i] as f64-k*weights[i]*sum_c;
+                            assert!((p.s[i] as f64-expected_s).abs() < 2e-7);
+                            assert!((p.c[i] as f64-expected_c).abs() < 2e-7);
+                            if i < 3 && i >= count {
+                                assert_eq!(p.s[i], 0.0);
+                                assert_eq!(p.c[i], 0.0);
+                            }
+                        }
+                    }
+                    let mut coherent = Partial::default();
+                    coherent.bridge_vertical[..count].fill(1.0);
+                    for i in 0..4 {
+                        coherent.rc[i] = 1.0;
+                        coherent.s[i] = weights[i] as f32;
+                    }
+                    coherent.configure_bridge(drained, horizontal);
+                    for _ in 0..CULL_INTERVAL { coherent.tick(horizontal); }
+                    for i in 0..4 {
+                        let expected = weights[i]*(1.0-drained as f64);
+                        assert!((coherent.s[i] as f64-expected).abs() < 3e-5);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn quiet_coupled_coordinates_survive_until_the_whole_partial_retires() {
+        let mut voice = Voice::<1>::default();
+        voice.active = true;
+        voice.partial_count = 1;
+        let p = &mut voice.partials[0];
+        p.bridge_vertical = [1.0, 1.0, 0.0];
+        p.rc[0] = 1.0;
+        p.rc[1] = 1.0;
+        p.rc[LANE_HORIZONTAL] = 1.0;
+        p.s[0] = 0.1;
+        p.configure_bridge(0.2, 0.12);
+        assert_eq!(voice.cull(), 0);
+        assert_eq!(voice.partials[0].rc[1], 1.0);
+        voice.partials[0].tick(0.12);
+        assert!(voice.partials[0].s[1] < 0.0, "quiet neighbour must receive motion");
+        voice.partials[0].s = [0.0; LANES];
+        voice.partials[0].c = [0.0; LANES];
+        assert_eq!(voice.cull(), 1);
+        assert!(!voice.active);
+    }
+
+    #[test]
+    fn bridge_coupling_does_not_populate_absent_bass_strings() {
+        for (note, count) in [(21, 1), (30, 2), (48, 3)] {
+            let mut piano = prepared();
+            render(&mut piano, 512, &[note_on(note, 100)]);
+            render(&mut piano, 512, &[]);
+            let voice = piano.voices().find(|v| v.active && v.note == note).unwrap();
+            let p = &voice.partials[0];
+            assert_eq!(p.bridge_vertical.iter().sum::<f32>(), count as f32);
+            for lane in count..3 {
+                assert_eq!(p.s[lane], 0.0);
+                assert_eq!(p.c[lane], 0.0);
+            }
+        }
+    }
+
+    #[test]
     #[ignore = "offline body diagnosis; CG_BODY_TRACE_DIR must be a fresh directory"]
     fn export_release_body_trace() {
         use std::io::Write;
@@ -18334,11 +18446,12 @@ mod bench {
     /// Nothing about the instrument's sound should move by accident, and
     /// until now nothing stopped it -- these two tests printed their hash and
     /// asserted nothing, so they passed whatever the instrument did.
-    // Accepted piano, with the local C4 correction removed. Retain only
-    // the previously accepted treble unison residual.
-    const RENDER_FINGERPRINT: u64 = 0xe74d_f301_16b3_9a5a;
+    // The common mechanical port now uses its own normalization, excludes
+    // absent strings and retains quiet coupled coordinates. Both scripts
+    // change globally; no note-specific tuning correction is present.
+    const RENDER_FINGERPRINT: u64 = 0x581f_8087_da14_bcbf;
     /// As `RENDER_FINGERPRINT`, for the pedalled scenario.
-    const RENDER_FINGERPRINT_PEDALS: u64 = 0x9b9b_d2cb_b324_52f0;
+    const RENDER_FINGERPRINT_PEDALS: u64 = 0x3f40_537e_871f_c7c3;
 
     /// A fingerprint of rendered audio: what the instrument sounds like,
     /// as one number.

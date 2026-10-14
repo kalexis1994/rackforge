@@ -196,8 +196,8 @@ strings", *JASA* 62, 1977).
 The model now *simulates* the coupling rather than imitating its outcome.
 Every partial holds its unison strings (or a lone string's two
 polarisations) as separate oscillators, each detuned by its own fraction of
-a cent and carrying only its intrinsic internal/air losses. At control rate
-(every 256 samples) the bridge removes the same slice of the *coherent sum*
+a cent and carrying only its intrinsic internal/air losses. Each sample
+the bridge removes a weighted slice of the *coherent sum*
 from every string: the in-phase configuration the hammer leaves radiates
 strongly and dies fast, the dephased configurations that follow couple
 weakly and live on, and the energy the bridge cannot reach is what carries
@@ -251,6 +251,34 @@ Calibration state after refit (SLOW_STAGE_RATIO 3.5, incoherent share 0.55,
 horizontal share 0.2–0.5 falling treble-ward): per-partial bands 0.75×–1.37×
 of the instrument, whole-note durations mean 0.84×, fit cost 25.93, fuel
 54 % worst case.
+
+### Mechanical-port normalization (tested, October 2026)
+
+The common dissipative port uses `w = (a0, a1, a2, h)`, where each vertical
+participation `ai` is one for a present string and zero for an absent one,
+and `h` is the horizontal coupling. The same port projects the states and
+applies the reaction. Its normalization is `n = w.w`, independently of the
+hammer's uneven excitation amplitudes. Given the intended coherent amplitude
+retention `r` over a control interval of `N` samples, the per-sample operator is
+
+    C = I - [(1 - r^(1/N)) / n] w w^T
+
+The coherent configuration has eigenvalue `r^(1/N)`; orthogonal configurations
+have eigenvalue one. This contraction does not populate absent strings.
+The previous implementation normalized by the hammer's amplitude shares but
+used a different vector in the reaction, making the intended decay depend
+on strike imbalance. Quiet coupled coordinates now keep their poles until
+the whole partial falls below the culling threshold, so a neighbour can drive
+them again. Re-strikes copy the mechanical participation with the coupling.
+
+Tests compare arbitrary complex states with an independent f64 rank-one
+matrix exponential for one, two and three strings, verify coherent decay
+over a full interval, protect quiet coordinates and exclude phantom bass
+strings. The squared state norm is in model coordinates, not SI joules; this
+does not certify the energy balance of the entire nonlinear instrument.
+No note-specific retuning is used by this correction. Keyboard-wide acoustic
+results are mixed, so mathematical consistency is not presented as an audible
+improvement in every note. See the [audit and listening comparison](concert-grand-release-body-2026-10-14/general-coupling.md).
 
 ### Frequency-dependent damping (tested)
 

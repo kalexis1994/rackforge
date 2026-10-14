@@ -31,7 +31,10 @@ def main():
     assert a.tail_seconds >= 1
     assert not a.work.exists() and not a.output.exists() and not a.report.exists()
     build = json.loads(a.probe_report.read_text(encoding='utf-8'))
-    probe = Path(build['full_render']['command'][0])
+    render_record = build.get('full_render')
+    if render_record is None:
+        render_record = build['pieces'][0]['B_render']
+    probe = Path(render_record['command'][0])
     for path in (probe, root/'plugins/concert-grand/src/lib.rs', root/'plugins/concert-grand/src/math.rs',
                  root/'crates/rackforge-plugin-sdk/src/lib.rs', root/'crates/rackforge-plugin-sdk/src/portable.rs',
                  root/'tools/concert-grand-release-probe.rs'):
@@ -82,7 +85,7 @@ def main():
     check_rate, check_audio = wavfile.read(a.output)
     assert check_rate == rate and np.array_equal(check_audio, audio)
     assert frozen == {str(path.resolve()): midi.sha(path) for path in paths}
-    report = dict(scope=__doc__, model='Current C4 fundamental body candidate, including accepted treble residual',
+    report = dict(scope=__doc__, model=build.get('physical_change', 'Authenticated Concert Grand build described in the probe report'),
                   git_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),
                   files_sha256=frozen, midi_duration_seconds=float(duration), audio_duration_seconds=total/rate,
                   rate=rate, channels=2, block=block, tail_seconds=a.tail_seconds, export_gain=1,

@@ -6,6 +6,9 @@ por completo esa selección de notas y se restaura la base aceptada con el
 residuo agudo. Los candidatos de cuerpo y sus audios siguientes quedan como
 historial de ensayos, no como el modelo que se continúa. La retirada recupera
 exactamente las huellas `e74df30116b39a5a` y `9b9bd2cbb32452f0`.
+Se implementa después una [corrección general del puerto de acoplamiento](general-coupling.md).
+Las pruebas físicas y numéricas pasan; el efecto acústico medido es mixto.
+No se presenta como una mejora ya conseguida de cuerpo en todo el teclado.
 
 2026-10-14. El usuario confirma que quiere continuar desde el piano incluido
 en la release y prioriza **cuerpo y sostenido**. Base: RackForge v0.1.32,

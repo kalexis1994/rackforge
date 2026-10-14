@@ -1,0 +1,26 @@
+{
+  "measurement_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\probe-pieza-reloj64.json",
+  "measurement_sha256": "c3a2ddfc62df62231050afbae8844671b57dfe9383221f6e3da3f3e1cf517399",
+  "verifier_sha256": "1cc5581da1eb233609d0735987bda5f285b1f784e3a07e06da6ad8539bb598d3",
+  "all_retained_artifact_hashes_passed": true,
+  "original_MIDI_events_preserved": true,
+  "no_clipping": true,
+  "common_gain_verified": true,
+  "body_feedback": false,
+  "complete_reciprocal_piano": false,
+  "perceptual_quality_decided_by_listener": true,
+  "variants": [
+    {
+      "nonlinear_transverse": 8,
+      "strikes": 37,
+      "frames": 436800,
+      "rate_hz": 48000,
+      "stereo": true,
+      "float32": true,
+      "common_gain_exact": true,
+      "peak": 0.07439452409744263,
+      "render_wall_seconds": 33.07114619999629,
+      "wav_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-physics\\P7-piece-clock-probe-audio-2026-10-14\\Campanella-hibrido-NL8.wav"
+    }
+  ]
+}

@@ -82,6 +82,20 @@ fn smooth(x: f64) -> f64 {
     let u = x.clamp(0., 1.);
     u * u * (3. - 2. * u)
 }
+fn sleeping_flight(q: &mut [f64], v: &mut [f64], w2: &[f64], nt: usize, nl: usize, dt: f64) {
+    let width = nl + 2 * nt;
+    for i in 0..3 {
+        for n in 0..nl {
+            let j = i * width + n;
+            let w = w2[j].sqrt();
+            let (s, c) = (w * dt).sin_cos();
+            let before = q[j];
+            q[j] = c * before + s * v[j] / w;
+            v[j] = -w * s * before + c * v[j];
+        }
+    }
+    q[3 * width] += dt * v[3 * width];
+}
 
 pub(super) fn run(
     args: &[String],
@@ -100,7 +114,17 @@ pub(super) fn run(
     let dt = 1. / rate as f64;
     let capture = rate.max(128000);
     assert!(capture % rate == 0);
-    let contact_rate = rate.max(32000) * 16;
+    let contact_rate = args
+        .iter()
+        .find_map(|s| s.strip_prefix("--contact-rate="))
+        .map(|s| s.parse::<usize>().unwrap())
+        .unwrap_or(rate.max(32000) * 16);
+    let sleep_j = args
+        .iter()
+        .find_map(|s| s.strip_prefix("--sleep-j="))
+        .map(|s| s.parse::<f64>().unwrap())
+        .unwrap_or(0.);
+    assert!(sleep_j.is_finite() && sleep_j >= 0.);
     assert!(contact_rate % capture == 0);
     let sub = contact_rate / rate;
     let stride = capture / rate;
@@ -235,9 +259,15 @@ pub(super) fn run(
     let mut peak_force = 0f64;
     let mut heat = 0f64;
     let mut launches = Vec::new();
+    let mut sleeping = sleep_j > 0.;
+    let mut sleep_start = 0;
+    let mut sleep_episodes = 0;
+    let mut skipped_steps = 0;
+    let mut discarded_energy = 0.;
     let mut last = Instant::now();
     let start = last;
-    for frame in 0..total {
+    let mut frame = 0;
+    while frame < total {
         let time = frame as f64 / rate as f64;
         let damper =
             damper_start + (damper_target - damper_start) * smooth((time - damper_time) / 0.03);
@@ -247,6 +277,21 @@ pub(super) fn run(
                 0 => {
                     // Live strike, retaining the vibrating wires.
                     assert!(!active, "overlapping hammer contact on same key");
+                    if sleeping {
+                        sleeping_flight(
+                            &mut q,
+                            &mut v,
+                            &omega2,
+                            nt,
+                            nl,
+                            (frame - sleep_start) as f64 * dt,
+                        );
+                        for (k, &j) in indices.iter().enumerate() {
+                            model.q[k] = q[j];
+                            model.v[k] = v[j];
+                        }
+                        sleeping = false;
+                    }
                     contact.set_state(&q, &v);
                     contact.set_contact_area([1. - soft, 1., 1.]);
                     let work = contact.launch(5. * (e.value / 124.).powf(1.5)).unwrap();
@@ -323,7 +368,7 @@ pub(super) fn run(
                 segments.push((contact_start, contact_force.len(), path));
                 contact_force.clear();
             }
-        } else if attacks > 0 {
+        } else if attacks > 0 && !sleeping {
             full_old_q.copy_from_slice(&q);
             full_old_v.copy_from_slice(&v);
             old_q.copy_from_slice(&model.q);
@@ -427,11 +472,55 @@ pub(super) fn run(
             // the moving strings would create a false contact at the repeat.
             q[size] += dt * v[size];
             coast_steps += 1;
+            if sleep_j > 0. && held == 0 && damper > 0.001 && frame % (rate / 1000).max(1) == 0 {
+                let transverse = (0..3)
+                    .map(|i| {
+                        (nl..width)
+                            .map(|n| {
+                                let j = i * width + n;
+                                0.5 * (v[j] * v[j] + omega2[j] * q[j] * q[j])
+                            })
+                            .sum::<f64>()
+                    })
+                    .sum::<f64>();
+                if transverse < sleep_j {
+                    for i in 0..3 {
+                        q[i * width + nl..(i + 1) * width].fill(0.);
+                        v[i * width + nl..(i + 1) * width].fill(0.);
+                    }
+                    discarded_energy += transverse;
+                    sleep_episodes += 1;
+                    sleep_start = frame + 1;
+                    sleeping = true;
+                }
+            }
         }
         if last.elapsed().as_secs_f64() > 20. {
             eprintln!("voice {:.2}/{:.2}s", time, total as f64 / rate as f64);
             last = Instant::now();
         }
+        if sleeping && !active {
+            let next = events
+                .get(event)
+                .map(|e| e.frame)
+                .unwrap_or(total)
+                .min(total)
+                .max(frame + 1);
+            skipped_steps += next - frame;
+            frame = next;
+        } else {
+            frame += 1;
+        }
+    }
+    if sleeping {
+        sleeping_flight(
+            &mut q,
+            &mut v,
+            &omega2,
+            nt,
+            nl,
+            (total - sleep_start) as f64 * dt,
+        );
     }
     assert!(!active, "excerpt ends during a hammer contact");
     write_floats(&args[6], &coast_force);
@@ -445,5 +534,5 @@ pub(super) fn run(
         })
         .collect::<Vec<_>>()
         .join(",");
-    println!("{{\"q\":{:?},\"v\":{:?},\"capture_rate_hz\":{},\"coast_rate_hz\":{},\"contact_rate_hz\":{},\"capture_frames\":{},\"attacks\":{},\"launch_work_j\":{:?},\"peak_contact_force_n\":{},\"felt_heat_j\":{},\"coast_steps\":{},\"contact_steps\":{},\"maximum_iterations\":{},\"seconds\":{},\"body_feedback\":false,\"nonlinear_transverse\":{},\"contact_segments\":[{}]}}",q,v,capture,rate,contact_rate,coast_force.len(),attacks,launches,peak_force,heat,coast_steps,contact_steps,max_iterations,start.elapsed().as_secs_f64(),low,segments_json);
+    println!("{{\"q\":{:?},\"v\":{:?},\"capture_rate_hz\":{},\"coast_rate_hz\":{},\"contact_rate_hz\":{},\"capture_frames\":{},\"attacks\":{},\"launch_work_j\":{:?},\"peak_contact_force_n\":{},\"felt_heat_j\":{},\"coast_steps\":{},\"contact_steps\":{},\"maximum_iterations\":{},\"seconds\":{},\"body_feedback\":false,\"nonlinear_transverse\":{},\"sleep_threshold_j\":{},\"sleep_episodes\":{},\"skipped_steps\":{},\"discarded_transverse_energy_j\":{},\"contact_segments\":[{}]}}",q,v,capture,rate,contact_rate,coast_force.len(),attacks,launches,peak_force,heat,coast_steps,contact_steps,max_iterations,start.elapsed().as_secs_f64(),low,sleep_j,sleep_episodes,skipped_steps,discarded_energy,segments_json);
 }

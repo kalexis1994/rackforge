@@ -1,8 +1,35 @@
 """Offline MIDI window and continuous bridge-force reconstruction for listening."""
 from math import gcd
+from functools import lru_cache
 from pathlib import Path
 import numpy as np
 from scipy.signal import resample_poly
+from concert_grand_moving_bridge import contact_footprint
+
+
+@lru_cache(maxsize=8)
+def _footprint(nt):return contact_footprint(nt,.125,.02)[0]
+
+
+def light_fixture(note,rate,duration,nt=96):
+    """Same serialized cold state, without constructing a dense Python piano."""
+    length=.62*2**((60-note)/12);mu=.0081;nl=2*nt;size=3*(nl+2*nt)+1
+    q=np.zeros(size);q[-1]=-.01*np.sqrt(.002)
+    return dict(note=note,transverse=nt,axial=nl,nodes=1<<(max(nl,2*nt)+1).bit_length(),
+        parameters=np.array([length,mu,200e9,7850.,rate,.002,7.5e8,2.6,.1,2e-5,-1e-5]),
+        shapes=np.tile(-_footprint(nt)/np.sqrt(mu*length/2),3),tensions=850.*2**(np.array([-.4,0.,.6])/600),
+        launch_speeds=np.zeros(3),times=np.array([0.,.012,duration]),q=q,v=np.zeros(size),endpoint=q.copy())
+
+
+def light_omega(f):
+    nt=f['transverse'];nl=f['axial'];length,mu,young,density=f['parameters'][:4]
+    root=np.sqrt(mu*length/2);ku=np.pi*np.arange(1,nl+1)/length/root
+    k=np.pi*np.arange(1,nt+1)/length;kv=k/root;ea=young*mu/density;ei=young*(mu/density)**2/(4*np.pi)
+    result=[]
+    for tension in f['tensions']:
+        transverse=tension*length/2*kv**2+ei*length/2*k**4/(mu*length/2)
+        result.extend(np.r_[ea*length/2*ku**2,transverse,transverse])
+    return np.sqrt(result)
 
 
 def excerpt(plan,cut=8.,tail=1.):

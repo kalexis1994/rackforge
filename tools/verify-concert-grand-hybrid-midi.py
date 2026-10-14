@@ -30,11 +30,16 @@ def main():
     original=[dict(e,time_s=(e['tick']-first)/plan['contact_rate_hz']) for e in plan['events'] if first<=e['tick']<end]
     if original!=window['original_events']:raise ValueError('original MIDI events altered')
     expected_attacks=sum(e['kind']=='on' for e in original);checks=[]
+    soft_values=[e['value'] for e in window['events'] if e['kind']=='cc' and e['key']==67]
+    first_wire_unstruck=bool(soft_values) and all(v==127 for v in soft_values)
     for variant in d['variants']:
         attacks=0
         for voice in variant['voices']:
             for prefix in ['result','fixture','events','loss','force']:
+                if prefix=='force' and not voice.get('force_retained',True):continue
                 if digest(voice[prefix+'_path'])!=voice[prefix+'_sha256']:raise ValueError('native artifact changed')
+            if 'audio_force_path' in voice and digest(voice['audio_force_path'])!=voice['audio_force_sha256']:
+                raise ValueError('compact audio force changed')
             for segment in voice['contact_segments']:
                 if digest(segment['path'])!=segment['sha256']:raise ValueError('contact trace changed')
             data=json.loads(Path(voice['result_path']).read_text(encoding='utf-8'))
@@ -52,10 +57,14 @@ def main():
             if data['felt_heat_j']<0 or data['peak_contact_force_n']<=0:raise ValueError('felt control failed')
             # This excerpt starts at full soft pedal, so the unstruck first wire
             # must remain exactly at rest. It is retained in the full state.
-            if not np.array_equal(np.asarray(data['q'])[:384],np.zeros(384)):raise ValueError('unstruck wire was excited')
-            target=round(window['duration_s']*data['capture_rate_hz'])
+            if first_wire_unstruck and not np.array_equal(np.asarray(data['q'])[:384],np.zeros(384)):
+                raise ValueError('unstruck wire was excited')
+            target=int(np.floor(window['duration_s']*data['coast_rate_hz']+.5))*(data['capture_rate_hz']//data['coast_rate_hz'])
             if data['capture_frames']!=target:raise ValueError('native capture duration changed')
-            if Path(voice['force_path']).stat().st_size!=8*target:raise ValueError('native force trace changed')
+            if voice.get('force_retained',True) and Path(voice['force_path']).stat().st_size!=8*target:
+                raise ValueError('native force trace changed')
+            if data.get('discarded_transverse_energy_j',0.)>data.get('sleep_threshold_j',0.)*data.get('sleep_episodes',0):
+                raise ValueError('sleep energy threshold exceeded')
             attacks+=expected
         if attacks!=expected_attacks:raise ValueError('piece strikes omitted')
         for prefix in ['body_input','raw_pressure','wav']:
@@ -70,7 +79,7 @@ def main():
             rate_hz=rate,stereo=True,float32=True,common_gain_exact=True,peak=float(abs(audio).max()),
             render_wall_seconds=variant['render_wall_seconds'],wav_path=variant['wav_path']))
     report=dict(measurement_path=str(args.measurement.resolve()),measurement_sha256=digest(args.measurement),
-        verifier_sha256=digest(__file__),all_artifact_hashes_passed=True,original_MIDI_events_preserved=True,
+        verifier_sha256=digest(__file__),all_retained_artifact_hashes_passed=True,original_MIDI_events_preserved=True,
         no_clipping=True,common_gain_verified=True,body_feedback=False,complete_reciprocal_piano=False,
         perceptual_quality_decided_by_listener=True,variants=checks)
     args.report.write_text(json.dumps(report,indent=2,allow_nan=False)+'\n',encoding='utf-8')

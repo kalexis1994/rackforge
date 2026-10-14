@@ -5812,6 +5812,11 @@ pub static UNISON_BEAT_CAP_HZ: Knob = Knob::new(2.0);
 /// Scales the unison's width in cents: the knee between the coherent, draining
 /// decay and the dephased aftersound. Half the old width, measured.
 pub static UNISON_WIDTH: Knob = Knob::new(0.5);
+/// Residual nominal string-pair separation at the top, in cents at the
+/// factory unison setting, before the fixed note/partial variation. This
+/// conservative voicing trial avoids exact unisons without restoring the
+/// former fast treble beats. No extra oscillators or per-sample work.
+const TOP_UNISON_CENTS: f32 = 0.02;
 /// Geometric spread of the per-partial detune jitter (6 = x0.4..x2.4; 1 = one detune per string).
 pub static UNISON_JITTER_SPREAD: Knob = Knob::new(6.0);
 /// Stulov's hereditary felt: the share of the compression history the force
@@ -7444,13 +7449,22 @@ impl StringUnit {
         // note and, under the pedal, on all of them at once. With the width
         // at zero the envelope is monotone and within three decibels of the
         // reference to half a second; at 0.05 a slower beat appears at 1 s.
-        // The taper follows `top_octave`.
+        // Keep that taper, but leave a minute residual at the top rather
+        // than forcing all three strings to exactly the same frequency.
+        // This is a listening candidate, not a measured tuning tolerance.
+        let top_unison = StringEngine::top_octave(position);
         let detune_cents = UNISON_WIDTH.get()
             * (0.9 + 0.9 * position)
-            * (1.0 - StringEngine::top_octave(position))
+            * (1.0 - top_unison)
             * (self.engine.controls.unison * 2.86)
             * self.engine.controls.lab(13)
             * unison_precision;
+        let detune_cents = detune_cents
+            + TOP_UNISON_CENTS
+                * top_unison
+                * (self.engine.controls.unison / 0.65)
+                * self.engine.controls.lab(13)
+                * unison_precision;
         // A tuner hears beats, not cents: the same three cents that pass
         // unnoticed on a C2 beat twenty times a second on a C7's second
         // partial, and that is the chirp the user heard on the high notes
@@ -14057,6 +14071,33 @@ mod tests {
     }
 
     #[test]
+    fn top_unisons_keep_a_slow_residual_and_the_control_can_remove_it() {
+        // Read the actual oscillator rotations, not a duplicate tuning law.
+        // Small positive separation is intentional; a fast fundamental
+        // beat or a detune that survives the panel's zero is a regression.
+        for note in [96, 100, 103, 108] {
+            for unison in [0.0, 0.65] {
+                let mut piano = prepared();
+                assert!(piano.set_parameter(PARAM_UNISON, unison));
+                render(&mut piano, 64, &[note_on(note, 100)]);
+                let voice = piano.voices().find(|v| v.active && v.note == note).unwrap();
+                let partial = &voice.partials[0];
+                let frequencies: [f32; 3] = core::array::from_fn(|lane| {
+                    partial.rs[lane].atan2(partial.rc[lane]) * FS as f32 / core::f32::consts::TAU
+                });
+                let spread = frequencies.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+                    - frequencies.iter().copied().fold(f32::INFINITY, f32::min);
+                std::println!("note {note}, unison {unison}: {frequencies:?}, span {spread} Hz");
+                if unison == 0.0 {
+                    assert_eq!(spread, 0.0, "zero unison must remove the residual");
+                } else {
+                    assert!(spread > 0.001 && spread < 0.5, "unexpected top spread: {spread}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn the_top_octave_has_no_dampers() {
         // Above LAST_DAMPER_NOTE a key-up is nothing: the string rings on
         // as if the pedal were down. Below it the key-up is a damper. E7
@@ -18220,8 +18261,11 @@ mod bench {
     /// until now nothing stopped it -- these two tests printed their hash and
     /// asserted nothing, so they passed whatever the instrument did.
     const RENDER_FINGERPRINT: u64 = 0xe74d_f301_16b3_9a5a;
-    /// As `RENDER_FINGERPRINT`, for the pedalled scenario.
-    const RENDER_FINGERPRINT_PEDALS: u64 = 0x8d20_f899_b050_9bd0;
+    /// As `RENDER_FINGERPRINT`, for the pedalled scenario. The 0.02-cent
+    /// treble residual moves its notes above F#6; the lower-register plain
+    /// fingerprint stays unchanged. Setting only the residual to zero in a
+    /// frozen control restores the published 0x8d20_f899_b050_9bd0 exactly.
+    const RENDER_FINGERPRINT_PEDALS: u64 = 0x9b9b_d2cb_b324_52f0;
 
     /// A fingerprint of rendered audio: what the instrument sounds like,
     /// as one number.

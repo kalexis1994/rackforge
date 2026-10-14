@@ -1,0 +1,778 @@
+{
+  "scope": "Compare the tiny treble unison residual against the frozen release render.",
+  "candidate_status": "Conservative listening candidate; subjective benefit pending",
+  "change": {
+    "TOP_UNISON_CENTS": 0.02,
+    "extra_oscillators": 0,
+    "extra_per_sample_operations": 0,
+    "note": "Residual fades in with the existing top-octave taper; same fixed note/partial variation and unison controls"
+  },
+  "baseline_report": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\docs\\concert-grand-release-body-2026-10-14\\campanella-baseline.json",
+  "baseline_report_sha256": "1f66a22f87e4757c065c87c891bbaaebe4070a4936cf698a752fba65a78a6e87",
+  "files_sha256": {
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\compare-concert-grand-top-unison.py": "32bdec877240416ad70e3b2aa5ca0007067add31c54146952049484fc6de4429",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\concert-grand-release-probe.rs": "317935110022c4e58e35c4ba1093a72dd939823ff029477aa4c3fbe462a26b5d",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs": "ccd1883dd1c7759ca38c82090b8f835ba12630c53405146c90efe86bc453599f",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\math.rs": "8fcbef468ccce24de475503793ee778f715f419c31bb2300d0cc0ffd4bd472ee",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\crates\\rackforge-plugin-sdk\\src\\lib.rs": "af557b4b598264ce09d000916c91388804b763337c6517d13f09d32faca793ab",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe": "042da7a6b40d87dbfe37b51d727301bd1efb2a543e44dae58b54478c3c218e57",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\librackforge_concert_grand.rlib": "6082dbadbaa3e9a73e58020263434b67520778eab2028c7d443b5ac603550357",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib": "dd7a10832c20260cd98c29bda740fa10d3908a335a4f7da34d3e78a170b8a068",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\events.txt": "3fe9e3a7b11805cefd31fae5c6375ebdb9a9cd59385b57cf0a6406a7ea5d22b5",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe": "cfe4662a2e5783825acf8825009ebba1431a7baa33794fe40a83c7aa2b679771"
+  },
+  "compile_commands": [
+    [
+      "rustc",
+      "+1.98.0-x86_64-pc-windows-msvc",
+      "--edition=2024",
+      "-O",
+      "--crate-name",
+      "rackforge_concert_grand",
+      "--crate-type",
+      "rlib",
+      "--extern",
+      "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs",
+      "-o",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\librackforge_concert_grand.rlib"
+    ],
+    [
+      "rustc",
+      "+1.98.0-x86_64-pc-windows-msvc",
+      "--edition=2024",
+      "-O",
+      "-L",
+      "dependency=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14",
+      "-L",
+      "dependency=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14",
+      "--extern",
+      "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib",
+      "--extern",
+      "rackforge_concert_grand=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\librackforge_concert_grand.rlib",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\concert-grand-release-probe.rs",
+      "-o",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe"
+    ]
+  ],
+  "source_diff": "diff --git a/plugins/concert-grand/src/lib.rs b/plugins/concert-grand/src/lib.rs\nindex 0c0c2442..67ad3507 100644\n--- a/plugins/concert-grand/src/lib.rs\n+++ b/plugins/concert-grand/src/lib.rs\n@@ -5812,6 +5812,11 @@ pub static UNISON_BEAT_CAP_HZ: Knob = Knob::new(2.0);\n /// Scales the unison's width in cents: the knee between the coherent, draining\n /// decay and the dephased aftersound. Half the old width, measured.\n pub static UNISON_WIDTH: Knob = Knob::new(0.5);\n+/// Residual nominal string-pair separation at the top, in cents at the\n+/// factory unison setting, before the fixed note/partial variation. This\n+/// conservative voicing trial avoids exact unisons without restoring the\n+/// former fast treble beats. No extra oscillators or per-sample work.\n+const TOP_UNISON_CENTS: f32 = 0.02;\n /// Geometric spread of the per-partial detune jitter (6 = x0.4..x2.4; 1 = one detune per string).\n pub static UNISON_JITTER_SPREAD: Knob = Knob::new(6.0);\n /// Stulov's hereditary felt: the share of the compression history the force\n@@ -7444,13 +7449,22 @@ impl StringUnit {\n         // note and, under the pedal, on all of them at once. With the width\n         // at zero the envelope is monotone and within three decibels of the\n         // reference to half a second; at 0.05 a slower beat appears at 1 s.\n-        // The taper follows `top_octave`.\n+        // Keep that taper, but leave a minute residual at the top rather\n+        // than forcing all three strings to exactly the same frequency.\n+        // This is a listening candidate, not a measured tuning tolerance.\n+        let top_unison = StringEngine::top_octave(position);\n         let detune_cents = UNISON_WIDTH.get()\n             * (0.9 + 0.9 * position)\n-            * (1.0 - StringEngine::top_octave(position))\n+            * (1.0 - top_unison)\n             * (self.engine.controls.unison * 2.86)\n             * self.engine.controls.lab(13)\n             * unison_precision;\n+        let detune_cents = detune_cents\n+            + TOP_UNISON_CENTS\n+                * top_unison\n+                * (self.engine.controls.unison / 0.65)\n+                * self.engine.controls.lab(13)\n+                * unison_precision;\n         // A tuner hears beats, not cents: the same three cents that pass\n         // unnoticed on a C2 beat twenty times a second on a C7's second\n         // partial, and that is the chirp the user heard on the high notes\n@@ -14056,6 +14070,33 @@ mod tests {\n         );\n     }\n \n+    #[test]\n+    fn top_unisons_keep_a_slow_residual_and_the_control_can_remove_it() {\n+        // Read the actual oscillator rotations, not a duplicate tuning law.\n+        // Small positive separation is intentional; a fast fundamental\n+        // beat or a detune that survives the panel's zero is a regression.\n+        for note in [96, 100, 103, 108] {\n+            for unison in [0.0, 0.65] {\n+                let mut piano = prepared();\n+                assert!(piano.set_parameter(PARAM_UNISON, unison));\n+                render(&mut piano, 64, &[note_on(note, 100)]);\n+                let voice = piano.voices().find(|v| v.active && v.note == note).unwrap();\n+                let partial = &voice.partials[0];\n+                let frequencies: [f32; 3] = core::array::from_fn(|lane| {\n+                    partial.rs[lane].atan2(partial.rc[lane]) * FS as f32 / core::f32::consts::TAU\n+                });\n+                let spread = frequencies.iter().copied().fold(f32::NEG_INFINITY, f32::max)\n+                    - frequencies.iter().copied().fold(f32::INFINITY, f32::min);\n+                std::println!(\"note {note}, unison {unison}: {frequencies:?}, span {spread} Hz\");\n+                if unison == 0.0 {\n+                    assert_eq!(spread, 0.0, \"zero unison must remove the residual\");\n+                } else {\n+                    assert!(spread > 0.001 && spread < 0.5, \"unexpected top spread: {spread}\");\n+                }\n+            }\n+        }\n+    }\n+\n     #[test]\n     fn the_top_octave_has_no_dampers() {\n         // Above LAST_DAMPER_NOTE a key-up is nothing: the string rings on\n@@ -18220,8 +18261,11 @@ mod bench {\n     /// until now nothing stopped it -- these two tests printed their hash and\n     /// asserted nothing, so they passed whatever the instrument did.\n     const RENDER_FINGERPRINT: u64 = 0xe74d_f301_16b3_9a5a;\n-    /// As `RENDER_FINGERPRINT`, for the pedalled scenario.\n-    const RENDER_FINGERPRINT_PEDALS: u64 = 0x8d20_f899_b050_9bd0;\n+    /// As `RENDER_FINGERPRINT`, for the pedalled scenario. The 0.02-cent\n+    /// treble residual moves its notes above F#6; the lower-register plain\n+    /// fingerprint stays unchanged. Setting only the residual to zero in a\n+    /// frozen control restores the published 0x8d20_f899_b050_9bd0 exactly.\n+    const RENDER_FINGERPRINT_PEDALS: u64 = 0x9b9b_d2cb_b324_52f0;\n \n     /// A fingerprint of rendered audio: what the instrument sounds like,\n     /// as one number.\n",
+  "audio_duration_seconds": 280.15884353741495,
+  "full_render": {
+    "command": [
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\events.txt",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\campanella-candidate.f32",
+      "44100",
+      "12355005",
+      "256",
+      "concert"
+    ],
+    "native": {
+      "frames": 12355005,
+      "rate": 44100,
+      "block": 256,
+      "warmup_frames": 8820,
+      "events": 11381,
+      "peak": 0.9252374,
+      "rms": 0.05234955815292012,
+      "wall_seconds": 26.0615366
+    },
+    "process_seconds": 26.123438400005398,
+    "raw_sha256": "9cfda370b427a4d4976fcfba1a720815834492c0ccbb1f50d68896ac920dedf8"
+  },
+  "full_output": {
+    "path": "C:\\SHARED\\Piano-Campanella-unisonos-2026-10-14\\escucha\\Campanella-B-unisonos-agudos.wav",
+    "sha256": "2d288be290437d2c0dde749a4ebe8b8a694542324755fae9168eb6b2445e794f",
+    "frames": 12355005,
+    "rate": 44100,
+    "gain": 1
+  },
+  "full_relative_rms_delta": 0.03711019603997014,
+  "isolated_note_order": [
+    60,
+    84,
+    90,
+    91,
+    96,
+    100,
+    103,
+    108
+  ],
+  "isolated_outputs": [
+    {
+      "path": "C:\\SHARED\\Piano-Campanella-unisonos-2026-10-14\\escucha\\Notas-A-release.wav",
+      "sha256": "3cb969f7abcad0f5dfcde4f107d754f0f96a33866b1aeac73c3f52332bbe4970",
+      "frames": 1146600,
+      "rate": 44100,
+      "gain": 1
+    },
+    {
+      "path": "C:\\SHARED\\Piano-Campanella-unisonos-2026-10-14\\escucha\\Notas-B-unisonos-agudos.wav",
+      "sha256": "1b32e08046bfa0b381283a8c5768627dcbd57be62ab333562ca8ba0e5ccbcc39",
+      "frames": 1146600,
+      "rate": 44100,
+      "gain": 1
+    }
+  ],
+  "notes": [
+    {
+      "note": 60,
+      "velocity": 96,
+      "release": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-60.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\60-A.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.10253407,
+          "rms": 0.011411195850739958,
+          "wall_seconds": 0.1407521
+        },
+        "process_seconds": 0.16569589999562595,
+        "raw_sha256": "047c02f44503360ff1c5b90ad37b95c788d34f9c3b4dc4e6ab9057fb62ef5655"
+      },
+      "candidate": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-60.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\60-B.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.10253407,
+          "rms": 0.011411195850739958,
+          "wall_seconds": 0.1478524
+        },
+        "process_seconds": 0.17194500000186963,
+        "raw_sha256": "047c02f44503360ff1c5b90ad37b95c788d34f9c3b4dc4e6ab9057fb62ef5655"
+      },
+      "identical": true,
+      "windows": [
+        {
+          "start": 0.05,
+          "end": 0.15,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 0.15,
+          "end": 0.3,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 0.3,
+          "end": 0.5,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 0.5,
+          "end": 1,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 1,
+          "end": 2,
+          "level_delta_db": 0.0
+        }
+      ],
+      "relative_rms_delta": 0.0
+    },
+    {
+      "note": 84,
+      "velocity": 96,
+      "release": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-84.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\84-A.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.09551018,
+          "rms": 0.004183496315381227,
+          "wall_seconds": 0.1356971
+        },
+        "process_seconds": 0.1603021999981138,
+        "raw_sha256": "9f772ec1055d398e68b3eac4fb295eea9d123c051eb0a1570e85b87d87e9af03"
+      },
+      "candidate": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-84.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\84-B.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.09551018,
+          "rms": 0.004183496315381227,
+          "wall_seconds": 0.1427843
+        },
+        "process_seconds": 0.16675560000294354,
+        "raw_sha256": "9f772ec1055d398e68b3eac4fb295eea9d123c051eb0a1570e85b87d87e9af03"
+      },
+      "identical": true,
+      "windows": [
+        {
+          "start": 0.05,
+          "end": 0.15,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 0.15,
+          "end": 0.3,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 0.3,
+          "end": 0.5,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 0.5,
+          "end": 1,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 1,
+          "end": 2,
+          "level_delta_db": 0.0
+        }
+      ],
+      "relative_rms_delta": 0.0
+    },
+    {
+      "note": 90,
+      "velocity": 96,
+      "release": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-90.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\90-A.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.195973,
+          "rms": 0.014012520876283609,
+          "wall_seconds": 0.1427348
+        },
+        "process_seconds": 0.16791250000096625,
+        "raw_sha256": "2233b8ea7247415341cab79ca73771e63ac7e25d2999331c6087edb2c95b2905"
+      },
+      "candidate": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-90.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\90-B.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.195973,
+          "rms": 0.014012520876283609,
+          "wall_seconds": 0.1412213
+        },
+        "process_seconds": 0.16454520000115735,
+        "raw_sha256": "2233b8ea7247415341cab79ca73771e63ac7e25d2999331c6087edb2c95b2905"
+      },
+      "identical": true,
+      "windows": [
+        {
+          "start": 0.05,
+          "end": 0.15,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 0.15,
+          "end": 0.3,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 0.3,
+          "end": 0.5,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 0.5,
+          "end": 1,
+          "level_delta_db": 0.0
+        },
+        {
+          "start": 1,
+          "end": 2,
+          "level_delta_db": 0.0
+        }
+      ],
+      "relative_rms_delta": 0.0
+    },
+    {
+      "note": 91,
+      "velocity": 96,
+      "release": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-91.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\91-A.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.19503796,
+          "rms": 0.013843395784264415,
+          "wall_seconds": 0.1380936
+        },
+        "process_seconds": 0.16328410000278382,
+        "raw_sha256": "0cdeab982dacb6c107d1387b2a2b5dda5cddbab24b348097fa01cbbcc1dc6c06"
+      },
+      "candidate": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-91.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\91-B.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.19503695,
+          "rms": 0.013841624001968261,
+          "wall_seconds": 0.1331639
+        },
+        "process_seconds": 0.15613760000269394,
+        "raw_sha256": "69df90b0ac1a1c4d42a02c4deaac849d5cff1d0069781349ca0d942056d03559"
+      },
+      "identical": false,
+      "windows": [
+        {
+          "start": 0.05,
+          "end": 0.15,
+          "level_delta_db": -0.004244945830102317
+        },
+        {
+          "start": 0.15,
+          "end": 0.3,
+          "level_delta_db": 0.004978088706113612
+        },
+        {
+          "start": 0.3,
+          "end": 0.5,
+          "level_delta_db": 0.03155190314696049
+        },
+        {
+          "start": 0.5,
+          "end": 1,
+          "level_delta_db": -0.003667187334102733
+        },
+        {
+          "start": 1,
+          "end": 2,
+          "level_delta_db": -0.0009263874413247155
+        }
+      ],
+      "relative_rms_delta": 0.001044278717594448
+    },
+    {
+      "note": 96,
+      "velocity": 96,
+      "release": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-96.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\96-A.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.13710244,
+          "rms": 0.007500153148837023,
+          "wall_seconds": 0.1552302
+        },
+        "process_seconds": 0.17992980000417447,
+        "raw_sha256": "bf8332c0be37521be93fb1b9634caf6a0e4072cea5f0e5377365cd22e8db16fe"
+      },
+      "candidate": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-96.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\96-B.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.1371183,
+          "rms": 0.007502763523527481,
+          "wall_seconds": 0.1420161
+        },
+        "process_seconds": 0.16515110000182176,
+        "raw_sha256": "b9e15a4597c622966d48b1d2845902bd6e5f7ec339452c6d2dde0c9d7a427c76"
+      },
+      "identical": false,
+      "windows": [
+        {
+          "start": 0.05,
+          "end": 0.15,
+          "level_delta_db": 0.02020553059538199
+        },
+        {
+          "start": 0.15,
+          "end": 0.3,
+          "level_delta_db": 0.04095003722693061
+        },
+        {
+          "start": 0.3,
+          "end": 0.5,
+          "level_delta_db": -0.09105127337486171
+        },
+        {
+          "start": 0.5,
+          "end": 1,
+          "level_delta_db": -0.11693633717896364
+        },
+        {
+          "start": 1,
+          "end": 2,
+          "level_delta_db": 0.04774408598006867
+        }
+      ],
+      "relative_rms_delta": 0.0019094335494598675
+    },
+    {
+      "note": 100,
+      "velocity": 96,
+      "release": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-100.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\100-A.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.0754412,
+          "rms": 0.001976430108129623,
+          "wall_seconds": 0.1451169
+        },
+        "process_seconds": 0.16935860000376124,
+        "raw_sha256": "337d2c48c69e9471942c6be718d0b920268f4e23748e39b648c1b6198bc82656"
+      },
+      "candidate": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-100.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\100-B.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.07543186,
+          "rms": 0.001976111125052402,
+          "wall_seconds": 0.1411785
+        },
+        "process_seconds": 0.16845509999984642,
+        "raw_sha256": "b5adbe83e5f1e73fe8dadb64070f0f75ce36013790c6693c59813aca99e2bac3"
+      },
+      "identical": false,
+      "windows": [
+        {
+          "start": 0.05,
+          "end": 0.15,
+          "level_delta_db": -0.006044726080668394
+        },
+        {
+          "start": 0.15,
+          "end": 0.3,
+          "level_delta_db": -0.021464602475320546
+        },
+        {
+          "start": 0.3,
+          "end": 0.5,
+          "level_delta_db": -0.010104626101711776
+        },
+        {
+          "start": 0.5,
+          "end": 1,
+          "level_delta_db": 0.05006802526049592
+        },
+        {
+          "start": 1,
+          "end": 2,
+          "level_delta_db": 0.05381760689327916
+        }
+      ],
+      "relative_rms_delta": 0.0006742472316715814
+    },
+    {
+      "note": 103,
+      "velocity": 96,
+      "release": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-103.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\103-A.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.16853969,
+          "rms": 0.006988504581820051,
+          "wall_seconds": 0.1348326
+        },
+        "process_seconds": 0.1594081000002916,
+        "raw_sha256": "35769de6a1f7ebf23b9b46eb5e1f6af98a50d86d6ce57aca0c0c115b04287c78"
+      },
+      "candidate": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-103.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\103-B.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.1685072,
+          "rms": 0.006985868837394896,
+          "wall_seconds": 0.1326715
+        },
+        "process_seconds": 0.15579040000011446,
+        "raw_sha256": "64632134cfa92fbe17f007b1ed0c6eb15a5f4cc3e0d092d53cae4617c0f267d6"
+      },
+      "identical": false,
+      "windows": [
+        {
+          "start": 0.05,
+          "end": 0.15,
+          "level_delta_db": -0.03177680603413644
+        },
+        {
+          "start": 0.15,
+          "end": 0.3,
+          "level_delta_db": -0.025166996433379205
+        },
+        {
+          "start": 0.3,
+          "end": 0.5,
+          "level_delta_db": 0.05061727172178603
+        },
+        {
+          "start": 0.5,
+          "end": 1,
+          "level_delta_db": 0.052822494077609375
+        },
+        {
+          "start": 1,
+          "end": 2,
+          "level_delta_db": 0.0013580669492393616
+        }
+      ],
+      "relative_rms_delta": 0.0011602877894513577
+    },
+    {
+      "note": 108,
+      "velocity": 96,
+      "release": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-108.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\108-A.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.23209351,
+          "rms": 0.0069042640021495134,
+          "wall_seconds": 0.1263086
+        },
+        "process_seconds": 0.1501918000067235,
+        "raw_sha256": "678e26a2b582a89b85507446f9ede11325e4e068509894f8e977a68ae1c3340e"
+      },
+      "candidate": {
+        "command": [
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\probe.exe",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\note-108.txt",
+          "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\108-B.f32",
+          "44100",
+          "132300",
+          "256",
+          "concert"
+        ],
+        "native": {
+          "frames": 132300,
+          "rate": 44100,
+          "block": 256,
+          "warmup_frames": 8820,
+          "events": 2,
+          "peak": 0.2320986,
+          "rms": 0.006903870638611225,
+          "wall_seconds": 0.1241554
+        },
+        "process_seconds": 0.1467588000014075,
+        "raw_sha256": "c55ffc2dbbb912de613c834711da1c3fafaa7f3fd8e10644ec6169e7bff87a0d"
+      },
+      "identical": false,
+      "windows": [
+        {
+          "start": 0.05,
+          "end": 0.15,
+          "level_delta_db": -0.0020059263979836147
+        },
+        {
+          "start": 0.15,
+          "end": 0.3,
+          "level_delta_db": 0.004526064517080874
+        },
+        {
+          "start": 0.3,
+          "end": 0.5,
+          "level_delta_db": 0.000724968982022944
+        },
+        {
+          "start": 0.5,
+          "end": 1,
+          "level_delta_db": -0.0003649875468147309
+        },
+        {
+          "start": 1,
+          "end": 2,
+          "level_delta_db": -0.008145039400826434
+        }
+      ],
+      "relative_rms_delta": 0.00046346416439500116
+    }
+  ],
+  "timing": {
+    "scope": "14-second native offline script, three runs each, alternating order; includes raw I/O",
+    "seconds": {
+      "release": [
+        0.7034965,
+        0.6953207,
+        0.6956219
+      ],
+      "candidate": [
+        0.7021057,
+        0.6954644,
+        0.703261
+      ]
+    },
+    "median_seconds": {
+      "release": 0.6956219,
+      "candidate": 0.7021057
+    },
+    "median_ratio": 1.00932086813253
+  },
+  "validation": [
+    "Finite output; peak below full scale",
+    "Exact WAV/raw equality",
+    "Same complete MIDI events, preset and export gain as baseline",
+    "C4, C6 and F#6 match release bit for bit in isolated runs",
+    "Source and executable hashes unchanged during comparison"
+  ]
+}

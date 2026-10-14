@@ -169,3 +169,52 @@ del MIDI original y redondea una sola vez a muestras de audio.
 
 Este WAV será la versión A para comparar futuros cambios locales de cuerpo
 y sostenido con el mismo MIDI, preset y nivel de exportación.
+
+## Candidato: separación mínima del unísono agudo
+
+El usuario propone conservar pequeñas diferencias de afinación entre las
+cuerdas. La release ya las tiene en el registro medio, pero las reduce a cero
+en la última octava para evitar una oscilación que molestaba. Se conserva esa
+reducción y se añade un residuo nominal de **0,02 cents**, con la misma
+variación fija por nota/parcial y los controles Unison y de laboratorio de
+detune. Es un candidato conservador para escuchar, no una tolerancia de
+afinación medida en un piano real ni una mejora audible ya confirmada.
+
+El residuo entra progresivamente con `top_octave`, desde la zona de G6 hacia
+C7. No agrega cuerdas, parciales, estados ni operaciones por muestra: sólo
+ajusta las frecuencias al crear la nota. El registro medio sigue usando las
+frecuencias de la release. Las pruebas leen las rotaciones de los osciladores:
+la separación entre extremos del fundamental es 0,0498 / 0,0205 / 0,0232 /
+0,0342 Hz en C7/E7/G7/C8. Con Unison en cero, la separación vuelve a cero.
+
+La Campanella completa B conserva exactamente los eventos, preset, duración
+y ganancia de exportación de A. Tarda **26,12 s**, dura **280,159 s** y alcanza
+un pico de **0,92524**. Salida:
+`C:/SHARED/Piano-Campanella-unisonos-2026-10-14/escucha/Campanella-B-unisonos-agudos.wav`.
+Los WAV `Notas-A-release.wav` y `Notas-B-unisonos-agudos.wav` de esa misma
+carpeta permiten escuchar notas aisladas en orden MIDI
+60/84/90/91/96/100/103/108, velocidad 96, tres segundos por nota y 250 ms de
+silencio entre ellas. Los primeros tres casos coinciden bit a bit; los demás
+cambian. En las ventanas medidas de 50 ms a 2 s, el mayor cambio absoluto de
+nivel de estas notas es **0,117 dB**. Esto no demuestra una mejora de timbre.
+
+Una comparación alternada de tres ejecuciones por versión, con un guion
+nativo de 14 s, da medianas de **0,6956 s** para A y **0,7021 s** para B
+(+0,93%). Los rangos se solapan; no se aprecia un costo relevante en esta
+prueba. Incluye escritura del audio crudo y no mide plazos de audio WASM.
+
+Pasan ocho comprobaciones: separación real y control a cero, dos huellas de
+audio, ausencia de apagadores agudos, dos controles de medio pedal,
+repetición sobre la misma cuerda y desfase del unísono. La huella del guion
+grave/medio permanece `e74df30116b39a5a`. La del guion con pedales, que incluye
+notas agudas, cambia intencionalmente a `9b9bd2cbb32452f0`; poner sólo el nuevo
+residuo a cero en una fuente temporal restaura exactamente ambas huellas de
+la release, incluida `8d20f899b0509bd0` con pedales.
+
+- [Audios, comparación por nota, tiempos y procedencia](top-unison-comparison.json).
+- [Ocho comprobaciones del candidato](top-unison-tests.json).
+- [Control de reversión a las huellas publicadas](top-unison-zero-control.json).
+- `tools/compare-concert-grand-top-unison.py`: comparación reproducible.
+
+El candidato queda en la rama de trabajo. No se publicó ni se instaló un
+paquete; la selección por escucha sigue pendiente.

@@ -3,6 +3,8 @@
 //! Temporal accuracy must be checked independently; closed energy is not proof.
 #[path = "concert-grand-collocation.rs"]
 mod collocation;
+#[path = "concert-grand-phase-profile.rs"]
+mod profile;
 #[allow(dead_code)]
 #[path = "concert-grand-native-strings.rs"]
 mod native;
@@ -101,6 +103,7 @@ struct Stats {
     residual: f64,
 }
 struct Trajectory {
+    profile: profile::Profile,
     collocation: Option<collocation::Collocation>,
     wires: Vec<Wire>,
     plans: Vec<PhaseQuadratic>,
@@ -196,6 +199,7 @@ impl Trajectory {
             }
         }
         Self {
+            profile: profile::Profile::default(),
             collocation: use_collocation.then(|| collocation::Collocation::new(&omega2, h, order)),
             wires,
             plans,
@@ -488,6 +492,7 @@ impl Trajectory {
         Err("midpoint iteration did not converge")
     }
     fn step_collocation(&mut self) -> Result<Stats, &'static str> {
+        let clock = profile::start();
         let target = self.energy();
         let target_wires = wire_energies(&mut self.wires, &self.omega2, &self.q, &self.v, None);
         for j in 0..self.q.len() {
@@ -505,6 +510,7 @@ impl Trajectory {
             self.direction_q[j] = self.free_q[j] + self.gradient[j] / self.omega2[j];
             self.direction_v[j] = self.free_v[j];
         }
+        self.profile.record(profile::Stage::StepSetup, clock);
         let (iterations, residual) = self.collocation.as_mut().unwrap().solve(
             &mut self.wires,
             &self.omega2,
@@ -513,7 +519,9 @@ impl Trajectory {
             &mut self.delta_q,
             &mut self.delta_v,
             self.limit,
+            &mut self.profile,
         )?;
+        let clock = profile::start();
         for j in 0..self.q.len() {
             self.raw_q[j] = self.free_q[j] + self.delta_q[j];
             self.raw_v[j] = self.free_v[j] + self.delta_v[j];
@@ -525,6 +533,8 @@ impl Trajectory {
             &self.raw_v,
             None,
         );
+        self.profile.record(profile::Stage::RawEnergy, clock);
+        let clock = profile::start();
         let lambda = if !self.constrained {
             self.end_q.copy_from_slice(&self.raw_q);
             self.end_v.copy_from_slice(&self.raw_v);
@@ -537,8 +547,11 @@ impl Trajectory {
         } else {
             self.project(target, 0.)?.0.abs()
         };
+        self.profile.record(profile::Stage::Projection, clock);
+        let clock = profile::start();
         self.q.copy_from_slice(&self.end_q);
         self.v.copy_from_slice(&self.end_v);
+        self.profile.record(profile::Stage::Publish, clock);
         Ok(Stats {
             iterations,
             lambda,
@@ -824,8 +837,10 @@ fn main() {
                 raw_max = raw_max.max(stats.raw_work_relative);
                 residual_max = residual_max.max(stats.residual);
                 completed += frames;
+                let clock = profile::start();
                 work_max =
                     work_max.max((model.energy() - initial).abs() / initial.abs().max(1e-30));
+                model.profile.record(profile::Stage::Ledger, clock);
                 if bench && completed % buffer_microframes == 0 {
                     times.push(last.elapsed().as_secs_f64() * 1000.);
                     last = Instant::now();
@@ -854,5 +869,5 @@ fn main() {
     let failure_json = failure
         .map(|s| format!("{:?}", s))
         .unwrap_or_else(|| "null".to_string());
-    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"initial_wire_energy_j\":{:?},\"final_wire_energy_j\":{:?},\"per_wire_energy_constraint\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false,\"temporal_collocation\":{},\"buffer_microframes\":{}}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,initial_wires,final_wires,model.per_wire_constraint,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0),model.collocation.is_some(),buffer_microframes);
+    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"initial_wire_energy_j\":{:?},\"final_wire_energy_j\":{:?},\"per_wire_energy_constraint\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false,\"temporal_collocation\":{},\"buffer_microframes\":{},\"profile\":{}}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,initial_wires,final_wires,model.per_wire_constraint,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0),model.collocation.is_some(),buffer_microframes,model.profile.json(elapsed));
 }

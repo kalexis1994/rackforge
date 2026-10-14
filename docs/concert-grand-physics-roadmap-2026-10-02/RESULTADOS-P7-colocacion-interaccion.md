@@ -454,3 +454,45 @@ CPU continúa rechazado frente a **0,125 ms** por buffer. Sigue medir el
 costo separado de fuerzas, contracción temporal y raíces energéticas antes
 de otra modificación del núcleo FFT; también sigue pendiente extender la
 duración y añadir contacto/cuerpo/presión/pedales/polifonía.
+
+## Perfil separado de colocación — 2026-10-14
+
+El [productor de perfil](../../tools/measure-concert-grand-collocation-profile.py)
+compila dos ejecutables de las mismas fuentes. `--cfg concert_phase_profile`
+activa diez relojes de diagnóstico; el ejecutable normal los elimina al
+compilar. No hay relojes adicionales ni buffers de perfil en el procesamiento
+normal. El perfil usa 160 bytes de contadores y acumula intervalos disjuntos;
+su serialización y asignaciones ocurren después del contador de procesamiento.
+
+La [medición autenticada](medidas-P7-cuerdas-nativas-2026-10-14/collocation-profile.json)
+reutiliza entradas y controles de fb4c030b, sin reintegrar maestros. Los seis
+ensayos de 6 ms —normal/perfil a tres relojes— reproducen exactamente q/v,
+ledger, lambda, residual, iteraciones y energías individuales congelados.
+Los benchmarks usan 64 buffers de 0,125 ms, 8 ms físicos por ejecución.
+
+| Sección / porcentaje del tiempo instrumentado | 512 kHz / 8 | 256 kHz / 16 | 128 kHz / 24 |
+|---|---:|---:|---:|
+| Fuerzas no lineales nodales | 52,44 % | 52,43 % | 48,14 % |
+| Contracción temporal | 15,96 % | 28,68 % | 38,55 % |
+| Residual | 6,65 % | 6,64 % | 6,07 % |
+| Energías iniciales, transporte y dirección de corrección | 9,45 % | 4,22 % | 2,19 % |
+| Proyección energética | 8,36 % | 3,80 % | 1,97 % |
+
+Los porcentajes restantes incluyen inicialización nodal, extremo, energía
+sin corregir, publicación, monitor energético y tiempo sin atribuir. La
+contracción gana peso con el orden temporal; conviene medir una disposición
+de pesos por pequeños bloques de modos antes de otra modificación de FFT.
+La energía incluye comprobaciones de diagnóstico que permanecen contadas.
+
+A 512 kHz/8, las medias normal/perfil son **35,450/35,640 ms**, frente a
+**35,384 ms** del congelado. Repeticiones: **36,132/35,858 ms**, frente a
+**36,715 ms**. No se interpreta esta variación como aceleración ni como una
+estimación precisa de la sobrecarga de relojes. Los cuatro replays largos
+normal/perfil y sus controles congelados son exactamente iguales y no
+asignan memoria durante el procesamiento. Los tiempos instrumentados sirven
+para distribuir el costo; el presupuesto se decide con el ejecutable normal.
+
+Pasan **26 pruebas actuales** de fases/trayectoria; la nueva comprueba
+transparencia del perfil, llamadas por etapa, suma de intervalos y cero
+asignaciones. Suite acumulada 52. El alcance de fidelidad continúa en 6 ms,
+con CPU rechazado frente a 0,125 ms y sin integración de contacto/cuerpo.

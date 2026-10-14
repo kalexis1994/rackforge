@@ -200,6 +200,31 @@ class PhaseTrajectoryTests(unittest.TestCase):
         final=self.audit.wire_energies(f,native['q'],native['v'])
         self.assertLess(max(abs(final-initial)/np.maximum(initial,1e-30)),1e-9)
 
+    def test_diagnostic_profile_preserves_state_and_counts_without_allocations(self):
+        exe=self.folder/'profile.exe';root=Path(__file__).resolve().parents[2]
+        subprocess.run(['rustc','--edition=2021','-O','--cfg','concert_phase_library',
+            '--cfg','concert_phase_profile',str(root/'tools/concert-grand-phase-trajectory.rs'),'-o',str(exe)],check=True)
+        f=fixture(transverse=4,rate=128000,seed=83,duration=.000125);f['launch_speeds'][:]=0.
+        plain=self.run_native(f,'verify',1,8,'--collocation')
+        path=self.folder/'profile-input.bin';write_fixture(path,f)
+        data=json.loads(subprocess.check_output([str(exe),str(path),'verify','1','8','--collocation'],text=True))
+        self.assertIsNone(plain['profile'])
+        for key in ['q','v','work_relative_max','numerical_lambda_abs_max',
+                    'maximum_iterations','midpoint_residual_relative_max','known_prepared_bytes']:
+            self.assertEqual(data[key],plain[key],key)
+        self.assertEqual(data['allocations'],0)
+        profile=data['profile'];sections={s['name']:s for s in profile['sections']}
+        steps=data['completed_microframes'];self.assertEqual(steps,16)
+        for name in ['step_energy_and_linear_setup','node_setup','endpoint','raw_state_and_energy',
+                     'energy_projection','publish','ledger_monitor']:
+            self.assertEqual(sections[name]['calls'],steps,name)
+        self.assertGreaterEqual(sections['nonlinear_forces']['calls'],steps)
+        self.assertEqual(sections['node_contraction']['calls'],sections['nonlinear_forces']['calls'])
+        self.assertEqual(sections['residual']['calls'],sections['nonlinear_forces']['calls'])
+        self.assertTrue(all(s['milliseconds']>=0 for s in profile['sections']))
+        self.assertGreaterEqual(profile['unattributed_ms'],0.)
+        self.assertAlmostEqual(sum(s['milliseconds'] for s in profile['sections']),profile['measured_ms'],places=6)
+
     def test_collocation_benchmark_uses_requested_physical_duration(self):
         f=self.coast(4,.000125)
         verify=self.run_native(f,'verify',1,8,'--collocation')

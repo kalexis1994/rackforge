@@ -1,6 +1,7 @@
 //! Experimental collocation in the exact linear interaction frame.
 //! The full nonlinear gradient is evaluated at every temporal node.
 use super::native::Wire;
+use super::profile::{self, Profile, Stage};
 
 fn legendre(x: f64, order: usize) -> Vec<f64> {
     let mut p = vec![1.; order + 2];
@@ -140,9 +141,11 @@ impl Collocation {
         dq: &mut [f64],
         dv: &mut [f64],
         limit: usize,
+        profile: &mut Profile,
     ) -> Result<(usize, f64), &'static str> {
         assert!(q.len() == self.size && v.len() == self.size && omega2.len() == self.size);
         assert!(dq.len() == self.size && dv.len() == self.size);
+        let clock = profile::start();
         let scale = q
             .iter()
             .zip(v)
@@ -159,8 +162,12 @@ impl Collocation {
             }
         }
         self.q.copy_from_slice(&self.free);
+        profile.record(Stage::NodeSetup, clock);
         for iteration in 1..=limit {
+            let clock = profile::start();
             self.forces(wires);
+            profile.record(Stage::Forces, clock);
+            let clock = profile::start();
             self.next.copy_from_slice(&self.free);
             for i in 0..self.order {
                 let out = &mut self.next[i * self.size..(i + 1) * self.size];
@@ -173,6 +180,8 @@ impl Collocation {
                     }
                 }
             }
+            profile.record(Stage::NodeUpdate, clock);
+            let clock = profile::start();
             let residual2 = if self.legacy_node_updates {
                 self.next
                     .iter()
@@ -197,6 +206,7 @@ impl Collocation {
                 sum
             };
             let residual = residual2.sqrt() / scale;
+            profile.record(Stage::Residual, clock);
             if !residual.is_finite() {
                 return Err("nonfinite collocation residual");
             }
@@ -206,8 +216,11 @@ impl Collocation {
                 // The control performs one extra update and force evaluation.
                 if self.refresh_converged_forces {
                     self.q.copy_from_slice(&self.next);
+                    let clock = profile::start();
                     self.forces(wires);
+                    profile.record(Stage::Forces, clock);
                 }
+                let clock = profile::start();
                 dq.fill(0.);
                 dv.fill(0.);
                 for node in 0..self.order {
@@ -217,6 +230,7 @@ impl Collocation {
                         dv[j] += self.end_weights[k][1] * self.gradient[k];
                     }
                 }
+                profile.record(Stage::Endpoint, clock);
                 return Ok((iteration, residual));
             }
             if self.legacy_node_updates {

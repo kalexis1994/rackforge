@@ -272,6 +272,14 @@ Mediciones, parches reproducibles y decisión quedan en los
 Los 8 ms del benchmark largo no amplían la validación de fidelidad de 6 ms.
 Sigue medir el costo separado de fuerzas, contracción temporal y raíces.
 
+Ese [perfil separado](medidas-P7-cuerdas-nativas-2026-10-14/collocation-profile.json)
+ya conserva exactamente los controles normal/instrumentado de 6 ms.
+Las fuerzas consumen **48–52 %**; la contracción temporal crece de
+**15,96 %** a 512 kHz/8 hasta **38,55 %** a 128 kHz/24, y el residual ronda
+6–7 %. Los relojes se eliminan del procesamiento normal al compilar.
+Pasan 26 pruebas actuales; suite acumulada 52. El benchmark de 8 ms no
+amplía la validación de fidelidad; CPU sigue rechazado.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

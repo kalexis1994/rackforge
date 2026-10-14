@@ -16,6 +16,7 @@ def main():
     parser.add_argument('--reference-ref', required=True)
     parser.add_argument('--local', type=Path, required=True)
     parser.add_argument('--report', type=Path, required=True)
+    parser.add_argument('--blocked-contraction', action='store_true')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     if args.local.exists() or args.report.exists():
@@ -27,14 +28,15 @@ def main():
     for name, sha in old['source_sha256'].items():
         if hashlib.sha256(subprocess.check_output(['git','show',args.reference_ref+':tools/'+name],cwd=root)).hexdigest()!=sha:
             raise ValueError('frozen source mismatch: '+name)
-    controls = [next(c for c in old['cases'] if c['label']==f'prepared-{rate}-O{order}')
+    controls = [next(c for c in old['cases'] if c['label']==(f'plain-{rate}' if args.blocked_contraction else f'prepared-{rate}-O{order}'))
                 for rate,order in [(128000,24),(256000,16),(512000,8)]]
     for c in controls:
         for prefix in ['result','coefficient']:
             if digest(c[prefix+'_path'])!=c[prefix+'_sha256']:
                 raise ValueError('reference data changed')
-    frozen = old['executable_path']
-    if digest(frozen)!=old['executable_sha256']:
+    frozen = old['plain_executable_path'] if args.blocked_contraction else old['executable_path']
+    frozen_sha = old['plain_executable_sha256'] if args.blocked_contraction else old['executable_sha256']
+    if digest(frozen)!=frozen_sha:
         raise ValueError('frozen executable changed')
     names = set(old['source_sha256'])|{'concert-grand-phase-profile.rs',Path(__file__).name}
     sources = {name:digest(root/'tools'/name) for name in sorted(names)}
@@ -43,7 +45,8 @@ def main():
     for exe, flags in [(plain,[]),(profiled,['--cfg','concert_phase_profile'])]:
         subprocess.run(['rustc','--edition=2021','-O','-C','target-cpu=native','--cfg','concert_phase_library',
                         *flags,str(root/'tools/concert-grand-phase-trajectory.rs'),'-o',str(exe)],check=True)
-    record = dict(source_sha256=sources,reference_ref=args.reference_ref,
+    record = dict(stage='blocked temporal contraction' if args.blocked_contraction else 'stage profiling',
+                  source_sha256=sources,reference_ref=args.reference_ref,
                   reference_report_path=str(args.reference_report.resolve()),reference_report_sha256=digest(args.reference_report),
                   reference_sources_authenticated_from_git=True,reference_reintegrated=False,
                   plain_executable_path=str(plain.resolve()),plain_executable_sha256=digest(plain),
@@ -53,20 +56,19 @@ def main():
                   longer_duration_fidelity_approved=False,full_piano_realtime=False,cases=[],benchmarks=[])
     keys = ['q','v','work_relative_max','numerical_lambda_abs_max','maximum_iterations',
             'midpoint_residual_relative_max','initial_wire_energy_j','final_wire_energy_j']
-    bench_control = None
+    bench_controls = {}
 
-    def run(label, exe, control, buffers=0):
-        nonlocal bench_control
+    def run(label, exe, control, buffers=0, flags=()):
         rate=control['rate_hz']; order=control['order']; microframes=rate//8000
         mode = ['bench','1',str(order),str(buffers),f'--buffer-microframes={microframes}'] if buffers else ['verify','1',str(order)]
-        command=[str(exe),control['coefficient_path'],*mode,'--collocation']
+        command=[str(exe),control['coefficient_path'],*mode,'--collocation',*flags]
         process=subprocess.run(command,capture_output=True,text=True,check=True)
         data=json.loads(process.stdout); output=args.local/(label+'.json')
         output.write_text(process.stdout,encoding='utf-8')
         if buffers:
-            if bench_control is None:
-                bench_control={k:data[k] for k in keys}
-            same = all(data[k]==bench_control[k] for k in keys) if rate==512000 else None
+            if rate not in bench_controls:
+                bench_controls[rate]={k:data[k] for k in keys}
+            same = all(data[k]==bench_controls[rate][k] for k in keys)
         else:
             frozen_data=json.loads(Path(control['result_path']).read_text())
             same=all(data[k]==frozen_data[k] for k in keys)
@@ -84,6 +86,19 @@ def main():
     for c in controls:
         run(f'plain-{c["rate_hz"]}',plain,c)
         run(f'profile-{c["rate_hz"]}',profiled,c)
+        if args.blocked_contraction:
+            run(f'streamed-{c["rate_hz"]}',plain,c,flags=['--streamed-node-contraction'])
+    if args.blocked_contraction:
+        for c in reversed(controls):
+            rate=c['rate_hz']
+            run(f'frozen-{rate}',frozen,c,64)
+            run(f'streamed-benchmark-{rate}',plain,c,64,['--streamed-node-contraction'])
+            run(f'blocked-{rate}',plain,c,64)
+            run(f'blocked-repeat-{rate}',plain,c,64)
+            run(f'frozen-repeat-{rate}',frozen,c,64)
+            run(f'profile-streamed-{rate}',profiled,c,64,['--streamed-node-contraction'])
+            run(f'profile-blocked-{rate}',profiled,c,64)
+        return
     c=controls[-1]
     for label,exe in [('frozen-benchmark',frozen),('plain-benchmark',plain),('profile-benchmark',profiled)]:
         run(label,exe,c,64)

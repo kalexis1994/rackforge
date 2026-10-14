@@ -496,3 +496,77 @@ Pasan **26 pruebas actuales** de fases/trayectoria; la nueva comprueba
 transparencia del perfil, llamadas por etapa, suma de intervalos y cero
 asignaciones. Suite acumulada 52. El alcance de fidelidad continúa en 6 ms,
 con CPU rechazado frente a 0,125 ms y sin integración de contacto/cuerpo.
+
+## Contracción temporal por bloques de 32 modos — 2026-10-14
+
+Se cambia la disposición de los pesos temporales, conservando sus valores.
+En preparación se agrupan como `[nodo destino][bloque modal][nodo fuente][modo]`.
+Cada bloque carga 32 posiciones libres, acumula los nodos fuente en su
+**orden anterior** y guarda el resultado una sola vez. La cola admite
+cualquier número de modos. Se mantienen todas las sumas/productos f64 de
+cada coordenada, el residual 1e−11, los modos físicos y las fuerzas completas.
+La FFT queda igual. `--streamed-node-contraction` recupera la tabla y el
+recorrido anteriores durante la preparación.
+
+La [medición completa](medidas-P7-cuerdas-nativas-2026-10-14/collocation-blocked-contraction.json)
+autentica el control **6056fae0**. Los **nueve ensayos de 6 ms** —normal,
+instrumentado y control dentro del nuevo ejecutable a tres relojes— conservan
+exactamente q/v, ledger, lambda, residual, iteraciones y energías individuales
+del control. Se hereda así su contraste previo con los maestros y la auditoría
+espacial independiente; no se reintegran referencias ni se amplía el alcance
+de fidelidad temporal. Los **21 benchmarks** de 64 buffers/8 ms también
+conservan exactamente esos resultados entre rutas del mismo reloj, pasan el
+ledger total y el cierre energético nativo por cuerda, y no asignan memoria.
+
+| Reloj / orden | Congelado, media inicial/repetida | Bloques, media inicial/repetida |
+|---|---:|---:|
+| 512 kHz / 8 | 40,519 / 40,117 ms | 38,552 / 38,813 ms |
+| 256 kHz / 16 | 45,875 / 45,330 ms | 43,893 / 43,967 ms |
+| 128 kHz / 24 | 44,089 / 35,630 ms | 35,181 / 35,800 ms |
+
+La variación de carga de la máquina es grande, especialmente en el último
+reloj. No se atribuye toda la diferencia de tiempos al cambio de kernel.
+En el mismo ejecutable instrumentado, el tiempo de **contracción** por buffer
+cambia **5,590 → 4,058 ms** a 512 kHz/8, **11,474 → 10,620 ms** a
+256 kHz/16 y **12,936 → 12,742 ms** a 128 kHz/24. Es una reducción local
+aproximada de **27,4 / 7,4 / 1,5 %** en esas ejecuciones; la fracción de
+fuerzas y las interrupciones del sistema varían entre ensayos.
+
+Se añade una [comparación alternada](medidas-P7-cuerdas-nativas-2026-10-14/collocation-paired-contraction.json)
+a 512 kHz/8: tres ciclos `congelado → control interno → bloques → bloques →
+control interno → congelado`. Cada ejecución usa 16 buffers de 0,125 ms,
+**2 ms físicos**, siempre desde el mismo estado inicial. El
+[productor](../../tools/measure-concert-grand-paired-contraction.py) autentica
+los ejecutables, las fuentes y la entrada del ensayo completo.
+
+| Ruta, seis ejecuciones por ruta | Media de medias | Mediana de medias | Máximo observado |
+|---|---:|---:|---:|
+| Congelado 6056fae0 | 36,175 ms | 36,199 ms | 44,485 ms |
+| Recorrido anterior, nuevo ejecutable | 35,338 ms | 35,095 ms | 43,739 ms |
+| Bloques de 32 modos | **34,614 ms** | **34,176 ms** | **41,749 ms** |
+
+El ahorro medio es **4,31 %** frente al congelado y **2,05 %** frente al
+control interno; la mediana mejora **5,59 %** frente al congelado. Se conserva
+la diferencia entre ambos controles para no atribuir al kernel todo el
+cambio entre ejecutables. Las 18 ejecuciones alternadas conservan exactamente
+estado y métricas energéticas, con cero asignaciones.
+
+Las tablas/buffers permanentes contabilizados permanecen en **1.479.168 bytes**
+a 512 kHz/8. La preparación usa temporalmente otra tabla de pesos antes de
+liberar la anterior: **589.824 bytes** extra en ese caso y **5.308.416 bytes**
+a 128 kHz/24. El acumulador local usa 32 f64, **256 bytes de pila**. No es una
+medición de memoria total del proceso.
+
+Pasan **27 pruebas actuales** de fases/trayectoria; suite acumulada 53.
+La regresión nueva cubre bloques completos, sólo cola y bloques con cola,
+tres relojes, un orden 10 con cola de fuerzas escalar y fallo tras dos
+iteraciones sin publicar estado parcial. Los algoritmos normales de cuerdas
+y presión no cambian.
+
+**CPU sigue rechazado** frente a 0,125 ms. El máximo alternado nuevo equivale
+a unas **334 veces** el plazo; en el ensayo largo aparece un máximo de
+**105,224 ms** a 512 kHz/8. No se establece mejora de latencia máxima ni se
+declara tiempo real. El contraste de fidelidad sigue limitado a 6 ms sin
+contacto, cuerpo, presión, pedales ni polifonía. El perfil permite priorizar
+reducir evaluaciones de fuerzas, que continúan dominando, manteniendo el
+criterio de convergencia y el cierre energético por cuerda.

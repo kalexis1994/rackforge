@@ -3,6 +3,8 @@
 use super::native::Wire;
 use super::profile::{self, Profile, Stage};
 
+const CONTRACTION_TILE: usize = 32;
+
 fn legendre(x: f64, order: usize) -> Vec<f64> {
     let mut p = vec![1.; order + 2];
     p[1] = x;
@@ -34,6 +36,7 @@ pub(super) fn integration_matrix(rule: &[(f64, f64)], h: f64) -> Vec<f64> {
 }
 
 pub(super) struct Collocation {
+    blocked_contraction: bool,
     legacy_node_updates: bool,
     scalar_forces: bool,
     refresh_converged_forces: bool,
@@ -75,7 +78,8 @@ impl Collocation {
                 }
             }
         }
-        Self {
+        let mut result = Self {
+            blocked_contraction: true,
             legacy_node_updates: false,
             scalar_forces: false,
             refresh_converged_forces: false,
@@ -88,6 +92,76 @@ impl Collocation {
             q: vec![0.; order * size],
             next: vec![0.; order * size],
             gradient: vec![0.; order * size],
+        };
+        // Store each output tile's temporal weights contiguously. The old
+        // table is released during preparation, before processing is counted.
+        let mut packed = Vec::with_capacity(result.node_weights.len());
+        for row in result.node_weights.chunks_exact(order * size) {
+            for base in (0..size).step_by(CONTRACTION_TILE) {
+                let lanes = (size - base).min(CONTRACTION_TILE);
+                for j in 0..order {
+                    packed.extend_from_slice(&row[j * size + base..j * size + base + lanes]);
+                }
+            }
+        }
+        result.node_weights = packed;
+        result
+    }
+    pub(super) fn streamed_node_contraction(&mut self) {
+        if !self.blocked_contraction {
+            return;
+        }
+        let mut unpacked = vec![0.; self.node_weights.len()];
+        for i in 0..self.order {
+            for base in (0..self.size).step_by(CONTRACTION_TILE) {
+                let lanes = (self.size - base).min(CONTRACTION_TILE);
+                for j in 0..self.order {
+                    let from = i * self.order * self.size + base * self.order + j * lanes;
+                    let to = (i * self.order + j) * self.size + base;
+                    unpacked[to..to + lanes]
+                        .copy_from_slice(&self.node_weights[from..from + lanes]);
+                }
+            }
+        }
+        self.node_weights = unpacked;
+        self.blocked_contraction = false;
+    }
+    fn contract_blocked(&mut self) {
+        for i in 0..self.order {
+            let free = &self.free[i * self.size..(i + 1) * self.size];
+            let out = &mut self.next[i * self.size..(i + 1) * self.size];
+            let row =
+                &self.node_weights[i * self.order * self.size..(i + 1) * self.order * self.size];
+            let full = self.size / CONTRACTION_TILE * CONTRACTION_TILE;
+            for base in (0..full).step_by(CONTRACTION_TILE) {
+                let mut values = [0.; CONTRACTION_TILE];
+                values.copy_from_slice(&free[base..base + CONTRACTION_TILE]);
+                let tile = &row[base * self.order..(base + CONTRACTION_TILE) * self.order];
+                for (weights, force) in tile
+                    .chunks_exact(CONTRACTION_TILE)
+                    .zip(self.gradient.chunks_exact(self.size))
+                {
+                    let force = &force[base..base + CONTRACTION_TILE];
+                    for k in 0..CONTRACTION_TILE {
+                        // Temporal nodes retain their original summation order.
+                        values[k] += weights[k] * force[k];
+                    }
+                }
+                out[base..base + CONTRACTION_TILE].copy_from_slice(&values);
+            }
+            // Arbitrary modal counts use the same packed layout in the tail.
+            if full < self.size {
+                let lanes = self.size - full;
+                out[full..].copy_from_slice(&free[full..]);
+                for (weights, force) in row[full * self.order..]
+                    .chunks_exact(lanes)
+                    .zip(self.gradient.chunks_exact(self.size))
+                {
+                    for k in 0..lanes {
+                        out[full + k] += weights[k] * force[full + k];
+                    }
+                }
+            }
         }
     }
     pub(super) fn prepared_bytes(&self) -> usize {
@@ -168,15 +242,19 @@ impl Collocation {
             self.forces(wires);
             profile.record(Stage::Forces, clock);
             let clock = profile::start();
-            self.next.copy_from_slice(&self.free);
-            for i in 0..self.order {
-                let out = &mut self.next[i * self.size..(i + 1) * self.size];
-                for j in 0..self.order {
-                    let force = &self.gradient[j * self.size..(j + 1) * self.size];
-                    let weights = &self.node_weights
-                        [(i * self.order + j) * self.size..(i * self.order + j + 1) * self.size];
-                    for k in 0..self.size {
-                        out[k] += weights[k] * force[k];
+            if self.blocked_contraction {
+                self.contract_blocked();
+            } else {
+                self.next.copy_from_slice(&self.free);
+                for i in 0..self.order {
+                    let out = &mut self.next[i * self.size..(i + 1) * self.size];
+                    for j in 0..self.order {
+                        let force = &self.gradient[j * self.size..(j + 1) * self.size];
+                        let weights = &self.node_weights[(i * self.order + j) * self.size
+                            ..(i * self.order + j + 1) * self.size];
+                        for k in 0..self.size {
+                            out[k] += weights[k] * force[k];
+                        }
                     }
                 }
             }

@@ -745,6 +745,11 @@ fn main() {
         use_collocation,
     );
     model.constrained = !args.iter().any(|x| x == "--unconstrained");
+    if args.iter().any(|x| x == "--streamed-node-contraction") {
+        if let Some(collocation) = &mut model.collocation {
+            collocation.streamed_node_contraction();
+        }
+    }
     if args.iter().any(|x| x == "--legacy-batch-packing") {
         for wire in &mut model.wires {
             wire.legacy_batch_packing();

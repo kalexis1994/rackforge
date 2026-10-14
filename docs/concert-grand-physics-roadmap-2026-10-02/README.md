@@ -280,6 +280,19 @@ Las fuerzas consumen **48–52 %**; la contracción temporal crece de
 Pasan 26 pruebas actuales; suite acumulada 52. El benchmark de 8 ms no
 amplía la validación de fidelidad; CPU sigue rechazado.
 
+La contracción temporal agrupa ahora pesos y acumuladores en bloques de
+**32 modos**, manteniendo el orden de sumas por coordenada. Nueve ensayos
+de 6 ms conservan exactamente el control **6056fae0**; 21 benchmarks largos
+y 18 alternados también coinciden entre rutas. En la comparación alternada
+a 512 kHz/8, la media baja **36,175 → 34,614 ms**, ahorro **4,31 %** frente
+al congelado y **2,05 %** frente al control interno del nuevo ejecutable.
+La memoria permanente contabilizada no aumenta; la preparación requiere una
+tabla temporal y el acumulador usa 256 bytes de pila. Pasan 27 pruebas
+actuales; suite acumulada 53. Máximos muy variables, CPU todavía rechazado
+frente a 0,125 ms. Ver [medición](medidas-P7-cuerdas-nativas-2026-10-14/collocation-blocked-contraction.json),
+[comparación alternada](medidas-P7-cuerdas-nativas-2026-10-14/collocation-paired-contraction.json)
+y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

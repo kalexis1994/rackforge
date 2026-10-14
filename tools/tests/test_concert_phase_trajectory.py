@@ -299,6 +299,24 @@ class PhaseTrajectoryTests(unittest.TestCase):
             self.assertLess(max(abs(final-initial)/np.maximum(initial,1e-30)),1e-9)
             self.assertEqual(batch['allocations'],0)
 
+    def test_blocked_contraction_preserves_exact_state_work_and_failure(self):
+        for nt,rate,order in [(1,128000,8),(4,128000,10),(12,128000,8),
+                              (96,128000,24),(96,256000,16),(96,512000,8)]:
+            f=fixture(transverse=nt,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.
+            blocked=self.run_native(f,'verify',1,order,'--collocation')
+            streamed=self.run_native(f,'verify',1,order,'--collocation','--streamed-node-contraction')
+            self.assertTrue(blocked['completed'] and streamed['completed'])
+            for key in ['q','v','work_relative_max','numerical_lambda_abs_max',
+                        'maximum_iterations','midpoint_residual_relative_max','known_prepared_bytes']:
+                self.assertEqual(blocked[key],streamed[key],key)
+            self.assertEqual(blocked['allocations'],0)
+        f=self.coast(12,.000125)
+        for flags in [[],['--streamed-node-contraction']]:
+            data=self.run_native(f,'verify',1,8,'--collocation','--iteration-limit=2',*flags)
+            self.assertFalse(data['completed']);self.assertEqual(data['completed_microframes'],0)
+            np.testing.assert_array_equal(data['q'],f['q']);np.testing.assert_array_equal(data['v'],f['v'])
+            self.assertEqual(data['allocations'],0)
+
     def test_prepared_packing_preserves_legacy_trajectory_and_work(self):
         for rate,order in [(128000,24),(256000,16),(512000,8)]:
             f=fixture(transverse=96,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.

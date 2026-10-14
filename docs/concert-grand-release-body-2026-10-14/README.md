@@ -170,7 +170,7 @@ del MIDI original y redondea una sola vez a muestras de audio.
 Este WAV será la versión A para comparar futuros cambios locales de cuerpo
 y sostenido con el mismo MIDI, preset y nivel de exportación.
 
-## Candidato: separación mínima del unísono agudo
+## Separación mínima del unísono agudo: aceptada por escucha
 
 El usuario propone conservar pequeñas diferencias de afinación entre las
 cuerdas. La release ya las tiene en el registro medio, pero las reduce a cero
@@ -216,5 +216,10 @@ la release, incluida `8d20f899b0509bd0` con pedales.
 - [Control de reversión a las huellas publicadas](top-unison-zero-control.json).
 - `tools/compare-concert-grand-top-unison.py`: comparación reproducible.
 
-El candidato queda en la rama de trabajo. No se publicó ni se instaló un
-paquete; la selección por escucha sigue pendiente.
+El usuario escucha la Campanella B y confirma: «No se nota mucho, pero si no
+agrega carga dejemoslo porque es mas real. Yo lo escucho muy bien». Se acepta
+conservar el ajuste en la rama de trabajo, commit `d55f8f50`. La justificación
+de costo es que no agrega osciladores ni trabajo por muestra y los tiempos
+medidos se solapan; no se afirma un costo total exactamente nulo. La escucha
+no establece una mejora perceptual grande ni valida una tolerancia física
+real. No se publicó ni se instaló un paquete.

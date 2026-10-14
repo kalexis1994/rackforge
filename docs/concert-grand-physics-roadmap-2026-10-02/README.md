@@ -247,6 +247,19 @@ La variación de las mediciones permanece visible y el plazo de 0,125 ms
 sigue rechazado. Ver [medición](medidas-P7-cuerdas-nativas-2026-10-14/collocation-node-updates.json)
 y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
 
+El empaquetado real de la FFT agrupada prepara ahora sus mapas lineales de
+síntesis/análisis. Frente a e90ec2c5, el estado de los tres replays de 6 ms
+cambia como máximo **3,607e−14**, pasando precisión y energía por cuerda.
+La media a 512 kHz/8 baja **44,531 → 33,592 ms**; repetición **33,093 ms**
+frente al control **45,094 ms**, ahorro **24,56/26,61 %**. Máximos
+**33,985/33,717 ms**, cero asignaciones. Las tablas/buffers contabilizados
+crecen 127.488 bytes hasta **1.479.168 bytes**. Pasan 25 pruebas actuales;
+suite acumulada 51. La aritmética cambia su orden, con gradiente relativo
+<1e−13 frente al control en las pruebas; la ruta anterior sigue exacta por
+flag. CPU sigue rechazado frente a 0,125 ms. Ver
+[medición](medidas-P7-cuerdas-nativas-2026-10-14/collocation-prepared-packing.json)
+y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

@@ -39,13 +39,16 @@ struct ComplexQuad {
 }
 
 pub(super) struct BatchCosine {
+    packing: Option<PreparedPacking>,
     fft: Vec<ComplexQuad>,
     fields: Vec<Quad>,
     products: Vec<Quad>,
 }
 impl BatchCosine {
-    fn new(nodes: usize) -> Self {
+    fn new(plan: &CosinePlan, ku: &[f64], kv: &[f64], factor: f64) -> Self {
+        let nodes = plan.nodes;
         Self {
+            packing: Some(PreparedPacking::new(plan, ku, kv, factor)),
             fft: vec![ComplexQuad::default(); nodes / 2],
             fields: vec![Quad::default(); 3 * nodes],
             products: vec![Quad::default(); 3 * nodes],
@@ -126,17 +129,30 @@ impl BatchCosine {
             self.fields[slot * n..(slot + 1) * n].fill(Quad::default());
             return;
         }
-        for k in 0..m {
-            let x = Self::spectrum(plan, q, stride, scales, k);
-            let y = Self::spectrum(plan, q, stride, scales, k + m);
-            let wr = Quad::splat(plan.real_roots[k].r);
-            let wi = Quad::splat(plan.real_roots[k].i);
-            let dr = x.r - y.r;
-            let di = x.i - y.i;
-            self.fft[plan.reverse[k]] = ComplexQuad {
-                r: Quad::splat(0.5) * (x.r + y.r + wi * dr - wr * di),
-                i: Quad::splat(0.5) * (x.i + y.i + wr * dr + wi * di),
-            };
+        if let Some(packing) = &self.packing {
+            for cell in &packing.synthesis[usize::from(slot != 0)] {
+                let mut r = Quad::default();
+                let mut i = Quad::default();
+                for tap in 0..cell.count {
+                    let value = Quad::gather(q, stride, cell.source[tap]);
+                    r = r + value * Quad::splat(cell.weights[tap][0]);
+                    i = i + value * Quad::splat(cell.weights[tap][1]);
+                }
+                self.fft[cell.target] = ComplexQuad { r, i };
+            }
+        } else {
+            for k in 0..m {
+                let x = Self::spectrum(plan, q, stride, scales, k);
+                let y = Self::spectrum(plan, q, stride, scales, k + m);
+                let wr = Quad::splat(plan.real_roots[k].r);
+                let wi = Quad::splat(plan.real_roots[k].i);
+                let dr = x.r - y.r;
+                let di = x.i - y.i;
+                self.fft[plan.reverse[k]] = ComplexQuad {
+                    r: Quad::splat(0.5) * (x.r + y.r + wi * dr - wr * di),
+                    i: Quad::splat(0.5) * (x.i + y.i + wr * dr + wi * di),
+                };
+            }
         }
         self.transform(plan, true);
         for j in 0..m {
@@ -180,6 +196,20 @@ impl BatchCosine {
             };
         }
         self.transform(plan, false);
+        if let Some(packing) = &self.packing {
+            for (index, cell) in packing.analysis[usize::from(slot != 0)].iter().enumerate() {
+                let a = self.fft[cell.a];
+                let b = self.fft[cell.b];
+                let value = a.r * Quad::splat(cell.weights[0])
+                    + a.i * Quad::splat(cell.weights[1])
+                    + b.r * Quad::splat(cell.weights[2])
+                    + b.i * Quad::splat(cell.weights[3]);
+                for lane in 0..4 {
+                    out[lane * stride + index] = value.0[lane];
+                }
+            }
+            return;
+        }
         for (index, &scale) in scales.iter().enumerate() {
             let k = index + 1;
             let a = self.fft[k % m];
@@ -198,7 +228,17 @@ impl BatchCosine {
 }
 impl Wire {
     pub(crate) fn prepare_batch4(&mut self) {
-        self.batch4 = Some(BatchCosine::new(self.nodes));
+        self.batch4 = Some(BatchCosine::new(
+            &self.plan,
+            &self.ku,
+            &self.kv,
+            self.ea * self.length / (2 * self.nodes) as f64,
+        ));
+    }
+    pub(crate) fn legacy_batch_packing(&mut self) {
+        if let Some(batch) = &mut self.batch4 {
+            batch.packing = None;
+        }
     }
     pub(crate) fn disable_batch4(&mut self) {
         self.batch4 = None;
@@ -209,6 +249,7 @@ impl Wire {
             .map(|b| {
                 b.fft.capacity() * std::mem::size_of::<ComplexQuad>()
                     + (b.fields.capacity() + b.products.capacity()) * std::mem::size_of::<Quad>()
+                    + b.packing.as_ref().map(|p| p.prepared_bytes()).unwrap_or(0)
             })
             .unwrap_or(0)
     }
@@ -242,5 +283,121 @@ impl Wire {
             &mut out[self.nl + self.nt..],
             stride,
         );
+    }
+}
+
+struct SynthesisCell {
+    source: [usize; 4],
+    weights: [[f64; 2]; 4],
+    count: usize,
+    target: usize,
+}
+struct AnalysisCell {
+    a: usize,
+    b: usize,
+    weights: [f64; 4],
+}
+struct PreparedPacking {
+    synthesis: [Vec<SynthesisCell>; 2],
+    analysis: [Vec<AnalysisCell>; 2],
+}
+impl PreparedPacking {
+    fn new(plan: &CosinePlan, ku: &[f64], kv: &[f64], factor: f64) -> Self {
+        let synthesis = [Self::synthesis(plan, ku), Self::synthesis(plan, kv)];
+        let analysis = [
+            Self::analysis(plan, ku, factor),
+            Self::analysis(plan, kv, factor),
+        ];
+        Self {
+            synthesis,
+            analysis,
+        }
+    }
+    fn prepared_bytes(&self) -> usize {
+        self.synthesis
+            .iter()
+            .map(|v| v.capacity() * std::mem::size_of::<SynthesisCell>())
+            .sum::<usize>()
+            + self
+                .analysis
+                .iter()
+                .map(|v| v.capacity() * std::mem::size_of::<AnalysisCell>())
+                .sum::<usize>()
+    }
+    fn synthesis(plan: &CosinePlan, scales: &[f64]) -> Vec<SynthesisCell> {
+        let n = plan.nodes;
+        let m = n / 2;
+        let mut cells = Vec::with_capacity(m);
+        for k in 0..m {
+            // A real-FFT cell depends on at most four modal coordinates.
+            // Duplicate indices (notably k=0) represent one basis vector.
+            let mut source = [usize::MAX; 4];
+            let mut count = 0;
+            for mode in [k, n - k, k + m, m - k] {
+                if mode > 0 && mode <= scales.len() && !source[..count].contains(&(mode - 1)) {
+                    source[count] = mode - 1;
+                    count += 1;
+                }
+            }
+            let mut weights = [[0.; 2]; 4];
+            for tap in 0..count {
+                let spectrum = |index: usize| {
+                    let a = if index > 0 && index <= scales.len() && index - 1 == source[tap] {
+                        n as f64 * 0.5 * scales[index - 1]
+                    } else {
+                        0.
+                    };
+                    let mirror = n - index;
+                    let b = if index > 0 && mirror <= scales.len() && mirror - 1 == source[tap] {
+                        n as f64 * 0.5 * scales[mirror - 1]
+                    } else {
+                        0.
+                    };
+                    let p = plan.phase[index];
+                    (a * p.r + b * p.i, a * p.i - b * p.r)
+                };
+                let x = spectrum(k);
+                let y = spectrum(k + m);
+                let w = plan.real_roots[k];
+                let dr = x.0 - y.0;
+                let di = x.1 - y.1;
+                weights[tap] = [
+                    0.5 * (x.0 + y.0 + w.i * dr - w.r * di),
+                    0.5 * (x.1 + y.1 + w.r * dr + w.i * di),
+                ];
+            }
+            cells.push(SynthesisCell {
+                source,
+                weights,
+                count,
+                target: plan.reverse[k],
+            });
+        }
+        cells
+    }
+    fn analysis(plan: &CosinePlan, scales: &[f64], factor: f64) -> Vec<AnalysisCell> {
+        let m = plan.nodes / 2;
+        scales
+            .iter()
+            .enumerate()
+            .map(|(index, &scale)| {
+                let k = index + 1;
+                let w = plan.real_roots[k];
+                let p = plan.phase[k];
+                let weights = std::array::from_fn(|component| {
+                    let mut basis = [0.; 4];
+                    basis[component] = 1.;
+                    let [ar, ai, br, bi] = basis;
+                    let xr = 0.5 * (ar + br + w.r * (ai + bi) + w.i * (ar - br));
+                    let xi = 0.5 * (ai - bi + w.r * (br - ar) + w.i * (ai + bi));
+                    2. * factor * scale * (xr * p.r + xi * p.i)
+                });
+                AnalysisCell {
+                    a: k % m,
+                    b: (m - k % m) % m,
+                    weights,
+                }
+            })
+            .collect()
     }
 }

@@ -304,3 +304,76 @@ esos algoritmos no cambian aquí. La suite acumulada contiene **50 pruebas**.
 370/404 veces el plazo. El alcance de estado sigue limitado al sostenido
 mixto de 6 ms, sin contacto, cuerpo, presión, pedales o polifonía. Sigue
 reducir el costo de la colocación y extender la validación temporal.
+
+## Mapas preparados del empaquetado FFT — 2026-10-14
+
+La [medición del empaquetado](medidas-P7-cuerdas-nativas-2026-10-14/collocation-prepared-packing.json)
+autentica el control **e90ec2c5** y reutiliza sus tres ensayos de 6 ms y el
+par de referencias finas. Se mantiene el núcleo FFT, la cuadratura espacial,
+todos los modos y la propagación temporal anteriores.
+
+Cada celda compleja del FFT real empaquetado depende de hasta cuatro
+coordenadas modales. Sus índices, permutación y coeficientes se preparan
+una sola vez aplicando la fórmula de empaquetado a esas bases. Los índices
+duplicados en las celdas especiales se cuentan una sola vez. Cada salida
+del análisis se prepara como combinación de las cuatro componentes reales
+de dos celdas espectrales. Las tablas transversales se comparten entre los
+ejes vertical y horizontal de cada cuerda.
+
+En la evaluación se toman coordenadas vivas y se aplican esas combinaciones
+f64 a los cuatro nodos independientes. Desaparecen del callback las fórmulas
+de coeficientes del empaquetado y los índices espectrales del análisis. Las fuerzas
+siguen siendo no lineales y se recalculan en cada iteración: se prepara sólo
+la transformación lineal. No hay congelación de fuerzas, truncamiento modal,
+cambio de rigidez, mezcla de nodos ni corte de amplitud.
+
+La evaluación reordena sumas y productos de coma flotante. Las pruebas
+exigen error de gradiente **<1e−13 relativo** frente al cálculo anterior,
+además de la cuadratura Gauss espacial independiente con hasta 256/512 modos.
+Los canales cero permanecen cero; el canal de amplitud 1e−12 sigue activo.
+`--legacy-batch-packing` libera las tablas y recupera las fórmulas anteriores.
+Reproduce exactamente q/v, ledger, lambda, residual máximo e iteraciones
+de e90ec2c5 en los tres controles de 6 ms.
+
+| Reloj / orden | Cambio de estado frente al control | Error frente al maestro | Máximo energético por cuerda |
+|---|---:|---:|---:|
+| 128 kHz / 24 | 1,071e−14 | 0,053051 % | 1,808e−13 |
+| 256 kHz / 16 | 3,090e−14 | 0,040580 % | 5,344e−14 |
+| 512 kHz / 8 | 3,607e−14 | 0,044801 % | 9,541e−14 |
+
+Los tres candidatos pasan el gate adicional de comparación 1e−9 y mantienen
+los gates originales de estado/energía. Ledger total máximo:
+**1,082e−13 / 5,142e−14 / 5,718e−14**. Máximos de iteración siguen en 8/7/6;
+el residual continúa limitado por 1e−11.
+
+CPU se mide secuencialmente, sin pruebas simultáneas, en ocho buffers de
+**0,125 ms** y **1 ms físico total**, con comprobación energética por paso:
+
+| Ruta | Media por buffer | P99/máximo | Asignaciones |
+|---|---:|---:|---:|
+| Ejecutable congelado e90ec2c5, 512 kHz/8 | 44,531 ms | 44,967 ms | 0 |
+| Ejecutable actual, empaquetado anterior | 45,073 ms | 46,043 ms | 0 |
+| Mapas preparados, 512 kHz/8 | **33,592 ms** | **33,985 ms** | **0** |
+| Repetición preparada | **33,093 ms** | **33,717 ms** | **0** |
+| Repetición del control congelado | 45,094 ms | 46,192 ms | 0 |
+| Mapas preparados, 256 kHz/16 | 36,748 ms | 37,676 ms | 0 |
+
+La media mejora **1,326× / 24,56 %** en la primera comparación y
+**1,363× / 26,61 %** frente al control repetido. Todos los benchmarks pasan
+ledger y energía por cuerda. Las tablas/buffers contabilizados crecen
+**127.488 bytes** para el coro, hasta **1.479.168 bytes** a 512 kHz/8;
+no se mide aquí memoria total del proceso. La preparación y liberación de
+esas tablas ocurren antes del contador de asignaciones del procesamiento.
+
+Pasan **25 pruebas actuales** de fases/trayectoria. La regresión nueva compara
+la trayectoria preparada y la anterior a tres relojes; los controles de
+gradiente y de trayectoria con cola escalar ahora comprueban el pequeño
+cambio de redondeo mediante normas relativas, y conservan la auditoría
+energética independiente. Las 26 pruebas del núcleo normal/presión pasaron
+en 983f634a, sin cambios a esos algoritmos aquí. La suite acumulada contiene
+**51 pruebas**.
+
+**CPU sigue rechazado**: máximos 33,985/33,717 ms frente a 0,125 ms, unas
+272/270 veces el plazo. El alcance de precisión continúa en el sostenido
+mixto de 6 ms, sin contacto, cuerpo, presión, pedales o polifonía. Sigue
+reducir el costo y extender la validación antes de integrar el instrumento.

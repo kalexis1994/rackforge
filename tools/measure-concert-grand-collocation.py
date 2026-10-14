@@ -22,10 +22,11 @@ def main():
     parser.add_argument('--reuse-forces', action='store_true')
     parser.add_argument('--batch-forces', action='store_true')
     parser.add_argument('--node-updates', action='store_true')
+    parser.add_argument('--prepared-packing', action='store_true')
     args = parser.parse_args()
-    if sum([args.reuse_forces,args.batch_forces,args.node_updates])>1:
+    if sum([args.reuse_forces,args.batch_forces,args.node_updates,args.prepared_packing])>1:
         raise ValueError('choose a single comparison stage')
-    compare_collocation = args.reuse_forces or args.batch_forces or args.node_updates
+    compare_collocation = args.reuse_forces or args.batch_forces or args.node_updates or args.prepared_packing
     if args.local.exists() or args.report.exists():
         raise ValueError('fresh paths required')
     root = Path(__file__).resolve().parents[1]
@@ -36,7 +37,7 @@ def main():
     for name, sha in old['source_sha256'].items():
         if hashlib.sha256(subprocess.check_output(['git', 'show', args.reference_ref+':tools/'+name], cwd=root)).hexdigest() != sha:
             raise ValueError('frozen source mismatch: '+name)
-    prefix = 'batched' if args.node_updates else ('reused' if args.batch_forces else 'collocation')
+    prefix = 'blocked' if args.prepared_packing else ('batched' if args.node_updates else ('reused' if args.batch_forces else 'collocation'))
     baseline_label = f'{prefix}-512000-O8' if compare_collocation else 'optimized-trajectory'
     baseline = next(c for c in old['cases'] if c['label'] == baseline_label)
     labels = [f'{prefix}-{rate}-O{order}' for rate,order in [(128000,24),(256000,16),(512000,8)]]
@@ -57,7 +58,7 @@ def main():
     exe = args.local/'trajectory.exe'
     subprocess.run(['rustc', '--edition=2021', '-O', '-C', 'target-cpu=native', '--cfg', 'concert_phase_library',
                     str(root/'tools/concert-grand-phase-trajectory.rs'), '-o', str(exe)], check=True)
-    stage = 'block residual traversal and swapped nodal buffers' if args.node_updates else ('four-node batched cosine transforms' if args.batch_forces else ('reuse forces at converged collocation nodes' if args.reuse_forces else 'full nonlinear gradient at interaction collocation nodes'))
+    stage = 'prepared linear maps for batched real FFT packing' if args.prepared_packing else ('block residual traversal and swapped nodal buffers' if args.node_updates else ('four-node batched cosine transforms' if args.batch_forces else ('reuse forces at converged collocation nodes' if args.reuse_forces else 'full nonlinear gradient at interaction collocation nodes')))
     record = dict(stage=stage, source_sha256=sources,
                   reference_ref=args.reference_ref, reference_sources_authenticated_from_git=True,
                   reference_report_path=str(args.reference_report.resolve()), reference_report_sha256=digest(args.reference_report),
@@ -145,6 +146,20 @@ def main():
             save()
 
         save()
+        if args.prepared_packing:
+            for rate,order in [(128000,24),(256000,16),(512000,8)]:
+                run(f'prepared-{rate}-O{order}',rate,order,['--collocation'])
+                run(f'legacy-{rate}-O{order}',rate,order,['--collocation','--legacy-batch-packing'])
+            run('frozen-benchmark',512000,8,['--collocation'],True,old['executable_path'])
+            run('legacy-benchmark',512000,8,['--collocation','--legacy-batch-packing'],True)
+            run('prepared-benchmark',512000,8,['--collocation'],True)
+            run('prepared-repeat',512000,8,['--collocation'],True)
+            run('frozen-repeat',512000,8,['--collocation'],True,old['executable_path'])
+            run('prepared-256k-benchmark',256000,16,['--collocation'],True)
+            record['sources_unchanged'] = all(digest(root/'tools'/name)==sha for name,sha in sources.items())
+            record['reference_report_unchanged'] = digest(args.reference_report)==record['reference_report_sha256']
+            save()
+            return
         if args.node_updates:
             for rate,order in [(128000,24),(256000,16),(512000,8)]:
                 run(f'blocked-{rate}-O{order}',rate,order,['--collocation'])

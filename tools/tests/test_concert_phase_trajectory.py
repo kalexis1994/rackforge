@@ -233,9 +233,11 @@ class PhaseTrajectoryTests(unittest.TestCase):
                 f['q'][[2*nt-1,3*nt-1,width-1]]=[2e-10,1e-8,-1.2e-8]
             else:f=self.coast(nt)
             data=self.run_native(f,'batch-gradient');width=4*nt;nl=2*nt
-            np.testing.assert_array_equal(data['gradient'],data['single_gradient'])
+            legacy=self.run_native(f,'batch-gradient',1,8,'--legacy-batch-packing')
+            np.testing.assert_array_equal(legacy['gradient'],data['single_gradient'])
             q=np.asarray(data['q_nodes']).reshape(4,3,width)
             observed=np.asarray(data['gradient']).reshape(4,3,width)
+            single=np.asarray(data['single_gradient']).reshape(4,3,width)
             np.testing.assert_array_equal(observed[2],np.zeros((3,width)))
             self.assertGreater(np.linalg.norm(observed[3]),0.)
             length,mu,young,density=f['parameters'][:4];ea=young*mu/density;root=np.sqrt(mu*length/2)
@@ -246,6 +248,10 @@ class PhaseTrajectoryTests(unittest.TestCase):
             dt=np.cos(x[:,None]*np.pi*np.arange(1,nt+1)/length)*(np.pi*np.arange(1,nt+1)/length/root)
             for lane in [0,1,3]:
                 for wire in range(3):
+                    if np.linalg.norm(single[lane,wire])>0:
+                        self.assertLess(relative(observed[lane,wire],single[lane,wire]),1e-13)
+                    else:
+                        np.testing.assert_array_equal(observed[lane,wire],single[lane,wire])
                     u=du @ q[lane,wire,:nl];v=dt @ q[lane,wire,nl:nl+nt];w=dt @ q[lane,wire,nl+nt:]
                     eta=.5*(v*v+w*w)
                     expected=np.r_[ea*du.T @ (wt*eta),ea*dt.T @ (wt*(u+eta)*v),ea*dt.T @ (wt*(u+eta)*w)]
@@ -260,9 +266,26 @@ class PhaseTrajectoryTests(unittest.TestCase):
             batch=self.run_native(f,'verify',1,order,'--collocation')
             single=self.run_native(f,'verify',1,order,'--collocation','--scalar-collocation-forces')
             self.assertTrue(batch['completed'] and single['completed'])
-            for key in ['q','v','work_relative_max','numerical_lambda_abs_max','maximum_iterations']:
-                self.assertEqual(batch[key],single[key],key)
+            omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+            def metric(d):return np.r_[omega*np.asarray(d['q'])[:-1],d['v'][:-1]]
+            self.assertLess(relative(metric(batch),metric(single)),1e-9)
+            initial=self.audit.wire_energies(f,f['q'],f['v'])
+            final=self.audit.wire_energies(f,batch['q'],batch['v'])
+            self.assertLess(max(abs(final-initial)/np.maximum(initial,1e-30)),1e-9)
             self.assertEqual(batch['allocations'],0)
+
+    def test_prepared_packing_preserves_legacy_trajectory_and_work(self):
+        for rate,order in [(128000,24),(256000,16),(512000,8)]:
+            f=fixture(transverse=96,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.
+            prepared=self.run_native(f,'verify',1,order,'--collocation')
+            legacy=self.run_native(f,'verify',1,order,'--collocation','--legacy-batch-packing')
+            omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+            def metric(d):return np.r_[omega*np.asarray(d['q'])[:-1],d['v'][:-1]]
+            self.assertTrue(prepared['completed'] and legacy['completed'])
+            self.assertLess(relative(metric(prepared),metric(legacy)),1e-9)
+            self.assertLess(prepared['work_relative_max'],1e-9)
+            self.assertLess(prepared['midpoint_residual_relative_max'],1e-11)
+            self.assertEqual(prepared['allocations'],0)
 
     def test_block_residual_and_swapped_buffers_preserve_nodes_and_failures(self):
         for nt,rate,order in [(4,128000,10),(96,128000,24),(96,256000,16),(96,512000,8)]:

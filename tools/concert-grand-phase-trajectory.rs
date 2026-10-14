@@ -592,6 +592,9 @@ fn main() {
         }
         for (i, wire) in wires.iter_mut().enumerate() {
             wire.prepare_batch4();
+            if args.iter().any(|x| x == "--legacy-batch-packing") {
+                wire.legacy_batch_packing();
+            }
             wire.point_nonlinearity_batch4(&inputs[i * width..], stride, &mut batch[i * width..]);
             for lane in 0..4 {
                 let range = lane * stride + i * width..lane * stride + (i + 1) * width;
@@ -729,6 +732,11 @@ fn main() {
         use_collocation,
     );
     model.constrained = !args.iter().any(|x| x == "--unconstrained");
+    if args.iter().any(|x| x == "--legacy-batch-packing") {
+        for wire in &mut model.wires {
+            wire.legacy_batch_packing();
+        }
+    }
     if args.iter().any(|x| x == "--legacy-node-updates") {
         if let Some(collocation) = &mut model.collocation {
             collocation.legacy_node_updates();

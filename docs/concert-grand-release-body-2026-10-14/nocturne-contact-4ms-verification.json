@@ -1,0 +1,12 @@
+{
+  "render_report_sha256": "3769a36baa3a50155ebe883d57e7d428874643960a901d1316501bea34a57b49",
+  "prior_comparison_report_sha256": "f5a2872e214da4f9c81913e3a95107ecb14e4d6d8fa866decb9c78753d055498",
+  "prior_prefix_raw_sha256": "b4999fd3de8cc83a58a873f62411bdcb69efd6490756db8ab886fd86826f1aaa",
+  "first_53_seconds_identical_to_contact_4ms_comparison": true,
+  "output": "C:\\SHARED\\Piano-Nocturno-contacto-4ms-2026-10-14\\Nocturno-contacto-4ms.wav",
+  "output_sha256": "b3b70abff05b078a7df9f3b00fa3395e780c4ba49dc337b5bb398e9c65d00c2c",
+  "duration_seconds": 232.5638095238095,
+  "render_seconds": 25.999776700002258,
+  "peak": 0.33643636107444763,
+  "production_source_changed": false
+}

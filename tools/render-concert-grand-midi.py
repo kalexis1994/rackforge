@@ -23,6 +23,7 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--report', type=Path, required=True)
     p.add_argument('--tail-seconds', type=int, default=8)
+    p.add_argument('--tuning', type=Path, help='Explicit native probe tuning applied after loading Concert')
     a = p.parse_args()
     root = Path(__file__).resolve().parents[1]
     helper = root/'tools/render-concert-grand-release-midi.py'
@@ -41,6 +42,8 @@ def main():
         assert midi.sha(path) == build['files_sha256'][str(path.resolve())], path
     paths = [Path(__file__), helper, a.midi, a.probe_report, probe,
              root/'plugins/concert-grand/src/lib.rs', root/'plugins/concert-grand/src/math.rs']
+    if a.tuning is not None:
+        paths.append(a.tuning)
     frozen = {str(path.resolve()): midi.sha(path) for path in paths}
     source, duration = midi.midi_events(a.midi)
     rate, block = 44100, 256
@@ -74,6 +77,8 @@ def main():
     event_path = a.work/'events.txt'; raw = a.work/'performance.f32'
     event_path.write_text(''.join(' '.join(map(str, e))+'\n' for e in events), encoding='utf-8', newline='\n')
     command = [str(probe), str(event_path.resolve()), str(raw.resolve()), str(rate), str(total), str(block), 'concert']
+    if a.tuning is not None:
+        command.append(str(a.tuning.resolve()))
     start = time.perf_counter()
     native = json.loads(subprocess.check_output(command, cwd=root, text=True))
     elapsed = time.perf_counter()-start
@@ -86,6 +91,7 @@ def main():
     assert check_rate == rate and np.array_equal(check_audio, audio)
     assert frozen == {str(path.resolve()): midi.sha(path) for path in paths}
     report = dict(scope=__doc__, model=build.get('physical_change', 'Authenticated Concert Grand build described in the probe report'),
+                  tuning=None if a.tuning is None else dict(path=str(a.tuning.resolve()), sha256=midi.sha(a.tuning), text=a.tuning.read_text(encoding='utf-8')),
                   git_head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),
                   files_sha256=frozen, midi_duration_seconds=float(duration), audio_duration_seconds=total/rate,
                   rate=rate, channels=2, block=block, tail_seconds=a.tail_seconds, export_gain=1,

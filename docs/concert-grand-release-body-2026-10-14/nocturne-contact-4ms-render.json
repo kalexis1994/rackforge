@@ -1,0 +1,85 @@
+{
+  "scope": "Render a piano MIDI through an authenticated existing native production build.\n\nPreserves original timing, velocities, channel messages and final pedal state.\nThe explicit Concert preset replaces only the initial piano program-0 message.\n",
+  "model": "Sum squared modal slopes separately across strings and polarisations for the existing scalar tension glide; omit nonphysical cross-string products and onset bloom",
+  "tuning": {
+    "path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\contacto_4ms.txt",
+    "sha256": "6426d298e9aaa546cfa050b722d6316692b149ae3cbe2dcef7c5b3ae802917f8",
+    "text": "MERGE_RAMP_S = 0.004\n"
+  },
+  "git_head": "136aacea677a95f6cfc8506235104f2a69702042",
+  "files_sha256": {
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\render-concert-grand-midi.py": "fab8e7e497c974602a3a40a1fe5c41e5b4426fe183134828fad90d488406f001",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\render-concert-grand-release-midi.py": "be9050450f23128766a3dd77d1c8c2a0c26c9dc159d138f5c443035a233e3d8b",
+    "C:\\Users\\kalex\\OneDrive\\Documents\\piano-comparacion\\09-midi\\chopin-nocturno-op9-2.mid": "83ea472e303c1cbbd35c9a06cafb368a09be2fc5c4c793231b32816d0a91aa77",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\docs\\concert-grand-release-body-2026-10-14\\string-tension-verification.json": "4d570bdbd8cc8994858537ca7b8278fdd7aca56d9ed1557061c77b17166f2f72",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\probe.exe": "6014b6d260b388083afe49657a5a4e1f9754516a02432d12210064aafbddb38d",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs": "cb6d553c638f06fb43010984b6321ebcb9fa6f137832e755ba47eb9fa5e16b77",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\math.rs": "8fcbef468ccce24de475503793ee778f715f419c31bb2300d0cc0ffd4bd472ee",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\contacto_4ms.txt": "6426d298e9aaa546cfa050b722d6316692b149ae3cbe2dcef7c5b3ae802917f8"
+  },
+  "midi_duration_seconds": 224.56380208333334,
+  "audio_duration_seconds": 232.5638095238095,
+  "rate": 44100,
+  "channels": 2,
+  "block": 256,
+  "tail_seconds": 8,
+  "export_gain": 1,
+  "counts": {
+    "cc64": 2901,
+    "cc66": 1,
+    "cc67": 129,
+    "strikes": 1498,
+    "releases": 1498
+  },
+  "original_events": 6028,
+  "rendered_events": 6027,
+  "skipped_initial_program": [
+    {
+      "seconds": 0,
+      "program": 0,
+      "reason": "Concert preset explicitly loaded"
+    }
+  ],
+  "final_original_controllers": {
+    "64": 80,
+    "66": 0,
+    "67": 127
+  },
+  "synthetic_events": [],
+  "events_sha256": "5b04961066a595a3e21a7cacb3e6ba68269016608a5279b8d55f50686a377da8",
+  "command": [
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\probe.exe",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-contact-4ms-2026-10-14\\events.txt",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-contact-4ms-2026-10-14\\performance.f32",
+    "44100",
+    "10256064",
+    "256",
+    "concert",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-nocturne-attacks-2026-10-14\\restrike\\contacto_4ms.txt"
+  ],
+  "native": {
+    "frames": 10256064,
+    "rate": 44100,
+    "block": 256,
+    "warmup_frames": 8820,
+    "events": 6027,
+    "peak": 0.33643636,
+    "rms": 0.028495827618985576,
+    "wall_seconds": 25.9664669
+  },
+  "render_process_seconds": 25.999776700002258,
+  "peak": 0.33643636107444763,
+  "last_100ms_rms": 2.4226688823435973e-11,
+  "output": "C:\\SHARED\\Piano-Nocturno-contacto-4ms-2026-10-14\\Nocturno-contacto-4ms.wav",
+  "output_sha256": "b3b70abff05b078a7df9f3b00fa3395e780c4ba49dc337b5bb398e9c65d00c2c",
+  "raw_sha256": "940e6fc7e951004b7dd4097fa9ecfcac362c044169de7e6908be249886985355",
+  "validation": [
+    "Authenticated current production sources and executable",
+    "Original MIDI messages and rational timing preserved",
+    "All note releases present; original final pedal state retained",
+    "One continuous instance; no note samples",
+    "Finite stereo float audio below full scale",
+    "Exact WAV/raw equality",
+    "Tail below -100 dBFS RMS"
+  ]
+}

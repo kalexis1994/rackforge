@@ -123,6 +123,24 @@ perceptualmente qué parte de la repetición y de su proyección acústica produ
 la sensación desproporcionada; no se declara resuelta. No se atribuye este
 reporte a Campanella ni se cambia el motor sobre esa identificación anterior.
 
+## Escucha del contacto y Nocturno completo
+
+El usuario responde «mejora en estos» a los recortes y pide renderizar todo
+Nocturno. Se toma la variante de **contacto fijo de 4 ms** para esa escucha
+completa. La valoración favorable del recorte no establece una causa única
+del tick ni una mejora en todo el teclado.
+
+Archivo: `C:/SHARED/Piano-Nocturno-contacto-4ms-2026-10-14/Nocturno-contacto-4ms.wav`.
+Duración **232,564 s**, incluyendo ocho segundos de cola; render nativo
+**26,00 s**, pico **0,33644**, RMS final de 100 ms **2,42e-11**.
+Se conserva el MIDI completo, sus controladores y pedal final, con ganancia
+de exportación uno. Los primeros **53 s son idénticos muestra por muestra**
+a la variante de 4 ms usada en el recorte. El ajuste se aplica explícitamente
+al ejecutable autenticado, sin cambiar todavía los valores de producción.
+
+[Comando, configuración y hashes del render](nocturne-contact-4ms-render.json).
+[Verificación contra el recorte](nocturne-contact-4ms-verification.json).
+
 Datos y reproducción:
 
 - [MIDI, ablaciones y recortes](nocturne-attacks.json):

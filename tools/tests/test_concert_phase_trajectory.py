@@ -220,7 +220,8 @@ class PhaseTrajectoryTests(unittest.TestCase):
             self.assertEqual(sections[name]['calls'],steps,name)
         self.assertGreaterEqual(sections['nonlinear_forces']['calls'],steps)
         self.assertEqual(sections['node_contraction']['calls'],sections['nonlinear_forces']['calls'])
-        self.assertEqual(sections['residual']['calls'],sections['nonlinear_forces']['calls'])
+        self.assertEqual(2*sections['residual']['calls'],sections['nonlinear_forces']['calls'])
+        self.assertTrue(data['axial_elimination'])
         self.assertTrue(all(s['milliseconds']>=0 for s in profile['sections']))
         self.assertGreaterEqual(profile['unattributed_ms'],0.)
         self.assertAlmostEqual(sum(s['milliseconds'] for s in profile['sections']),profile['measured_ms'],places=6)
@@ -258,6 +259,8 @@ class PhaseTrajectoryTests(unittest.TestCase):
                 f['q'][[2*nt-1,3*nt-1,width-1]]=[2e-10,1e-8,-1.2e-8]
             else:f=self.coast(nt)
             data=self.run_native(f,'batch-gradient');width=4*nt;nl=2*nt
+            split=self.run_native(f,'batch-gradient',1,8,'--split-batch-forces')
+            np.testing.assert_array_equal(split['gradient'],data['gradient'])
             legacy=self.run_native(f,'batch-gradient',1,8,'--legacy-batch-packing')
             np.testing.assert_array_equal(legacy['gradient'],data['single_gradient'])
             q=np.asarray(data['q_nodes']).reshape(4,3,width)
@@ -298,6 +301,35 @@ class PhaseTrajectoryTests(unittest.TestCase):
             final=self.audit.wire_energies(f,batch['q'],batch['v'])
             self.assertLess(max(abs(final-initial)/np.maximum(initial,1e-30)),1e-9)
             self.assertEqual(batch['allocations'],0)
+
+    def test_axial_elimination_preserves_full_equations_and_state(self):
+        for nt,rate,order in [(1,128000,8),(4,128000,10),(12,128000,8),
+                              (96,128000,24),(96,256000,16),(96,512000,8)]:
+            f=fixture(transverse=nt,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.
+            eliminated=self.run_native(f,'verify',1,order,'--collocation')
+            audited=self.run_native(f,'verify',1,order,'--collocation','--audit-full-collocation-residual')
+            simultaneous=self.run_native(f,'verify',1,order,'--collocation','--simultaneous-collocation')
+            self.assertTrue(eliminated['completed'] and audited['completed'] and simultaneous['completed'])
+            self.assertTrue(eliminated['axial_elimination']);self.assertFalse(simultaneous['axial_elimination'])
+            for key in ['q','v','work_relative_max','numerical_lambda_abs_max',
+                        'maximum_iterations','midpoint_residual_relative_max']:
+                self.assertEqual(eliminated[key],audited[key],key)
+            self.assertLessEqual(audited['audited_residual_relative_max'],1e-11)
+            self.assertEqual(audited['midpoint_residual_relative_max'],audited['audited_residual_relative_max'])
+            omega=np.sqrt(np.diag(f['system'].string.K))[f['keep'][:-1]]
+            def metric(d):return np.r_[omega*np.asarray(d['q'])[:-1],d['v'][:-1]]
+            self.assertLess(relative(metric(eliminated),metric(simultaneous)),1e-9)
+            initial=self.audit.wire_energies(f,f['q'],f['v'])
+            final=self.audit.wire_energies(f,eliminated['q'],eliminated['v'])
+            self.assertLess(max(abs(final-initial)/np.maximum(initial,1e-30)),1e-9)
+            self.assertEqual(eliminated['allocations'],0);self.assertEqual(audited['allocations'],0)
+            self.assertEqual(eliminated['known_prepared_bytes']-simultaneous['known_prepared_bytes'],3*3*f['nodes']*32*(order//4))
+            if nt==96:self.assertLess(eliminated['maximum_iterations'],simultaneous['maximum_iterations'])
+        f=self.coast(12,.000125)
+        for flags in [[],['--simultaneous-collocation']]:
+            data=self.run_native(f,'verify',1,8,'--collocation','--iteration-limit=2',*flags)
+            self.assertFalse(data['completed']);self.assertEqual(data['completed_microframes'],0)
+            np.testing.assert_array_equal(data['q'],f['q']);np.testing.assert_array_equal(data['v'],f['v'])
 
     def test_blocked_contraction_preserves_exact_state_work_and_failure(self):
         for nt,rate,order in [(1,128000,8),(4,128000,10),(12,128000,8),

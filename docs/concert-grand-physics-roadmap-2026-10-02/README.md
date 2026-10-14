@@ -293,6 +293,20 @@ frente a 0,125 ms. Ver [medición](medidas-P7-cuerdas-nativas-2026-10-14/colloca
 [comparación alternada](medidas-P7-cuerdas-nativas-2026-10-14/collocation-paired-contraction.json)
 y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
 
+El solucionador usa ahora la independencia de la fuerza axial respecto de
+la posición axial para resolver esa parte dentro de cada barrido. Conserva
+las 1152 coordenadas y el residual completo **1e−11**. En los tres controles
+de 6 ms los máximos bajan **8/7/6 → 5/4/4 barridos**; el estado cambia como
+máximo **3,752e−12**, pasando contraste con el maestro y energía por cuerda.
+Una reevaluación adicional del gradiente completo, sin la caché de fuerzas,
+certifica el mismo residual y reproduce exactamente el resultado sin auditoría.
+A 512 kHz/8, las medias bajan **34,019/34,053 → 29,595/29,306 ms**, ahorro
+**13,01/13,94 %**. La caché agrega 147.456 bytes; cero asignaciones durante
+el procesamiento. Pasan 28 pruebas actuales; suite acumulada 54. CPU sigue
+rechazado frente a 0,125 ms y la fidelidad sigue limitada a 6 ms. Ver
+[medición](medidas-P7-cuerdas-nativas-2026-10-14/collocation-axial-elimination.json)
+y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

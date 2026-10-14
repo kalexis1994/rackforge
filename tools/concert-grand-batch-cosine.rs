@@ -43,6 +43,8 @@ pub(super) struct BatchCosine {
     fft: Vec<ComplexQuad>,
     fields: Vec<Quad>,
     products: Vec<Quad>,
+    // Current sweep only: V, W and eta for each independent four-node group.
+    transverse_cache: Vec<Quad>,
 }
 impl BatchCosine {
     fn new(plan: &CosinePlan, ku: &[f64], kv: &[f64], factor: f64) -> Self {
@@ -52,6 +54,7 @@ impl BatchCosine {
             fft: vec![ComplexQuad::default(); nodes / 2],
             fields: vec![Quad::default(); 3 * nodes],
             products: vec![Quad::default(); 3 * nodes],
+            transverse_cache: Vec::new(),
         }
     }
     fn transform(&mut self, plan: &CosinePlan, inverse: bool) {
@@ -227,6 +230,68 @@ impl BatchCosine {
     }
 }
 impl Wire {
+    pub(crate) fn axial_modes(&self) -> usize {
+        self.nl
+    }
+    pub(crate) fn prepare_axial_elimination(&mut self, order: usize) {
+        let b = self.batch4.as_mut().expect("prepared four-node workspace");
+        b.transverse_cache = vec![Quad::default(); 3 * self.nodes * (order / 4)];
+    }
+    pub(crate) fn disable_axial_elimination_cache(&mut self) {
+        if let Some(b) = &mut self.batch4 {
+            b.transverse_cache = Vec::new();
+        }
+    }
+    pub(crate) fn axial_force_batch4(
+        &mut self,
+        q: &[f64],
+        stride: usize,
+        out: &mut [f64],
+        group: usize,
+    ) {
+        let b = self.batch4.as_mut().expect("prepared four-node workspace");
+        b.synthesize(&self.plan, &q[self.nl..], stride, &self.kv, 1);
+        b.synthesize(&self.plan, &q[self.nl + self.nt..], stride, &self.kv, 2);
+        for j in 0..self.nodes {
+            let v = b.fields[self.nodes + j];
+            let w = b.fields[2 * self.nodes + j];
+            b.products[j] = Quad::splat(0.5) * (v * v + w * w);
+        }
+        let cache = &mut b.transverse_cache[group * 3 * self.nodes..(group + 1) * 3 * self.nodes];
+        cache[..2 * self.nodes].copy_from_slice(&b.fields[self.nodes..]);
+        cache[2 * self.nodes..].copy_from_slice(&b.products[..self.nodes]);
+        let factor = self.ea * self.length / (2 * self.nodes) as f64;
+        b.analyze(&self.plan, 0, &self.ku, factor, out, stride);
+    }
+    pub(crate) fn transverse_force_batch4(
+        &mut self,
+        q: &[f64],
+        stride: usize,
+        out: &mut [f64],
+        group: usize,
+    ) {
+        let b = self.batch4.as_mut().expect("prepared four-node workspace");
+        b.synthesize(&self.plan, q, stride, &self.ku, 0);
+        let cache = &b.transverse_cache[group * 3 * self.nodes..(group + 1) * 3 * self.nodes];
+        for j in 0..self.nodes {
+            let u = b.fields[j];
+            let v = cache[j];
+            let w = cache[self.nodes + j];
+            let eta = cache[2 * self.nodes + j];
+            b.products[self.nodes + j] = (u + eta) * v;
+            b.products[2 * self.nodes + j] = (u + eta) * w;
+        }
+        let factor = self.ea * self.length / (2 * self.nodes) as f64;
+        b.analyze(&self.plan, 1, &self.kv, factor, &mut out[self.nl..], stride);
+        b.analyze(
+            &self.plan,
+            2,
+            &self.kv,
+            factor,
+            &mut out[self.nl + self.nt..],
+            stride,
+        );
+    }
     pub(crate) fn prepare_batch4(&mut self) {
         self.batch4 = Some(BatchCosine::new(
             &self.plan,
@@ -250,6 +315,7 @@ impl Wire {
                 b.fft.capacity() * std::mem::size_of::<ComplexQuad>()
                     + (b.fields.capacity() + b.products.capacity()) * std::mem::size_of::<Quad>()
                     + b.packing.as_ref().map(|p| p.prepared_bytes()).unwrap_or(0)
+                    + b.transverse_cache.capacity() * std::mem::size_of::<Quad>()
             })
             .unwrap_or(0)
     }

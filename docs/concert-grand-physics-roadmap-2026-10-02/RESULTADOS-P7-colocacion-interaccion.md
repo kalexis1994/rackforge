@@ -570,3 +570,114 @@ declara tiempo real. El contraste de fidelidad sigue limitado a 6 ms sin
 contacto, cuerpo, presión, pedales ni polifonía. El perfil permite priorizar
 reducir evaluaciones de fuerzas, que continúan dominando, manteniendo el
 criterio de convergencia y el cierre energético por cuerda.
+
+## Resolución axial dentro del barrido no lineal — 2026-10-14
+
+La [medición reproducible](medidas-P7-cuerdas-nativas-2026-10-14/collocation-axial-elimination.json)
+autentica **d57b67ec**, sus controles y la cadena de referencias finas.
+Se cambia el solucionador de las mismas ecuaciones nodales. Se conservan
+las **1152 coordenadas físicas** de las tres cuerdas 96/192, sus frecuencias,
+potencial y cuadratura espacial; la palabra «eliminación» se refiere a una
+sustitución algebraica interna, no a quitar modos del estado.
+
+Con derivadas espaciales `U,V,W` y `eta=(V²+W²)/2`, el gradiente axial
+`GU=EA*DUᵀ*eta` depende sólo del movimiento transversal. El gradiente
+transversal contiene `(U+eta)*V` y `(U+eta)*W`. Las ecuaciones de colocación
+permiten escribir:
+
+`Q_U = Q_libre_U + B_U * GU(Q_T)`;
+
+`Q_T = Q_libre_T + B_T * GT(Q_U, Q_T)`.
+
+Cada barrido evalúa GU a partir de los nodos transversales actuales, calcula
+Q_U con los mismos pesos temporales y evalúa GT con esa posición axial
+actualizada. Después aplica de nuevo el operador completo y comprueba el
+**mismo residual sobre todas las coordenadas**, ponderado por omega y con
+tolerancia **1e−11**. El límite sigue en 32 barridos. El extremo, la corrección
+energética por cuerda y la publicación de q/v permanecen como antes.
+
+Las dos mitades comparten V, W y eta de cada grupo de cuatro nodos. Esos
+campos se sobrescriben en cada barrido: no se reutilizan fuerzas de pasos
+anteriores ni se congelan fuerzas para aceptar el estado. Las mitades juntas
+usan las mismas seis transformadas por grupo que el gradiente completo.
+Las pruebas comprueban igualdad exacta de ambos gradientes con hasta 256/512
+modos, canales cero y amplitud 1e−12. Los nodos sobrantes de órdenes que no
+son múltiplos de cuatro usan el cálculo escalar completo en ambas mitades.
+La primera contracción puede omitir bloques que sólo contienen coordenadas
+transversales; conserva todos los canales de los bloques mixtos.
+
+`--simultaneous-collocation` recupera el solucionador anterior y libera la
+caché antes de medir. Reproduce exactamente estado, ledger, lambda, residual
+e iteraciones de d57b67ec en los tres controles de 6 ms. El control de fuerzas
+escalares también usa el solucionador anterior. Los controles de disposición
+de pesos, residual y actualización de buffers siguen disponibles.
+
+### Verificación del residual completo y fidelidad
+
+`--audit-full-collocation-residual` vuelve a evaluar el **gradiente completo**
+en los nodos candidatos, sin leer la caché transversal, y comprueba las
+ecuaciones originales antes de aceptar cada paso. Rechaza un residual no
+finito o mayor que 1e−11. Es un diagnóstico adicional; no se activa en los
+benchmarks normales. Los tres replays auditados de 6 ms producen exactamente
+las mismas q/v, ledger, lambda e iteraciones que los replays sin auditoría.
+La auditoría espacial densa independiente comprueba además la energía.
+
+| Reloj / orden | Máximos de barridos, anterior → actual | Cambio de estado frente al control | Error frente al maestro | Máximo energético por cuerda |
+|---|---:|---:|---:|---:|
+| 128 kHz / 24 | 8 → 5 | 8,954e−13 | 0,053051 % | 1,710e−13 |
+| 256 kHz / 16 | 7 → 4 | 3,752e−12 | 0,040580 % | 4,590e−14 |
+| 512 kHz / 8 | 6 → 4 | 3,536e−13 | 0,044801 % | 8,688e−14 |
+
+Pasan los gates de cambio de estado 1e−9, estado frente al maestro 1 %,
+ledger total 1e−9 y energía individual 1e−9 en los **12 ensayos de 6 ms**:
+normal, instrumentado, auditado y control anterior a cada reloj. Los máximos
+auditados del residual completo son **9,993e−12 / 3,438e−12 / 9,778e−12**.
+Los maestros se reutilizan con hashes comprobados; se mantiene su cambio de
+refinamiento **0,118467 %**. El criterio de convergencia es el mismo, pero
+el recorrido iterativo cambia y el estado final ya no es idéntico al control.
+
+### CPU, memoria y alcance
+
+Se ejecutan **21 benchmarks secuenciales**, con 64 buffers de **0,125 ms**
+y **8 ms físicos por ejecución**, comprobando energía en cada paso.
+Todos terminan sin asignaciones; la auditoría energética independiente por
+cuerda y el gate de estado 1e−9 frente al control del mismo reloj también
+pasan a esa duración. Ese contraste con el control anterior no amplía la
+validación de fidelidad frente a los maestros más allá de 6 ms.
+
+| Reloj / orden | Congelado, media inicial/repetida | Resolución axial interna, media inicial/repetida | Máximos nuevos |
+|---|---:|---:|---:|
+| 512 kHz / 8 | 34,019 / 34,053 ms | **29,595 / 29,306 ms** | 36,412 / 36,800 ms |
+| 256 kHz / 16 | 44,516 / 39,138 ms | **30,836 / 30,427 ms** | 36,115 / 38,682 ms |
+| 128 kHz / 24 | 38,348 / 37,467 ms | **31,089 / 30,857 ms** | 42,759 / 35,960 ms |
+
+A 512 kHz/8 la media mejora **13,01 / 13,94 %** frente al congelado.
+El control anterior dentro del nuevo ejecutable da 34,435 ms, por lo que
+el ahorro también aparece dentro del mismo binario. A 256 kHz hay mayor
+variación entre controles: el ahorro frente al repetido es **22,26 %**.
+A 128 kHz el ahorro repetido es **17,64 %**. Los máximos siguen variando;
+estos ensayos no establecen una garantía de latencia.
+
+El perfil a 512 kHz/8 reduce el costo de fuerzas por buffer
+**18,562 → 13,741 ms** y el residual **2,369 → 1,575 ms**. La contracción
+sube ligeramente, **4,548 → 4,929 ms**, porque se resuelve antes la parte
+axial. Cada barrido nuevo registra dos llamadas de fuerzas y dos de
+contracción, una por mitad; el contador de llamadas no es comparable a una
+evaluación completa anterior. Los barridos se cuentan mediante el residual.
+
+La caché agrega **147.456 bytes** al coro a 512 kHz/8, hasta **1.626.624 bytes**
+de tablas/buffers permanentes contabilizados. A 256/128 kHz agrega
+294.912/442.368 bytes. Su preparación y liberación ocurren antes del contador
+de asignaciones; no se mide memoria total del proceso.
+
+Pasan **28 pruebas actuales** de fases/trayectoria; suite acumulada 54.
+La regresión nueva contrasta ambos solucionadores, audita el residual con
+fuerzas completas, comprueba energía espacial independiente y memoria,
+cubre bloques y colas, y fuerza fallo tras dos barridos sin publicar estado
+parcial. La prueba del perfil cuenta las dos mitades por barrido. Los
+algoritmos normales de cuerdas/presión siguen sin cambios.
+
+**CPU sigue rechazado**: las medias nuevas a 512 kHz/8 equivalen a unas
+237/234 veces el plazo de 0,125 ms, y los máximos a 291/294 veces.
+Continúa el alcance C4 mixto de 6 ms, sin martillo, cuerpo, presión, pedales
+ni polifonía; fábrica y aprobación física global permanecen pendientes.

@@ -36,6 +36,9 @@ pub(super) fn integration_matrix(rule: &[(f64, f64)], h: f64) -> Vec<f64> {
 }
 
 pub(super) struct Collocation {
+    eliminate_axial: bool,
+    audit_full_residual: bool,
+    audited_residual_max: f64,
     blocked_contraction: bool,
     legacy_node_updates: bool,
     scalar_forces: bool,
@@ -79,6 +82,9 @@ impl Collocation {
             }
         }
         let mut result = Self {
+            eliminate_axial: true,
+            audit_full_residual: false,
+            audited_residual_max: 0.,
             blocked_contraction: true,
             legacy_node_updates: false,
             scalar_forces: false,
@@ -126,7 +132,7 @@ impl Collocation {
         self.node_weights = unpacked;
         self.blocked_contraction = false;
     }
-    fn contract_blocked(&mut self) {
+    fn contract_blocked<const AXIAL: bool>(&mut self, width: usize, axial_modes: usize) {
         for i in 0..self.order {
             let free = &self.free[i * self.size..(i + 1) * self.size];
             let out = &mut self.next[i * self.size..(i + 1) * self.size];
@@ -134,6 +140,14 @@ impl Collocation {
                 &self.node_weights[i * self.order * self.size..(i + 1) * self.order * self.size];
             let full = self.size / CONTRACTION_TILE * CONTRACTION_TILE;
             for base in (0..full).step_by(CONTRACTION_TILE) {
+                // A tile crossing a wire boundary includes the next wire's
+                // axial coordinates. Mixed tiles retain every lane.
+                if AXIAL
+                    && base % width >= axial_modes
+                    && base / width == (base + CONTRACTION_TILE - 1) / width
+                {
+                    continue;
+                }
                 let mut values = [0.; CONTRACTION_TILE];
                 values.copy_from_slice(&free[base..base + CONTRACTION_TILE]);
                 let tile = &row[base * self.order..(base + CONTRACTION_TILE) * self.order];
@@ -199,12 +213,99 @@ impl Collocation {
     }
     pub(super) fn scalar_forces(&mut self) {
         self.scalar_forces = true;
+        self.eliminate_axial = false;
+    }
+    pub(super) fn simultaneous_forces(&mut self) {
+        self.eliminate_axial = false;
+    }
+    pub(super) fn eliminates_axial(&self) -> bool {
+        self.eliminate_axial
+    }
+    pub(super) fn enable_residual_audit(&mut self) {
+        self.audit_full_residual = true;
+    }
+    pub(super) fn audited_residual_max(&self) -> f64 {
+        self.audited_residual_max
+    }
+    fn split_forces(&mut self, wires: &mut [Wire], axial: bool) {
+        let width = wires[0].size();
+        let end = self.order / 4 * 4;
+        for node in (0..end).step_by(4) {
+            for (i, wire) in wires.iter_mut().enumerate() {
+                let start = node * self.size + i * width;
+                if axial {
+                    wire.axial_force_batch4(
+                        &self.q[start..],
+                        self.size,
+                        &mut self.gradient[start..],
+                        node / 4,
+                    );
+                } else {
+                    wire.transverse_force_batch4(
+                        &self.q[start..],
+                        self.size,
+                        &mut self.gradient[start..],
+                        node / 4,
+                    );
+                }
+            }
+        }
+        for node in end..self.order {
+            for (i, wire) in wires.iter_mut().enumerate() {
+                let range = node * self.size + i * width..node * self.size + (i + 1) * width;
+                wire.point_nonlinearity(&self.q[range.clone()], &mut self.gradient[range]);
+            }
+        }
+    }
+    fn contract(&mut self) {
+        if self.blocked_contraction {
+            self.contract_blocked::<false>(0, 0);
+        } else {
+            self.next.copy_from_slice(&self.free);
+            for i in 0..self.order {
+                let out = &mut self.next[i * self.size..(i + 1) * self.size];
+                for j in 0..self.order {
+                    let force = &self.gradient[j * self.size..(j + 1) * self.size];
+                    let weights = &self.node_weights
+                        [(i * self.order + j) * self.size..(i * self.order + j + 1) * self.size];
+                    for k in 0..self.size {
+                        out[k] += weights[k] * force[k];
+                    }
+                }
+            }
+        }
     }
     pub(super) fn legacy_node_updates(&mut self) {
         self.legacy_node_updates = true;
     }
     pub(super) fn refresh_converged_forces(&mut self) {
         self.refresh_converged_forces = true;
+    }
+    fn residual(&self, omega2: &[f64], scale: f64) -> f64 {
+        let residual2 = if self.legacy_node_updates {
+            self.next
+                .iter()
+                .zip(&self.q)
+                .enumerate()
+                .map(|(k, (a, b))| omega2[k % self.size] * (a - b) * (a - b))
+                .sum::<f64>()
+        } else {
+            // Visit nodes and modes in the original summation order.
+            // Each node reuses omega2 directly, without per-mode modulo.
+            let mut sum = 0.;
+            for (next, current) in self
+                .next
+                .chunks_exact(self.size)
+                .zip(self.q.chunks_exact(self.size))
+            {
+                for ((a, b), w) in next.iter().zip(current).zip(omega2) {
+                    let d = a - b;
+                    sum += w * d * d;
+                }
+            }
+            sum
+        };
+        residual2.sqrt() / scale
     }
     pub(super) fn solve(
         &mut self,
@@ -238,57 +339,63 @@ impl Collocation {
         self.q.copy_from_slice(&self.free);
         profile.record(Stage::NodeSetup, clock);
         for iteration in 1..=limit {
+            if self.eliminate_axial {
+                // GU depends only on transverse positions. Enforce its exact
+                // nodal equation first, then evaluate GT at that updated U.
+                // The final residual below still covers every coordinate.
+                let clock = profile::start();
+                self.split_forces(wires, true);
+                profile.record(Stage::Forces, clock);
+                let clock = profile::start();
+                if self.blocked_contraction {
+                    self.contract_blocked::<true>(wires[0].size(), wires[0].axial_modes());
+                } else {
+                    self.contract();
+                }
+                let width = wires[0].size();
+                for node in 0..self.order {
+                    for (i, wire) in wires.iter().enumerate() {
+                        let start = node * self.size + i * width;
+                        let end = start + wire.axial_modes();
+                        self.q[start..end].copy_from_slice(&self.next[start..end]);
+                    }
+                }
+                profile.record(Stage::NodeUpdate, clock);
+            }
             let clock = profile::start();
-            self.forces(wires);
+            if self.eliminate_axial {
+                self.split_forces(wires, false);
+            } else {
+                self.forces(wires);
+            }
             profile.record(Stage::Forces, clock);
             let clock = profile::start();
-            if self.blocked_contraction {
-                self.contract_blocked();
-            } else {
-                self.next.copy_from_slice(&self.free);
-                for i in 0..self.order {
-                    let out = &mut self.next[i * self.size..(i + 1) * self.size];
-                    for j in 0..self.order {
-                        let force = &self.gradient[j * self.size..(j + 1) * self.size];
-                        let weights = &self.node_weights[(i * self.order + j) * self.size
-                            ..(i * self.order + j + 1) * self.size];
-                        for k in 0..self.size {
-                            out[k] += weights[k] * force[k];
-                        }
-                    }
-                }
-            }
+            self.contract();
             profile.record(Stage::NodeUpdate, clock);
             let clock = profile::start();
-            let residual2 = if self.legacy_node_updates {
-                self.next
-                    .iter()
-                    .zip(&self.q)
-                    .enumerate()
-                    .map(|(k, (a, b))| omega2[k % self.size] * (a - b) * (a - b))
-                    .sum::<f64>()
-            } else {
-                // Visit nodes and modes in the original summation order.
-                // Each node reuses omega2 directly, without per-mode modulo.
-                let mut sum = 0.;
-                for (next, current) in self
-                    .next
-                    .chunks_exact(self.size)
-                    .zip(self.q.chunks_exact(self.size))
-                {
-                    for ((a, b), w) in next.iter().zip(current).zip(omega2) {
-                        let d = a - b;
-                        sum += w * d * d;
-                    }
-                }
-                sum
-            };
-            let residual = residual2.sqrt() / scale;
+            let residual = self.residual(omega2, scale);
             profile.record(Stage::Residual, clock);
             if !residual.is_finite() {
                 return Err("nonfinite collocation residual");
             }
             if residual <= 1e-11 {
+                if self.audit_full_residual {
+                    // Independent full-force witness of the original equations
+                    // at the candidate nodes; no transverse cache is read.
+                    let clock = profile::start();
+                    self.forces(wires);
+                    profile.record(Stage::Forces, clock);
+                    let clock = profile::start();
+                    self.contract();
+                    profile.record(Stage::NodeUpdate, clock);
+                    let clock = profile::start();
+                    let audited = self.residual(omega2, scale);
+                    profile.record(Stage::Residual, clock);
+                    if !audited.is_finite() || audited > 1e-11 {
+                        return Err("full collocation residual audit failed");
+                    }
+                    self.audited_residual_max = self.audited_residual_max.max(audited);
+                }
                 // g(q) already belongs to nodes whose fixed-point residual
                 // meets the original tolerance. Use that certified iterate.
                 // The control performs one extra update and force evaluation.

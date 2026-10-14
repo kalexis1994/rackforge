@@ -177,6 +177,7 @@ impl Trajectory {
         let rule = if use_collocation {
             for wire in &mut wires {
                 wire.prepare_batch4();
+                wire.prepare_axial_elimination(order);
             }
             Vec::new()
         } else {
@@ -608,7 +609,13 @@ fn main() {
             if args.iter().any(|x| x == "--legacy-batch-packing") {
                 wire.legacy_batch_packing();
             }
-            wire.point_nonlinearity_batch4(&inputs[i * width..], stride, &mut batch[i * width..]);
+            if args.iter().any(|x| x == "--split-batch-forces") {
+                wire.prepare_axial_elimination(4);
+                wire.axial_force_batch4(&inputs[i * width..], stride, &mut batch[i * width..], 0);
+                wire.transverse_force_batch4(&inputs[i * width..], stride, &mut batch[i * width..], 0);
+            } else {
+                wire.point_nonlinearity_batch4(&inputs[i * width..], stride, &mut batch[i * width..]);
+            }
             for lane in 0..4 {
                 let range = lane * stride + i * width..lane * stride + (i + 1) * width;
                 wire.point_nonlinearity(&inputs[range.clone()], &mut single[range]);
@@ -745,6 +752,13 @@ fn main() {
         use_collocation,
     );
     model.constrained = !args.iter().any(|x| x == "--unconstrained");
+    if args.iter().any(|x| x == "--audit-full-collocation-residual") {
+        if let Some(collocation) = &mut model.collocation { collocation.enable_residual_audit(); }
+    }
+    if args.iter().any(|x| x == "--simultaneous-collocation") {
+        if let Some(collocation) = &mut model.collocation { collocation.simultaneous_forces(); }
+        for wire in &mut model.wires { wire.disable_axial_elimination_cache(); }
+    }
     if args.iter().any(|x| x == "--streamed-node-contraction") {
         if let Some(collocation) = &mut model.collocation {
             collocation.streamed_node_contraction();
@@ -874,5 +888,5 @@ fn main() {
     let failure_json = failure
         .map(|s| format!("{:?}", s))
         .unwrap_or_else(|| "null".to_string());
-    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"initial_wire_energy_j\":{:?},\"final_wire_energy_j\":{:?},\"per_wire_energy_constraint\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false,\"temporal_collocation\":{},\"buffer_microframes\":{},\"profile\":{}}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,initial_wires,final_wires,model.per_wire_constraint,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0),model.collocation.is_some(),buffer_microframes,model.profile.json(elapsed));
+    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"initial_wire_energy_j\":{:?},\"final_wire_energy_j\":{:?},\"per_wire_energy_constraint\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false,\"temporal_collocation\":{},\"buffer_microframes\":{},\"profile\":{},\"axial_elimination\":{},\"audited_residual_relative_max\":{}}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,initial_wires,final_wires,model.per_wire_constraint,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0),model.collocation.is_some(),buffer_microframes,model.profile.json(elapsed),model.collocation.as_ref().is_some_and(|c|c.eliminates_axial()),model.collocation.as_ref().map(|c|c.audited_residual_max()).unwrap_or(0.));
 }

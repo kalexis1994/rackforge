@@ -9,6 +9,8 @@ exactamente las huellas `e74df30116b39a5a` y `9b9bd2cbb32452f0`.
 Se implementa después una [corrección general del puerto de acoplamiento](general-coupling.md).
 Las pruebas físicas y numéricas pasan; el efecto acústico medido es mixto.
 No se presenta como una mejora ya conseguida de cuerpo en todo el teclado.
+El usuario escucha esta corrección y responde «Suena bien, sigamos»:
+`7d7546e5` pasa a ser la base aceptada para las comparaciones siguientes.
 
 2026-10-14. El usuario confirma que quiere continuar desde el piano incluido
 en la release y prioriza **cuerpo y sostenido**. Base: RackForge v0.1.32,

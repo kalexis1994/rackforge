@@ -40,7 +40,11 @@ y por [Woodhouse](https://euphonics.org/7-3-multiple-strings-and-double-decays/)
 Esos mecanismos explican por qué más movimiento almacenado no garantiza más
 presión audible; las cifras siguientes son nuestros ensayos del motor.
 
-## Resultado acústico: mixto, pendiente de escucha
+## Resultado acústico: mixto, escucha aceptada
+
+El usuario responde «Suena bien, sigamos» a los audios de esta versión.
+Se conserva `7d7546e5` como base aceptada. Esa aceptación de escucha no cambia
+los resultados mixtos ni demuestra que cada nota haya mejorado.
 
 Se renderizan **las 88 teclas a velocidades 60 y 110**, 176 pares A/B, una
 instancia nueva por nota, tecla mantenida dos segundos y salida de cuatro.
@@ -109,7 +113,7 @@ el fondo de escala. Se conserva el pedal final de cada MIDI.
 [Pruebas y compilación](general-coupling-verification.json).
 Reproducción: `tools/audit-concert-grand-general-coupling.py`.
 
-La rama contiene esta corrección como candidato de escucha y la retirada
-local ya está comprometida por separado. No se publica ni instala un paquete.
+La rama conserva esta corrección aceptada y la retirada local está
+comprometida por separado. No se publica ni instala un paquete.
 Sigue pendiente conseguir una mejora acústica general; corregir la
 normalización por sí sola no la demuestra.

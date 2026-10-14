@@ -1,0 +1,44 @@
+[
+  {
+    "label": "original",
+    "path": "C:\\SHARED\\Piano-Ticks-Campanella-2026-10-14\\Doble-Cs7-original.wav",
+    "sha256": "b99eac9a2130e3bff152adff096a2636707475c264681737d31c8b57675eb40b",
+    "source_raw": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-short-attacks-2026-10-14\\prefix-original.f32",
+    "source_sha256": "e3c562e589742577c117fc0ed7d5517aa0cb963edc211cc1a8ed23c2366b442f",
+    "source_seconds": [
+      48.75,
+      49.4
+    ],
+    "repeat_count": 3,
+    "gap_seconds": 0.35,
+    "export_gain": 1
+  },
+  {
+    "label": "sin_accion",
+    "path": "C:\\SHARED\\Piano-Ticks-Campanella-2026-10-14\\Doble-Cs7-sin_accion.wav",
+    "sha256": "901ebd3026a37d80467339960c3ba3564fabd30e807920fe03c16914297e3be6",
+    "source_raw": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-short-attacks-2026-10-14\\prefix-sin_accion.f32",
+    "source_sha256": "0530cf408362d1c0a54be4a11f2b6b1bc32052c36a00106a840afb7a1cff146c",
+    "source_seconds": [
+      48.75,
+      49.4
+    ],
+    "repeat_count": 3,
+    "gap_seconds": 0.35,
+    "export_gain": 1
+  },
+  {
+    "label": "sin_perdida_viscoelastica",
+    "path": "C:\\SHARED\\Piano-Ticks-Campanella-2026-10-14\\Doble-Cs7-sin_perdida_viscoelastica.wav",
+    "sha256": "c151addc97e7b6023b302548c07676021b63048319fc461ab33622cc59ebd671",
+    "source_raw": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-short-attacks-2026-10-14\\decay\\prefix-sin_perdida_viscoelastica.f32",
+    "source_sha256": "5e0ee3314734a987bfeaf05f10b4740dd4be728be091e2b034ab613298e74f5c",
+    "source_seconds": [
+      48.75,
+      49.4
+    ],
+    "repeat_count": 3,
+    "gap_seconds": 0.35,
+    "export_gain": 1
+  }
+]

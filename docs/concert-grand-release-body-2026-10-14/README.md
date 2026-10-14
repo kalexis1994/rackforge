@@ -14,6 +14,12 @@ El usuario escucha esta corrección y responde «Suena bien, sigamos»:
 Se corrige después el [cálculo común de tensión por cuerdas separadas](string-tension.md):
 82 pruebas pasan y se vuelven a renderizar ambas piezas completas. El efecto
 medido es pequeño y no resuelve los déficits de cuerpo; la escucha queda disponible.
+El usuario señala dos «ticks» cerca de 00:49 de Campanella. El
+[diagnóstico del pasaje](short-attacks.md) los localiza en C#7 y apunta a
+caída tonal rápida, con una contribución importante del canal de pérdida
+viscoelástica. Apagar ruidos mecánicos apenas cambia su ataque; la normalización
+del acoplamiento agravó la separación ataque/cola en este par respecto de la
+release. Se conserva esa regresión medida y se prepara la revisión de pérdidas.
 
 2026-10-14. El usuario confirma que quiere continuar desde el piano incluido
 en la release y prioriza **cuerpo y sostenido**. Base: RackForge v0.1.32,

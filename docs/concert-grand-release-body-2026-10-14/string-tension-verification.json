@@ -1,0 +1,197 @@
+{
+  "source_sha256": "cb6d553c638f06fb43010984b6321ebcb9fa6f137832e755ba47eb9fa5e16b77",
+  "measured_source_sha256": "22fbdf26fd9e5a81f98a475d102bf6568f5bc7da8a992509e55c4bb81a6c7f24",
+  "acoustic_audit_sha256": "160de01eb4f08c666a6fd3f8dcc260b19f4106af6b5ff2b487d0509aaedd237a",
+  "production_source_unchanged_after_acoustic_audit": true,
+  "post_audit_source_edits": "Only two expected fingerprints and their explanatory comment in cfg(test) mod bench",
+  "native_compile": [
+    {
+      "command": [
+        "rustc",
+        "+1.98.0-x86_64-pc-windows-msvc",
+        "--edition=2024",
+        "-O",
+        "--crate-name",
+        "rackforge_concert_grand",
+        "--crate-type",
+        "rlib",
+        "--extern",
+        "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs",
+        "-o",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\librackforge_concert_grand.rlib"
+      ],
+      "log_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-native-0.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": true
+    },
+    {
+      "command": [
+        "rustc",
+        "+1.98.0-x86_64-pc-windows-msvc",
+        "--edition=2024",
+        "-O",
+        "-L",
+        "dependency=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build",
+        "-L",
+        "dependency=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14",
+        "--extern",
+        "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib",
+        "--extern",
+        "rackforge_concert_grand=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\librackforge_concert_grand.rlib",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\concert-grand-release-probe.rs",
+        "-o",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\probe.exe"
+      ],
+      "log_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-native-1.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": true
+    }
+  ],
+  "test_compile": {
+    "command": [
+      "rustc",
+      "+1.98.0-x86_64-pc-windows-msvc",
+      "--edition=2024",
+      "-O",
+      "--test",
+      "-L",
+      "dependency=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14",
+      "--extern",
+      "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs",
+      "-o",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\tests.exe"
+    ],
+    "log_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-test-compile.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "passed": true
+  },
+  "native_tests": {
+    "command": [
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\tests.exe",
+      "--test-threads=1"
+    ],
+    "log_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-native-tests.log",
+    "log_sha256": "26878e24eb391ed2c3b55e7ba32f912d2204744bb02befe86dcd494f2afb283c",
+    "passed": true
+  },
+  "fingerprints": [
+    {
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\tests.exe",
+        "--exact",
+        "bench::render_fingerprint",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "log_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-fingerprint-0.log",
+      "log_sha256": "0341f20ee8baf173f0e8c063b5691417f7b4280675fd95759a20a3f2bd0cfacb",
+      "passed": true
+    },
+    {
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\tests.exe",
+        "--exact",
+        "bench::render_fingerprint_pedals",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "log_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-fingerprint-1.log",
+      "log_sha256": "47b025becfebae7a5e18a88b645db1f2080a00329364bf24bb167d2341c97bf5",
+      "passed": true
+    }
+  ],
+  "counts": {
+    "passed": 82,
+    "failed": 0,
+    "ignored": 69
+  },
+  "full_render": {
+    "command": [
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\probe.exe",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-top-unison-final-2026-10-14\\benchmark.txt",
+      "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\benchmark.f32",
+      "44100",
+      "617400",
+      "256",
+      "concert"
+    ],
+    "log_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-native-equivalence.log",
+    "log_sha256": "2cdf9266a8cbb38e3b888de5407e5300ee86b743a8a3499d67816beed2b584ed",
+    "passed": true
+  },
+  "native_audio_equivalence": {
+    "prior_raw": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\audit\\bench-0-B.f32",
+    "final_raw": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\benchmark.f32",
+    "sha256": "b6bce09213c2c7e058df3668671547d6ebefad14e7aa5c92732fa498c873e160",
+    "identical": true
+  },
+  "wasm_compile": [
+    {
+      "command": [
+        "rustc",
+        "+1.98.0-x86_64-pc-windows-msvc",
+        "--edition=2024",
+        "-O",
+        "--target",
+        "wasm32-unknown-unknown",
+        "-C",
+        "target-feature=+simd128",
+        "--crate-name",
+        "rackforge_plugin_sdk",
+        "--crate-type",
+        "rlib",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\crates\\rackforge-plugin-sdk\\src\\lib.rs",
+        "-o",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\librackforge_plugin_sdk_wasm.rlib"
+      ],
+      "log_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-wasm-0.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": true
+    },
+    {
+      "command": [
+        "rustc",
+        "+1.98.0-x86_64-pc-windows-msvc",
+        "--edition=2024",
+        "-O",
+        "--target",
+        "wasm32-unknown-unknown",
+        "-C",
+        "target-feature=+simd128",
+        "-C",
+        "link-arg=-zstack-size=8388608",
+        "--crate-name",
+        "rackforge_concert_grand",
+        "--crate-type",
+        "cdylib",
+        "--extern",
+        "rackforge_plugin_sdk=C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\librackforge_plugin_sdk_wasm.rlib",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs",
+        "-o",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\concert-grand.wasm"
+      ],
+      "log_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-wasm-1.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": true
+    }
+  ],
+  "wasm_runtime_tested": false,
+  "physical_change": "Sum squared modal slopes separately across strings and polarisations for the existing scalar tension glide; omit nonphysical cross-string products and onset bloom",
+  "files_sha256": {
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\lib.rs": "cb6d553c638f06fb43010984b6321ebcb9fa6f137832e755ba47eb9fa5e16b77",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\plugins\\concert-grand\\src\\math.rs": "8fcbef468ccce24de475503793ee778f715f419c31bb2300d0cc0ffd4bd472ee",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\crates\\rackforge-plugin-sdk\\src\\lib.rs": "af557b4b598264ce09d000916c91388804b763337c6517d13f09d32faca793ab",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\crates\\rackforge-plugin-sdk\\src\\portable.rs": "d5b3e171d927b3777cc11eabad67ffb9c3aa22a857075bb6b82d78294aee7988",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\concert-grand-release-probe.rs": "317935110022c4e58e35c4ba1093a72dd939823ff029477aa4c3fbe462a26b5d",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\tools\\verify-concert-grand-string-tension.py": "095996c0ddc915f3a5353971b2cfd5e303f29be3161699f2624ee3f900600720",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-campanella-2026-10-14\\librackforge_plugin_sdk.rlib": "dd7a10832c20260cd98c29bda740fa10d3908a335a4f7da34d3e78a170b8a068",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\probe.exe": "6014b6d260b388083afe49657a5a4e1f9754516a02432d12210064aafbddb38d",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\librackforge_concert_grand.rlib": "762ba150f157e67272d9d099d4b3902f1cb089ee201dadaac5be5c8dde57d91d",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\tests.exe": "15de763f94a4ddfe712a617efe3e9bd564d907fa207f71985cbc11ecb59628c5",
+    "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-string-tension-2026-10-14\\final-build\\concert-grand.wasm": "441a7d4396e4c851616570936d6166408de4b7500a2b42cfe4c0ac1df17d5769"
+  }
+}

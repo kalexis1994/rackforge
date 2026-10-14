@@ -11,6 +11,9 @@ Las pruebas físicas y numéricas pasan; el efecto acústico medido es mixto.
 No se presenta como una mejora ya conseguida de cuerpo en todo el teclado.
 El usuario escucha esta corrección y responde «Suena bien, sigamos»:
 `7d7546e5` pasa a ser la base aceptada para las comparaciones siguientes.
+Se corrige después el [cálculo común de tensión por cuerdas separadas](string-tension.md):
+82 pruebas pasan y se vuelven a renderizar ambas piezas completas. El efecto
+medido es pequeño y no resuelve los déficits de cuerpo; la escucha queda disponible.
 
 2026-10-14. El usuario confirma que quiere continuar desde el piano incluido
 en la release y prioriza **cuerpo y sostenido**. Base: RackForge v0.1.32,

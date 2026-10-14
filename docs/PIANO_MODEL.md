@@ -459,6 +459,15 @@ tension also gained its wave-number weighting (Σ h²q_h², no cross-string
 terms — the cosines are orthogonal), and the measured ff glide is +2.6 cents
 decaying over two seconds, in the published range.
 
+2026-10-14 source audit: the implementation still squared the sum of the
+string/polarisation coordinates despite the formula above. It now sums their
+squares separately, verified against independent spatial quadrature. This
+keeps the existing aggregate scalar glide rather than solving independent SI
+tensions per string. The earlier glide figure is historical; the new 88-key
+comparison finds at most 0.013 dB change in its short-note RMS windows and
+does not demonstrate an improvement in body or sustain. See
+`concert-grand-release-body-2026-10-14/string-tension.md` for the current audit.
+
 ### The soundboard, from the measured plate (tested)
 
 Everything the strings produce radiates through one bank of 136 two-pole

@@ -4414,8 +4414,14 @@ impl<const PARTIALS: usize> Voice<PARTIALS> {
             // sum of three strings, whose cross terms belong to no string's
             // tension at all.
             let w = partial.slope;
-            let a = partial.s[0] + partial.s[1] + partial.s[2] + partial.s[LANE_HORIZONTAL];
-            stretch += (w * a) * (w * a);
+            // Different strings and orthogonal polarisations cannot cancel
+            // geometric extension. Keep the existing aggregate scalar glide,
+            // but sum their squared slopes before that approximation. Bloom
+            // is an onset construction, not another moving string.
+            for lane in 0..=LANE_HORIZONTAL {
+                let a = w * partial.s[lane];
+                stretch += a * a;
+            }
         }
         // The offset the current tension asks for, as a fractional shift in
         // frequency, and then only the DIFFERENCE from what is already
@@ -14257,6 +14263,41 @@ mod tests {
     }
 
     #[test]
+    fn tension_stretch_matches_separate_string_spatial_integrals() {
+        // Independent midpoint integration of each string/polarisation's
+        // slope field. Cosine orthogonality removes cross-mode terms, while
+        // separate wires have separate integrals even in opposite phase.
+        for sign in [-1.0f32, 1.0] {
+            let mut voice = Voice::<4>::default();
+            voice.partial_count = 3;
+            voice.tension_gain = 0.25;
+            for (h, p) in voice.partials[..3].iter_mut().enumerate() {
+                p.slope = (h + 1) as f32;
+                let q = 0.005 / (h + 1) as f32;
+                p.s = [q, sign * q, -0.4*q, 0.2*q, 100.0];
+            }
+            let mut integral = 0.0f64;
+            const POINTS: usize = 2048;
+            for k in 0..POINTS {
+                let x = (k as f64 + 0.5) / POINTS as f64;
+                for lane in 0..=LANE_HORIZONTAL {
+                    let mut slope = 0.0;
+                    for (h, p) in voice.partials[..3].iter().enumerate() {
+                        let n = (h + 1) as f64;
+                        slope += n * p.s[lane] as f64 * (n * core::f64::consts::PI * x).cos();
+                    }
+                    integral += 2.0 * slope * slope / POINTS as f64;
+                }
+            }
+            let expected = integral * voice.tension_gain as f64 * TENSION_SMOOTHING.get() as f64;
+            voice.tension_step();
+            assert!(expected > 0.0);
+            assert!((voice.tension_applied as f64 / expected - 1.0).abs() < 2e-6,
+                "separate extension must survive cancellation: {} != {expected}", voice.tension_applied);
+        }
+    }
+
+    #[test]
     fn top_unisons_keep_a_slow_residual_and_the_control_can_remove_it() {
         // Read the actual oscillator rotations, not a duplicate tuning law.
         // Small positive separation is intentional; a fast fundamental
@@ -18446,12 +18487,12 @@ mod bench {
     /// Nothing about the instrument's sound should move by accident, and
     /// until now nothing stopped it -- these two tests printed their hash and
     /// asserted nothing, so they passed whatever the instrument did.
-    // The common mechanical port now uses its own normalization, excludes
-    // absent strings and retains quiet coupled coordinates. Both scripts
-    // change globally; no note-specific tuning correction is present.
-    const RENDER_FINGERPRINT: u64 = 0x581f_8087_da14_bcbf;
+    // Separate string/polarisation slopes are squared before summing the
+    // scalar tension estimate. Both scripts intentionally change; the bridge
+    // port and all note-dependent calibration remain as in the accepted base.
+    const RENDER_FINGERPRINT: u64 = 0xe4ab_cfd0_2a57_57c1;
     /// As `RENDER_FINGERPRINT`, for the pedalled scenario.
-    const RENDER_FINGERPRINT_PEDALS: u64 = 0x3f40_537e_871f_c7c3;
+    const RENDER_FINGERPRINT_PEDALS: u64 = 0xdfb7_f193_9622_35e0;
 
     /// A fingerprint of rendered audio: what the instrument sounds like,
     /// as one number.

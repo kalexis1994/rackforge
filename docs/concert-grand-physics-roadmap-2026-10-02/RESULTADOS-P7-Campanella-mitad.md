@@ -2,6 +2,12 @@
 
 Fecha: 2026-10-14.
 
+**Rechazado por escucha del usuario:** «el 90% se escucha como ticks cortados».
+La conservación del MIDI y la verificación del WAV pasaron, pero eso no aprobó
+el sostenido audible. Se conserva este resultado como control del problema;
+no usarlo como referencia aceptada de timbre. La corrección posterior se
+documenta en [apagadores y notas cortadas](RESULTADOS-P7-apagadores-ticks.md).
+
 El usuario escucha muy similares los fragmentos de ocho segundos con 8 y 12
 modos no lineales, pero pide más música antes de evaluar el timbre general.
 Se renderiza la primera mitad temporal del MIDI original con la variante de

@@ -32,6 +32,8 @@ def main():
     parser.add_argument('--workers',type=int,default=8)
     parser.add_argument('--max-coast-rate',type=int,default=64000)
     parser.add_argument('--sleep-j',type=float,default=1e-18)
+    parser.add_argument('--undamped-from',type=int,default=89,
+        help='First MIDI key without a damper; provisional F6=89. Use 109 to damp all keys.')
     parser.add_argument('--keep-dense-traces',action='store_true')
     args=parser.parse_args();root=Path(__file__).resolve().parents[1]
     if args.local.exists() or args.report.exists() or args.audio_dir.exists():raise ValueError('fresh paths required')
@@ -43,6 +45,7 @@ def main():
     first=next(e['tick'] for e in plan['events'] if e['kind']=='on')/plan['contact_rate_hz']
     cut=args.cut if args.cut is not None else plan['duration_s']*args.fraction-first
     if cut<=0 or args.tail<=0 or args.workers<1:raise ValueError('positive duration, tail and workers required')
+    if not 21<=args.undamped_from<=109:raise ValueError('undamped register must be within 21..109')
     window=excerpt(plan,cut,args.tail)
     body_report=doc/'medidas-P7-cuerpo-cargado-2026-10-12/residual-161.json'
     body=json.loads(body_report.read_text(encoding='utf-8'))
@@ -75,7 +78,7 @@ def main():
         strings_executable_sha256=digest(exe),body_executable_sha256=digest(body_exe),excerpt=window,
         sampled_notes_used=False,eq_or_compression=False,body_feedback=False,
         natural_loss='diagonal weak-load approximation: sigma_n = cross_n^2 * omega_n^2 * Re(Y_key(omega_n))',
-        damper='diagonal of the same uniform 0.3L / 0.08L patch, 0.6 N s/m; 30 ms engagement',
+        damper='diagonal 0.3L / 0.08L patch, 0.6 N s/m; key lift complete at strike, 30 ms engagement; absent above declared cutoff',
         soft_pedal='contact areas [1-u,1,1]; instantaneous prescribed shift, no velocity/volume substitution',
         high_coast_observation_limit_hz=20000,low_readout='cubic Hermite interval acceleration plus linearly interpolated nonlinear boundary gradient',
         coast_contact_switch='same q/v, full nonlinear potential during contact, projected nonlinear potential during coast',
@@ -84,6 +87,8 @@ def main():
         direct_felt_bridge_lever_arm=.125,cold_prefix_controls='settled before the first strike',
         felt_total_stiffness_split_equally_between_wires=True,
         coast_rate_cap_hz=args.max_coast_rate,sleep_threshold_j=args.sleep_j,
+        key_damper_lift='complete at the hammer strike; key pretravel omitted',
+        undamped_from_midi=args.undamped_from,undamped_register_cutoff_calibrated=False,
         source_duration_fraction=(cut+first)/plan['duration_s'],
         dense_force_traces_retained=args.keep_dense_traces,
         rejected_predecessor_path=str(doc/'medidas-P7-cuerdas-nativas-2026-10-14/audicion-midi.json'),
@@ -115,7 +120,8 @@ def main():
             key,(contact_rate,inp,events,loss)=item
             label=f'NL{low}-key-{key}';force_path=args.local/(label+'.force.f64');result_path=args.local/(label+'.json')
             command=[str(exe),str(inp.resolve()),'midi-voice',str(low),'16',str(events.resolve()),str(force_path.resolve()),str(loss.resolve()),
-                f'--contact-rate={contact_rate}',f'--sleep-j={args.sleep_j}']
+                f'--contact-rate={contact_rate}',f'--sleep-j={args.sleep_j}',
+                f'--damper-scale={int(key<args.undamped_from)}']
             start=time.perf_counter()
             with result_path.open('x',encoding='utf-8') as output:
                 subprocess.run(command,stdout=output,text=True,check=True)
@@ -128,7 +134,7 @@ def main():
             compact=args.local/(label+'.audio-force.f64');force.astype('<f8').tofile(compact)
             expected_attacks=sum(k==0 for _,k,_ in voice_events(window,key))
             if data['attacks']!=expected_attacks or data['felt_heat_j']<0:raise ValueError('event or felt loss mismatch')
-            entry=dict(key=key,command=command,result_path=str(result_path.resolve()),result_sha256=digest(result_path),
+            entry=dict(key=key,damper_scale=int(key<args.undamped_from),command=command,result_path=str(result_path.resolve()),result_sha256=digest(result_path),
                 fixture_path=str(inp.resolve()),fixture_sha256=digest(inp),events_path=str(events.resolve()),events_sha256=digest(events),
                 loss_path=str(loss.resolve()),loss_sha256=digest(loss),force_path=str(force_path.resolve()),force_sha256=digest(force_path),
                 contact_segments=[s|{'sha256':digest(s['path'])} for s in data['contact_segments']],

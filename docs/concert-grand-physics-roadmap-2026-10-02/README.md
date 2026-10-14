@@ -74,8 +74,21 @@ vuelo limitado a 64 kHz y reposo de residuos transversales menores a 1e−18 J;
 los ataques conservan el reloj fino original. Pasan la autenticación de
 fuentes/artefactos, conservación de eventos, estados finitos y reconstrucción
 exacta del WAV sin saturación. Las fuentes de simulación están en **d736c9c9**.
-El nuevo audio está en `C:/SHARED/Piano-Campanella-mitad-2026-10-14/`;
-la valoración del timbre sobre este pasaje más largo sigue pendiente.
+El audio está en `C:/SHARED/Piano-Campanella-mitad-2026-10-14/` y se conserva
+como control **rechazado por escucha**: el usuario indica que el 90 % suena
+como ticks cortados.
+
+La [corrección de apagadores](RESULTADOS-P7-apagadores-ticks.md) reproduce un
+fallo de sincronización: el apagador se levantaba durante los 30 ms posteriores
+al golpe y frenaba la cuerda recién excitada. Ahora está levantado al golpear;
+se incorpora además un extremo agudo sin apagadores, desde F6 como límite
+provisional configurable. Nueve controles pasan. Se entregan **37,1 s** nuevos
+con 310 golpes, calculados en **4 min 39,3 s** incluida preparación. En las
+ventanas de fuerza medidas, las colas inferiores al 1 % del ataque pasan de
+66 a cero, con idéntica ganancia; los primeros ocho segundos de música son
+idénticos bit a bit al audio anterior. La valoración del nuevo pasaje sigue
+pendiente antes de repetir el render largo. WAV en
+`C:/SHARED/Piano-Campanella-apagadores-2026-10-14/`.
 
 El usuario pide avanzar hacia una prueba tocable. El
 [cuerpo con presión estéreo nativa](RESULTADOS-P7-presion-realtime.md)

@@ -1,0 +1,26 @@
+{
+  "measurement_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\campanella-apagadores-35s.json",
+  "measurement_sha256": "0359190e775d3a9d6b19dd733a88934068bc03ecec42c4a3251fbd38c1fee2bd",
+  "verifier_sha256": "3c2effda308826589816a487aae06d25065eb4fa5c769fea39a8eb39ed026ba2",
+  "all_retained_artifact_hashes_passed": true,
+  "original_MIDI_events_preserved": true,
+  "no_clipping": true,
+  "common_gain_verified": true,
+  "body_feedback": false,
+  "complete_reciprocal_piano": false,
+  "perceptual_quality_decided_by_listener": true,
+  "variants": [
+    {
+      "nonlinear_transverse": 8,
+      "strikes": 310,
+      "frames": 1780800,
+      "rate_hz": 48000,
+      "stereo": true,
+      "float32": true,
+      "common_gain_exact": true,
+      "peak": 0.4850519895553589,
+      "render_wall_seconds": 272.87307419999706,
+      "wav_path": "C:\\SHARED\\Piano-Campanella-apagadores-2026-10-14\\Campanella-hibrido-NL8.wav"
+    }
+  ]
+}

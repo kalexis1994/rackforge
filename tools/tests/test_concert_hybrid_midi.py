@@ -55,15 +55,32 @@ class HybridMidiNative(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):cls.temp.cleanup()
 
-    def render(self,events,soft=127,duration=.13):
+    def render(self,events,soft=127,duration=.13,pedal=127,damper_scale=1.):
         folder=self.folder/str(len(list(self.folder.iterdir())));folder.mkdir()
         f=fixture(note=63,transverse=12,rate=32000,duration=duration);f['launch_speeds'][:]=0.
         write_fixture(folder/'f.bin',f)
-        (folder/'events').write_text(f'0 64 127\n0 67 {soft}\n'+events,encoding='utf-8')
+        (folder/'events').write_text(f'0 64 {pedal}\n0 67 {soft}\n'+events,encoding='utf-8')
         np.full(12,.4,dtype='<f8').tofile(folder/'loss')
         data=json.loads(subprocess.check_output([str(self.exe),str(folder/'f.bin'),'midi-voice','8','16',
-            str(folder/'events'),str(folder/'force'),str(folder/'loss')],text=True))
+            str(folder/'events'),str(folder/'force'),str(folder/'loss'),f'--damper-scale={damper_scale}'],text=True))
         return data,np.fromfile(folder/'force',dtype='<f8')
+
+    def test_delayed_key_strike_lifts_damper_before_string_vibrates(self):
+        # Adding cold silence must not turn a held note into a damped tick.
+        # At MIDI note-on the hammer is already striking, so key-driven
+        # damper lift must be complete, independently of pedal position.
+        a,fa=self.render('0 0 28\n.12 1 0\n',pedal=0,duration=.17)
+        b,fb=self.render('.04 0 28\n.16 1 0\n',pedal=0,duration=.17)
+        np.testing.assert_allclose(fb[5120:17920],fa[:12800],rtol=1e-12,atol=1e-14)
+        self.assertEqual(a['launch_work_j'],b['launch_work_j'])
+
+    def test_undamped_string_ignores_key_release_and_pedal_but_retains_decay(self):
+        a,fa=self.render('.04 0 28\n.15 1 0\n',pedal=0,duration=.17,damper_scale=0.)
+        b,fb=self.render('.04 0 28\n.06 1 0\n.08 64 127\n.1 64 0\n',
+            pedal=0,duration=.17,damper_scale=0.)
+        np.testing.assert_array_equal(fa,fb)
+        self.assertGreater(np.linalg.norm(fb[-1280:]),.01)
+        np.testing.assert_array_equal(a['q'],b['q'])
 
     def test_soft_pedal_leaves_unstruck_wire_alive_and_repeated_attack_keeps_history(self):
         first,a=self.render('0 0 28\n0.05 1 0\n')

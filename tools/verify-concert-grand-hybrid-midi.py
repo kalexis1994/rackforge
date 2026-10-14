@@ -45,6 +45,12 @@ def main():
             data=json.loads(Path(voice['result_path']).read_text(encoding='utf-8'))
             if not np.isfinite(np.r_[data['q'],data['v']]).all():raise ValueError('nonfinite final state')
             key=voice['key'];expected=sum(e['kind']=='on' and e['key']==key for e in original)
+            if 'undamped_from_midi' in d:
+                scale=int(key<d['undamped_from_midi'])
+                if [a for a in voice['command'] if a.startswith('--damper-scale=')]!=[f'--damper-scale={scale}']:
+                    raise ValueError('voice damper differs from declared register')
+                if 'damper_scale' in voice and voice['damper_scale']!=scale:
+                    raise ValueError('voice damper scale metadata differs')
             declared=[]
             for e in window['events']:
                 if e['kind'] in ('on','off') and e['key']==key:kind=0 if e['kind']=='on' else 1

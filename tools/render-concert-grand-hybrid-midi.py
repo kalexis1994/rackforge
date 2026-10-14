@@ -30,7 +30,10 @@ def main():
     parser.add_argument('--modes',type=int,nargs='+',default=[8],
         help='Nonlinear transverse modes, default: 8. Use --modes 8 12 for comparison.')
     parser.add_argument('--workers',type=int,default=4)
+    parser.add_argument('--undamped-from',type=int,default=89,
+        help='First MIDI key without a damper; provisional F6=89. Use 109 to damp all keys.')
     args=parser.parse_args();root=Path(__file__).resolve().parents[1]
+    if not 21<=args.undamped_from<=109:raise ValueError('undamped register must be within 21..109')
     if args.local.exists() or args.report.exists() or args.audio_dir.exists():raise ValueError('fresh paths required')
     started=time.perf_counter();doc=root/'docs/concert-grand-physics-roadmap-2026-10-02'
     plan_path=doc/'medidas-P6-entrada-MIDI-2026-10-11/plan.json'
@@ -68,7 +71,9 @@ def main():
         strings_executable_sha256=digest(exe),body_executable_sha256=digest(body_exe),excerpt=window,
         sampled_notes_used=False,eq_or_compression=False,body_feedback=False,
         natural_loss='diagonal weak-load approximation: sigma_n = cross_n^2 * omega_n^2 * Re(Y_key(omega_n))',
-        damper='diagonal of the same uniform 0.3L / 0.08L patch, 0.6 N s/m; 30 ms engagement',
+        damper='diagonal 0.3L / 0.08L patch, 0.6 N s/m; key lift complete at strike, 30 ms engagement; absent above declared cutoff',
+        key_damper_lift='complete at the hammer strike; key pretravel omitted',
+        undamped_from_midi=args.undamped_from,undamped_register_cutoff_calibrated=False,
         soft_pedal='contact areas [1-u,1,1]; instantaneous prescribed shift, no velocity/volume substitution',
         high_coast_observation_limit_hz=20000,low_readout='cubic Hermite interval acceleration plus linearly interpolated nonlinear boundary gradient',
         coast_contact_switch='same q/v, full nonlinear potential during contact, projected nonlinear potential during coast',
@@ -101,7 +106,8 @@ def main():
         def render_voice(item):
             key,(f,inp,events,loss)=item
             label=f'NL{low}-key-{key}';force_path=args.local/(label+'.force.f64');result_path=args.local/(label+'.json')
-            command=[str(exe),str(inp.resolve()),'midi-voice',str(low),'16',str(events.resolve()),str(force_path.resolve()),str(loss.resolve())]
+            command=[str(exe),str(inp.resolve()),'midi-voice',str(low),'16',str(events.resolve()),str(force_path.resolve()),str(loss.resolve()),
+                f'--damper-scale={int(key<args.undamped_from)}']
             start=time.perf_counter()
             with result_path.open('x',encoding='utf-8') as output:
                 subprocess.run(command,stdout=output,text=True,check=True)

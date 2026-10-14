@@ -125,6 +125,12 @@ pub(super) fn run(
         .map(|s| s.parse::<f64>().unwrap())
         .unwrap_or(0.);
     assert!(sleep_j.is_finite() && sleep_j >= 0.);
+    let damper_scale = args
+        .iter()
+        .find_map(|s| s.strip_prefix("--damper-scale="))
+        .map(|s| s.parse::<f64>().unwrap())
+        .unwrap_or(1.);
+    assert!(damper_scale.is_finite() && (0. ..=1.).contains(&damper_scale));
     assert!(contact_rate % capture == 0);
     let sub = contact_rate / rate;
     let stride = capture / rate;
@@ -269,7 +275,7 @@ pub(super) fn run(
     let mut frame = 0;
     while frame < total {
         let time = frame as f64 / rate as f64;
-        let damper =
+        let mut damper =
             damper_start + (damper_target - damper_start) * smooth((time - damper_time) / 0.03);
         while event < events.len() && events[event].frame == frame {
             let e = events[event];
@@ -301,6 +307,15 @@ pub(super) fn run(
                     contact_start = frame * stride;
                     held += 1;
                     attacks += 1;
+                    // A note-on launches the hammer at the strings, after
+                    // the key has already lifted its damper. Starting the
+                    // lift here as a 30 ms ramp would kill the new vibration,
+                    // especially on short treble strings. Keep the ramp for
+                    // subsequent damper engagement and pedal movement.
+                    damper = 0.;
+                    damper_start = 0.;
+                    damper_target = 0.;
+                    damper_time = time;
                 }
                 1 => held = held.saturating_sub(1),
                 64 => pedal = e.value / 127.,
@@ -377,7 +392,7 @@ pub(super) fn run(
                 let mass = p[1] * p[0] / 2.;
                 for n in 0..nt {
                     damping[n] = sigma[n]
-                        + damper * 0.6 / mass
+                        + damper * damper_scale * 0.6 / mass
                             * (0.5
                                 - (2. * std::f64::consts::PI * (n + 1) as f64 * 0.3).cos()
                                     * (std::f64::consts::PI * (n + 1) as f64 * 0.08).sin()
@@ -472,7 +487,7 @@ pub(super) fn run(
             // the moving strings would create a false contact at the repeat.
             q[size] += dt * v[size];
             coast_steps += 1;
-            if sleep_j > 0. && held == 0 && damper > 0.001 && frame % (rate / 1000).max(1) == 0 {
+            if sleep_j > 0. && held == 0 && damper * damper_scale > 0.001 && frame % (rate / 1000).max(1) == 0 {
                 let transverse = (0..3)
                     .map(|i| {
                         (nl..width)

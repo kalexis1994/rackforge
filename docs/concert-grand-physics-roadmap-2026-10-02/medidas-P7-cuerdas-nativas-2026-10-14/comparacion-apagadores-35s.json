@@ -1,0 +1,5330 @@
+{
+  "before_report": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\campanella-mitad.json",
+  "before_sha256": "32872f7bc6bc38514ebf0591ea5be4a49b436fa139a5c2115a1fb297a21354c3",
+  "after_report": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\campanella-apagadores-35s.json",
+  "after_sha256": "0359190e775d3a9d6b19dd733a88934068bc03ecec42c4a3251fbd38c1fee2bd",
+  "measurement_source_sha256": "8432a266ab338eea1c15939eab6fb49cceade826ca91261b86cfb2dafc8bc0ce",
+  "same_midi": true,
+  "no_gain_or_time_fit": true,
+  "identical_listening_gain": true,
+  "first_8s_plus_lead_bit_identical": true,
+  "diagnostic": "Per-key bridge force: RMS 40..80 ms / RMS 0..20 ms. No intervening strike. Not a perceptual score.",
+  "groups": {
+    "all": {
+      "strikes": 310,
+      "before": {
+        "median_tail_to_attack": 0.14026646902777645,
+        "tail_below_one_percent": 66
+      },
+      "after": {
+        "median_tail_to_attack": 0.4236456436303727,
+        "tail_below_one_percent": 0
+      }
+    },
+    "pedal_below_40": {
+      "strikes": 179,
+      "before": {
+        "median_tail_to_attack": 0.05429405452008906,
+        "tail_below_one_percent": 56
+      },
+      "after": {
+        "median_tail_to_attack": 0.36104821461848385,
+        "tail_below_one_percent": 0
+      }
+    },
+    "undamped_register": {
+      "strikes": 60,
+      "before": {
+        "median_tail_to_attack": 0.004891866406487877,
+        "tail_below_one_percent": 35
+      },
+      "after": {
+        "median_tail_to_attack": 0.07436083715319254,
+        "tail_below_one_percent": 0
+      }
+    },
+    "held_at_least_90ms": {
+      "strikes": 44,
+      "before": {
+        "median_tail_to_attack": 0.5144128472571043,
+        "tail_below_one_percent": 1
+      },
+      "after": {
+        "median_tail_to_attack": 0.9512813071028554,
+        "tail_below_one_percent": 0
+      }
+    }
+  },
+  "strikes": [
+    {
+      "key": 44,
+      "time_s": 22.7916640625,
+      "velocity": 43,
+      "held_ms": 40.367187499999346,
+      "pedal_at_50ms": 65,
+      "before": {
+        "attack_rms_n": 1.1279949148425876,
+        "tail_rms_n": 0.9179006140622328,
+        "tail_to_attack": 0.8137453475934564
+      },
+      "after": {
+        "attack_rms_n": 1.2983810277605439,
+        "tail_rms_n": 1.2048487277623758,
+        "tail_to_attack": 0.927962363899068
+      }
+    },
+    {
+      "key": 44,
+      "time_s": 30.08203125,
+      "velocity": 41,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 64,
+      "before": {
+        "attack_rms_n": 1.038386537476675,
+        "tail_rms_n": 0.8268972263221662,
+        "tail_to_attack": 0.7963289165242482
+      },
+      "after": {
+        "attack_rms_n": 1.193513536595416,
+        "tail_rms_n": 1.0762187418776907,
+        "tail_to_attack": 0.9017231132104986
+      }
+    },
+    {
+      "key": 47,
+      "time_s": 23.6979140625,
+      "velocity": 57,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.788972142822738,
+        "tail_rms_n": 1.3551057872119214,
+        "tail_to_attack": 0.7574772992684846
+      },
+      "after": {
+        "attack_rms_n": 2.058681754595519,
+        "tail_rms_n": 1.7563649450045518,
+        "tail_to_attack": 0.8531502943978025
+      }
+    },
+    {
+      "key": 47,
+      "time_s": 30.9440078125,
+      "velocity": 62,
+      "held_ms": 36.460937499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 2.0667138632271924,
+        "tail_rms_n": 1.5869528505573696,
+        "tail_to_attack": 0.7678628758406489
+      },
+      "after": {
+        "attack_rms_n": 2.3798683289416127,
+        "tail_rms_n": 2.0702584689117516,
+        "tail_to_attack": 0.8699046261237686
+      }
+    },
+    {
+      "key": 51,
+      "time_s": 23.1484375,
+      "velocity": 42,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.0751929165462277,
+        "tail_rms_n": 0.7247835975675498,
+        "tail_to_attack": 0.6740963285879199
+      },
+      "after": {
+        "attack_rms_n": 1.3227971863988421,
+        "tail_rms_n": 0.9922551415928056,
+        "tail_to_attack": 0.7501188782341623
+      }
+    },
+    {
+      "key": 51,
+      "time_s": 24.59765625,
+      "velocity": 49,
+      "held_ms": 46.875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.442252198132555,
+        "tail_rms_n": 1.089307279719575,
+        "tail_to_attack": 0.7552821074774737
+      },
+      "after": {
+        "attack_rms_n": 1.770728648591925,
+        "tail_rms_n": 1.5454876797858208,
+        "tail_to_attack": 0.8727975802587175
+      }
+    },
+    {
+      "key": 51,
+      "time_s": 28.02864453125,
+      "velocity": 42,
+      "held_ms": 87.2382812500021,
+      "pedal_at_50ms": 32,
+      "before": {
+        "attack_rms_n": 1.075213893010673,
+        "tail_rms_n": 0.8635548029829582,
+        "tail_to_attack": 0.8031469911209437
+      },
+      "after": {
+        "attack_rms_n": 1.3227972495130378,
+        "tail_rms_n": 1.270459778529053,
+        "tail_to_attack": 0.9604342456840972
+      }
+    },
+    {
+      "key": 51,
+      "time_s": 30.4205703125,
+      "velocity": 38,
+      "held_ms": 39.0625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.8835133234039678,
+        "tail_rms_n": 0.6142966176948083,
+        "tail_to_attack": 0.695288459633035
+      },
+      "after": {
+        "attack_rms_n": 1.0895753255948337,
+        "tail_rms_n": 0.8595409376976277,
+        "tail_to_attack": 0.7888770216307689
+      }
+    },
+    {
+      "key": 51,
+      "time_s": 31.82551953125,
+      "velocity": 52,
+      "held_ms": 44.2695312500021,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.6110967988437566,
+        "tail_rms_n": 1.1978060156975243,
+        "tail_to_attack": 0.7434724074662425
+      },
+      "after": {
+        "attack_rms_n": 1.9768294106904511,
+        "tail_rms_n": 1.686051020958065,
+        "tail_to_attack": 0.852906685746432
+      }
+    },
+    {
+      "key": 51,
+      "time_s": 34.34375,
+      "velocity": 55,
+      "held_ms": 66.40625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.7892052643279128,
+        "tail_rms_n": 1.4479764162433026,
+        "tail_to_attack": 0.8092846836034838
+      },
+      "after": {
+        "attack_rms_n": 2.190832965215381,
+        "tail_rms_n": 2.1052059657758435,
+        "tail_to_attack": 0.9609157791583991
+      }
+    },
+    {
+      "key": 56,
+      "time_s": 9.22395703125,
+      "velocity": 46,
+      "held_ms": 58.59375,
+      "pedal_at_50ms": 117,
+      "before": {
+        "attack_rms_n": 1.2971394551711337,
+        "tail_rms_n": 1.3072463861655998,
+        "tail_to_attack": 1.0077917073250484
+      },
+      "after": {
+        "attack_rms_n": 1.2971394551711337,
+        "tail_rms_n": 1.3072463861655998,
+        "tail_to_attack": 1.0077917073250484
+      }
+    },
+    {
+      "key": 56,
+      "time_s": 16.05859375,
+      "velocity": 49,
+      "held_ms": 49.476562500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.6810424209148649,
+        "tail_rms_n": 1.4159349493090339,
+        "tail_to_attack": 0.8422957872404238
+      },
+      "after": {
+        "attack_rms_n": 1.7890902222815293,
+        "tail_rms_n": 1.5868711491001233,
+        "tail_to_attack": 0.88697100310373
+      }
+    },
+    {
+      "key": 56,
+      "time_s": 21.09375,
+      "velocity": 41,
+      "held_ms": 166.66406250000065,
+      "pedal_at_50ms": 69,
+      "before": {
+        "attack_rms_n": 0.9221075650581669,
+        "tail_rms_n": 0.6718325665256544,
+        "tail_to_attack": 0.7285837270874954
+      },
+      "after": {
+        "attack_rms_n": 1.2578707381731533,
+        "tail_rms_n": 1.2696956915046023,
+        "tail_to_attack": 1.0094007698665626
+      }
+    },
+    {
+      "key": 56,
+      "time_s": 24.0338515625,
+      "velocity": 41,
+      "held_ms": 33.8554687499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9220480744791306,
+        "tail_rms_n": 0.509802838217536,
+        "tail_to_attack": 0.5529026656289328
+      },
+      "after": {
+        "attack_rms_n": 1.2578707313712023,
+        "tail_rms_n": 0.8344603280143619,
+        "tail_to_attack": 0.6633911634979521
+      }
+    },
+    {
+      "key": 56,
+      "time_s": 31.26953125,
+      "velocity": 56,
+      "held_ms": 37.757812500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.7316324490435193,
+        "tail_rms_n": 1.0901704869645952,
+        "tail_to_attack": 0.6295622882135059
+      },
+      "after": {
+        "attack_rms_n": 2.311590630458508,
+        "tail_rms_n": 1.735715664627074,
+        "tail_to_attack": 0.7508750216221424
+      }
+    },
+    {
+      "key": 58,
+      "time_s": 24.96614453125,
+      "velocity": 50,
+      "held_ms": 28.644531250002103,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.3144968299662951,
+        "tail_rms_n": 0.6209157562374047,
+        "tail_to_attack": 0.47236002558737666
+      },
+      "after": {
+        "attack_rms_n": 1.869452053500501,
+        "tail_rms_n": 1.0130095346884813,
+        "tail_to_attack": 0.5418751086938266
+      }
+    },
+    {
+      "key": 58,
+      "time_s": 32.2057265625,
+      "velocity": 46,
+      "held_ms": 40.3671875000029,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.105064794267397,
+        "tail_rms_n": 0.6134695197458138,
+        "tail_to_attack": 0.5551434838284877
+      },
+      "after": {
+        "attack_rms_n": 1.5762342814419683,
+        "tail_rms_n": 1.1576088581452038,
+        "tail_to_attack": 0.7344142122617723
+      }
+    },
+    {
+      "key": 59,
+      "time_s": 10.078125,
+      "velocity": 47,
+      "held_ms": 44.26953125000033,
+      "pedal_at_50ms": 83,
+      "before": {
+        "attack_rms_n": 1.2955783283264766,
+        "tail_rms_n": 1.1114604083558879,
+        "tail_to_attack": 0.8578874654314284
+      },
+      "after": {
+        "attack_rms_n": 1.3524863195365529,
+        "tail_rms_n": 1.2066688694327539,
+        "tail_to_attack": 0.8921856376678433
+      }
+    },
+    {
+      "key": 59,
+      "time_s": 13.48958203125,
+      "velocity": 45,
+      "held_ms": 111.98046874999967,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.0229047640035849,
+        "tail_rms_n": 0.642089301503664,
+        "tail_to_attack": 0.6277117128583573
+      },
+      "after": {
+        "attack_rms_n": 1.5210398314803892,
+        "tail_rms_n": 1.4473912031912697,
+        "tail_to_attack": 0.9515800791242665
+      }
+    },
+    {
+      "key": 59,
+      "time_s": 16.87239453125,
+      "velocity": 47,
+      "held_ms": 36.4570312500021,
+      "pedal_at_50ms": 85,
+      "before": {
+        "attack_rms_n": 1.5630726737385217,
+        "tail_rms_n": 1.2854530565397717,
+        "tail_to_attack": 0.8223885415802544
+      },
+      "after": {
+        "attack_rms_n": 1.661432545709885,
+        "tail_rms_n": 1.4383074888288967,
+        "tail_to_attack": 0.8657032104871564
+      }
+    },
+    {
+      "key": 59,
+      "time_s": 23.140625,
+      "velocity": 45,
+      "held_ms": 32.55078124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.0228834409304592,
+        "tail_rms_n": 0.4447457688069264,
+        "tail_to_attack": 0.43479613708710185
+      },
+      "after": {
+        "attack_rms_n": 1.5203486971789602,
+        "tail_rms_n": 0.8235661064462535,
+        "tail_to_attack": 0.5416955386447847
+      }
+    },
+    {
+      "key": 59,
+      "time_s": 27.28125,
+      "velocity": 58,
+      "held_ms": 37.757812500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.733045058019106,
+        "tail_rms_n": 0.9130214831706635,
+        "tail_to_attack": 0.5268307820076297
+      },
+      "after": {
+        "attack_rms_n": 2.5170609828146833,
+        "tail_rms_n": 1.63019133255709,
+        "tail_to_attack": 0.6476566693009327
+      }
+    },
+    {
+      "key": 59,
+      "time_s": 27.60546875,
+      "velocity": 53,
+      "held_ms": 32.55078124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.4350446587492398,
+        "tail_rms_n": 0.6695981822383459,
+        "tail_to_attack": 0.4666044210930384
+      },
+      "after": {
+        "attack_rms_n": 2.105663986765073,
+        "tail_rms_n": 1.1633433278791212,
+        "tail_to_attack": 0.5524828914732797
+      }
+    },
+    {
+      "key": 59,
+      "time_s": 30.4166640625,
+      "velocity": 29,
+      "held_ms": 45.5742187499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.390521948692497,
+        "tail_rms_n": 0.17940635022623072,
+        "tail_to_attack": 0.45940145189508425
+      },
+      "after": {
+        "attack_rms_n": 0.5901181401024808,
+        "tail_rms_n": 0.4544962747791914,
+        "tail_to_attack": 0.7701784505391801
+      }
+    },
+    {
+      "key": 61,
+      "time_s": 32.75390625,
+      "velocity": 53,
+      "held_ms": 46.875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.312264865401558,
+        "tail_rms_n": 0.6847051103678665,
+        "tail_to_attack": 0.5217735599118888
+      },
+      "after": {
+        "attack_rms_n": 1.9851941911122832,
+        "tail_rms_n": 1.5816322834962102,
+        "tail_to_attack": 0.7967141403985463
+      }
+    },
+    {
+      "key": 61,
+      "time_s": 34.4440078125,
+      "velocity": 45,
+      "held_ms": 106.7734375000029,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9250206621694321,
+        "tail_rms_n": 0.5214692718759927,
+        "tail_to_attack": 0.5637379717043308
+      },
+      "after": {
+        "attack_rms_n": 1.421047508380651,
+        "tail_rms_n": 1.4173690862445008,
+        "tail_to_attack": 0.9974114713868067
+      }
+    },
+    {
+      "key": 62,
+      "time_s": 13.57942578125,
+      "velocity": 32,
+      "held_ms": 40.36328125000033,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.42843948996051895,
+        "tail_rms_n": 0.13113091886378897,
+        "tail_to_attack": 0.306066368615724
+      },
+      "after": {
+        "attack_rms_n": 0.6893430962289993,
+        "tail_rms_n": 0.42397924408654863,
+        "tail_to_attack": 0.6150482196831969
+      }
+    },
+    {
+      "key": 62,
+      "time_s": 27.2916640625,
+      "velocity": 47,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9816372514204534,
+        "tail_rms_n": 0.3253565432344062,
+        "tail_to_attack": 0.3314427429924926
+      },
+      "after": {
+        "attack_rms_n": 1.5839585118189732,
+        "tail_rms_n": 0.8374474629304767,
+        "tail_to_attack": 0.5287054280031461
+      }
+    },
+    {
+      "key": 62,
+      "time_s": 27.6315078125,
+      "velocity": 22,
+      "held_ms": 54.6875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.1946279551389096,
+        "tail_rms_n": 0.07957777157458416,
+        "tail_to_attack": 0.40887123084547655
+      },
+      "after": {
+        "attack_rms_n": 0.29663273579587995,
+        "tail_rms_n": 0.2363263883518808,
+        "tail_to_attack": 0.7966969246256846
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 0.0,
+      "velocity": 28,
+      "held_ms": 153.64453125,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.4248048407698856,
+        "tail_rms_n": 0.4140541285126166,
+        "tail_to_attack": 0.9746925853345145
+      },
+      "after": {
+        "attack_rms_n": 0.4248048407698856,
+        "tail_rms_n": 0.4140541285126166,
+        "tail_to_attack": 0.9746925853345145
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 0.55598828125,
+      "velocity": 21,
+      "held_ms": 88.54296875,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.4099925205918603,
+        "tail_rms_n": 0.4029831593096499,
+        "tail_to_attack": 0.9829036849938341
+      },
+      "after": {
+        "attack_rms_n": 0.4099925205918603,
+        "tail_rms_n": 0.4029831593096499,
+        "tail_to_attack": 0.9829036849938341
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 0.97786328125,
+      "velocity": 28,
+      "held_ms": 274.73828125,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.6424327771616397,
+        "tail_rms_n": 0.6243472731773724,
+        "tail_to_attack": 0.9718484102505297
+      },
+      "after": {
+        "attack_rms_n": 0.6424327771616397,
+        "tail_rms_n": 0.6243472731773724,
+        "tail_to_attack": 0.9718484102505297
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 2.4635390625,
+      "velocity": 22,
+      "held_ms": 106.77343749999979,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.3201843161803198,
+        "tail_rms_n": 0.3151692562341823,
+        "tail_to_attack": 0.9843369593927482
+      },
+      "after": {
+        "attack_rms_n": 0.3201843161803198,
+        "tail_rms_n": 0.3151692562341823,
+        "tail_to_attack": 0.9843369593927482
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 2.7890625,
+      "velocity": 25,
+      "held_ms": 125.0,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.481826866521862,
+        "tail_rms_n": 0.46707467076541637,
+        "tail_to_attack": 0.9693827870933464
+      },
+      "after": {
+        "attack_rms_n": 0.481826866521862,
+        "tail_rms_n": 0.46707467076541637,
+        "tail_to_attack": 0.9693827870933464
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 3.1236953125,
+      "velocity": 28,
+      "held_ms": 214.84375,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.7138055134491231,
+        "tail_rms_n": 0.691071511980109,
+        "tail_to_attack": 0.9681509864512492
+      },
+      "after": {
+        "attack_rms_n": 0.7138055134491231,
+        "tail_rms_n": 0.691071511980109,
+        "tail_to_attack": 0.9681509864512492
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 4.5390625,
+      "velocity": 29,
+      "held_ms": 218.75,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.5640888522311035,
+        "tail_rms_n": 0.5480849146736766,
+        "tail_to_attack": 0.9716286937879953
+      },
+      "after": {
+        "attack_rms_n": 0.5640888522311035,
+        "tail_rms_n": 0.5480849146736766,
+        "tail_to_attack": 0.9716286937879953
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 5.8307265625,
+      "velocity": 21,
+      "held_ms": 341.1484375000002,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.15941688693347536,
+        "tail_rms_n": 0.15509957576813346,
+        "tail_to_attack": 0.9729181064290666
+      },
+      "after": {
+        "attack_rms_n": 0.15941688693347536,
+        "tail_rms_n": 0.15509957576813346,
+        "tail_to_attack": 0.9729181064290666
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 9.32421875,
+      "velocity": 20,
+      "held_ms": 174.47656250000065,
+      "pedal_at_50ms": 70,
+      "before": {
+        "attack_rms_n": 0.18395326590972688,
+        "tail_rms_n": 0.17088276294545846,
+        "tail_to_attack": 0.9289466109795373
+      },
+      "after": {
+        "attack_rms_n": 0.19462924971863066,
+        "tail_rms_n": 0.19329930021543099,
+        "tail_to_attack": 0.9931667541999862
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 10.9166640625,
+      "velocity": 55,
+      "held_ms": 57.29296874999967,
+      "pedal_at_50ms": 78,
+      "before": {
+        "attack_rms_n": 1.646333522021643,
+        "tail_rms_n": 1.4397059312597946,
+        "tail_to_attack": 0.8744922653897513
+      },
+      "after": {
+        "attack_rms_n": 1.7777404678919135,
+        "tail_rms_n": 1.6747626953982309,
+        "tail_to_attack": 0.942073787285837
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 14.39973828125,
+      "velocity": 28,
+      "held_ms": 131.51171874999966,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.3176503333733396,
+        "tail_rms_n": 0.14967694378303795,
+        "tail_to_attack": 0.47120033589613836
+      },
+      "after": {
+        "attack_rms_n": 0.5155013812629045,
+        "tail_rms_n": 0.49756167733488116,
+        "tail_to_attack": 0.9651995036675293
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 14.84765625,
+      "velocity": 42,
+      "held_ms": 33.851562500000654,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 1.133851377436917,
+        "tail_rms_n": 0.855563314023195,
+        "tail_to_attack": 0.7545638970401967
+      },
+      "after": {
+        "attack_rms_n": 1.244793278537752,
+        "tail_rms_n": 1.025471170887045,
+        "tail_to_attack": 0.8238084094506496
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 16.125,
+      "velocity": 34,
+      "held_ms": 175.78125,
+      "pedal_at_50ms": 66,
+      "before": {
+        "attack_rms_n": 0.485213773954924,
+        "tail_rms_n": 0.23375682498641942,
+        "tail_to_attack": 0.48176048895127876
+      },
+      "after": {
+        "attack_rms_n": 0.7913104415875155,
+        "tail_rms_n": 0.7609036071747534,
+        "tail_to_attack": 0.9615740766016427
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 17.71484375,
+      "velocity": 57,
+      "held_ms": 45.570312500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 2.0965234403565494,
+        "tail_rms_n": 1.4195189269561983,
+        "tail_to_attack": 0.6770823066565785
+      },
+      "after": {
+        "attack_rms_n": 2.3295286664666035,
+        "tail_rms_n": 1.731084238737024,
+        "tail_to_attack": 0.7431049309054901
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 20.16145703125,
+      "velocity": 52,
+      "held_ms": 183.59375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1722243400952679,
+        "tail_rms_n": 0.6022115743196212,
+        "tail_to_attack": 0.5137340641388481
+      },
+      "after": {
+        "attack_rms_n": 1.9356271419288509,
+        "tail_rms_n": 1.8660478944868293,
+        "tail_to_attack": 0.9640533830432415
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 21.2369765625,
+      "velocity": 51,
+      "held_ms": 91.14843749999935,
+      "pedal_at_50ms": 88,
+      "before": {
+        "attack_rms_n": 1.6238238308307926,
+        "tail_rms_n": 1.367081187733829,
+        "tail_to_attack": 0.8418900879379217
+      },
+      "after": {
+        "attack_rms_n": 1.8604727031613133,
+        "tail_rms_n": 1.7938685823869074,
+        "tail_to_attack": 0.9642004310725805
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 24.01953125,
+      "velocity": 48,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9870170640386356,
+        "tail_rms_n": 0.2969035792467539,
+        "tail_to_attack": 0.30080896274669877
+      },
+      "after": {
+        "attack_rms_n": 1.642896459493057,
+        "tail_rms_n": 0.7801668072760413,
+        "tail_to_attack": 0.47487277896793
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 28.6822890625,
+      "velocity": 53,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 95,
+      "before": {
+        "attack_rms_n": 1.8493231680474953,
+        "tail_rms_n": 1.3484852102128468,
+        "tail_to_attack": 0.729177697825832
+      },
+      "after": {
+        "attack_rms_n": 2.0119136155011774,
+        "tail_rms_n": 1.5869694240361385,
+        "tail_to_attack": 0.7887860650720915
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 31.265625,
+      "velocity": 59,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.5313986972905742,
+        "tail_rms_n": 0.4936464429519888,
+        "tail_to_attack": 0.32235004759072367
+      },
+      "after": {
+        "attack_rms_n": 2.4954330605424824,
+        "tail_rms_n": 1.0305399834282858,
+        "tail_to_attack": 0.41297039769291854
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 33.10676953125,
+      "velocity": 24,
+      "held_ms": 41.6679687499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.2298981880465544,
+        "tail_rms_n": 0.07777637384073917,
+        "tail_to_attack": 0.3383079027355772
+      },
+      "after": {
+        "attack_rms_n": 0.36289141790340307,
+        "tail_rms_n": 0.24425276824552272,
+        "tail_to_attack": 0.6730739725306472
+      }
+    },
+    {
+      "key": 63,
+      "time_s": 33.65755078125,
+      "velocity": 43,
+      "held_ms": 70.3125,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.7800774035153168,
+        "tail_rms_n": 0.3708987421799267,
+        "tail_to_attack": 0.4754640251191997
+      },
+      "after": {
+        "attack_rms_n": 1.3068095941836326,
+        "tail_rms_n": 1.2499493975988287,
+        "tail_to_attack": 0.9564893027738103
+      }
+    },
+    {
+      "key": 64,
+      "time_s": 33.34895703125,
+      "velocity": 47,
+      "held_ms": 29.949218749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9045037878211704,
+        "tail_rms_n": 0.2241471865235184,
+        "tail_to_attack": 0.24781232488087113
+      },
+      "after": {
+        "attack_rms_n": 1.531546142322716,
+        "tail_rms_n": 0.6548477484082077,
+        "tail_to_attack": 0.42757298021401896
+      }
+    },
+    {
+      "key": 65,
+      "time_s": 13.5963515625,
+      "velocity": 45,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.7986587419044311,
+        "tail_rms_n": 0.1700254999550334,
+        "tail_to_attack": 0.21288879847430375
+      },
+      "after": {
+        "attack_rms_n": 1.4135823397931315,
+        "tail_rms_n": 0.6003609558869817,
+        "tail_to_attack": 0.42470886837397853
+      }
+    },
+    {
+      "key": 65,
+      "time_s": 27.28645703125,
+      "velocity": 55,
+      "held_ms": 26.04296875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.2175253688612246,
+        "tail_rms_n": 0.2576884688264195,
+        "tail_to_attack": 0.2116493630579875
+      },
+      "after": {
+        "attack_rms_n": 2.1634586593351672,
+        "tail_rms_n": 0.668783600227651,
+        "tail_to_attack": 0.3091270532681077
+      }
+    },
+    {
+      "key": 65,
+      "time_s": 27.6041640625,
+      "velocity": 54,
+      "held_ms": 29.949218749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1722678226304748,
+        "tail_rms_n": 0.28378664978427653,
+        "tail_to_attack": 0.2420834593476106
+      },
+      "after": {
+        "attack_rms_n": 2.0842089772349923,
+        "tail_rms_n": 0.8208348471311921,
+        "tail_to_attack": 0.3938351941176981
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 11.9283828125,
+      "velocity": 55,
+      "held_ms": 28.648437499999346,
+      "pedal_at_50ms": 71,
+      "before": {
+        "attack_rms_n": 1.6100560105007444,
+        "tail_rms_n": 0.8976319616806457,
+        "tail_to_attack": 0.5575159844293074
+      },
+      "after": {
+        "attack_rms_n": 1.760554689272285,
+        "tail_rms_n": 1.0726523832767523,
+        "tail_to_attack": 0.6092695613563285
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 13.87630078125,
+      "velocity": 70,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.8546552250376167,
+        "tail_rms_n": 0.48465797313025977,
+        "tail_to_attack": 0.26131971408347865
+      },
+      "after": {
+        "attack_rms_n": 3.435295187815943,
+        "tail_rms_n": 1.6976617090605355,
+        "tail_to_attack": 0.4941821928670583
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 14.50130078125,
+      "velocity": 45,
+      "held_ms": 33.85546874999967,
+      "pedal_at_50ms": 72,
+      "before": {
+        "attack_rms_n": 0.9319453661677535,
+        "tail_rms_n": 0.40728721124100925,
+        "tail_to_attack": 0.43702906417766996
+      },
+      "after": {
+        "attack_rms_n": 1.3671268339859184,
+        "tail_rms_n": 0.9631350241541292,
+        "tail_to_attack": 0.7044957352977022
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 18.6861953125,
+      "velocity": 54,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.7291894265204533,
+        "tail_rms_n": 0.6014092885223138,
+        "tail_to_attack": 0.3477983842016051
+      },
+      "after": {
+        "attack_rms_n": 2.0146126498140418,
+        "tail_rms_n": 0.809229844753,
+        "tail_to_attack": 0.40168011693349376
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 20.296875,
+      "velocity": 55,
+      "held_ms": 42.96875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.127221419447668,
+        "tail_rms_n": 0.29393050826581724,
+        "tail_to_attack": 0.26075667406128733
+      },
+      "after": {
+        "attack_rms_n": 2.093564346838382,
+        "tail_rms_n": 1.3435392184345722,
+        "tail_to_attack": 0.6417472768217188
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 24.97005078125,
+      "velocity": 41,
+      "held_ms": 33.85546875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.620172758006194,
+        "tail_rms_n": 0.115298612964916,
+        "tail_to_attack": 0.18591370142666674
+      },
+      "after": {
+        "attack_rms_n": 1.116570783980349,
+        "tail_rms_n": 0.5254449869364676,
+        "tail_to_attack": 0.47058815659080966
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 25.53645703125,
+      "velocity": 52,
+      "held_ms": 28.644531250002103,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.0019024519337625,
+        "tail_rms_n": 0.15580935419523648,
+        "tail_to_attack": 0.15551349724168287
+      },
+      "after": {
+        "attack_rms_n": 1.8608863337899424,
+        "tail_rms_n": 0.6338704667579961,
+        "tail_to_attack": 0.3406282561423484
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 25.8307265625,
+      "velocity": 51,
+      "held_ms": 29.949218749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9644442669976919,
+        "tail_rms_n": 0.15778325957490813,
+        "tail_to_attack": 0.16360018403768037
+      },
+      "after": {
+        "attack_rms_n": 1.786149635458836,
+        "tail_rms_n": 0.6630290138599968,
+        "tail_to_attack": 0.3712057493378343
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 27.59895703125,
+      "velocity": 75,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 2.1392912987173047,
+        "tail_rms_n": 0.5387352043111229,
+        "tail_to_attack": 0.2518288204295238
+      },
+      "after": {
+        "attack_rms_n": 3.9468450142569744,
+        "tail_rms_n": 1.6087011329588436,
+        "tail_to_attack": 0.40759166553229725
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 28.2734375,
+      "velocity": 56,
+      "held_ms": 45.570312500000654,
+      "pedal_at_50ms": 91,
+      "before": {
+        "attack_rms_n": 1.858630166099706,
+        "tail_rms_n": 1.3810483557213222,
+        "tail_to_attack": 0.7430463472028012
+      },
+      "after": {
+        "attack_rms_n": 2.173842058697974,
+        "tail_rms_n": 1.8995342714621675,
+        "tail_to_attack": 0.873814297529921
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 32.21223828125,
+      "velocity": 32,
+      "held_ms": 54.6875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.37117521235311557,
+        "tail_rms_n": 0.11812310605320361,
+        "tail_to_attack": 0.318240825685385
+      },
+      "after": {
+        "attack_rms_n": 0.6413026872293627,
+        "tail_rms_n": 0.5198637709167858,
+        "tail_to_attack": 0.810637131683897
+      }
+    },
+    {
+      "key": 67,
+      "time_s": 34.52473828125,
+      "velocity": 52,
+      "held_ms": 28.644531249994998,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.0018919939986202,
+        "tail_rms_n": 0.15611308282104855,
+        "tail_to_attack": 0.15581827557877817
+      },
+      "after": {
+        "attack_rms_n": 1.8608809793121686,
+        "tail_rms_n": 0.6355815265776227,
+        "tail_to_attack": 0.341548725385194
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 10.171875,
+      "velocity": 49,
+      "held_ms": 188.80078125000034,
+      "pedal_at_50ms": 67,
+      "before": {
+        "attack_rms_n": 1.0367246588853738,
+        "tail_rms_n": 0.7636968978424142,
+        "tail_to_attack": 0.7366439018277976
+      },
+      "after": {
+        "attack_rms_n": 1.3464195630993308,
+        "tail_rms_n": 1.340210519646502,
+        "tail_to_attack": 0.9953884779878449
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 12.76171875,
+      "velocity": 54,
+      "held_ms": 29.945312500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.055768811983187,
+        "tail_rms_n": 0.17101563621679391,
+        "tail_to_attack": 0.16198208762726488
+      },
+      "after": {
+        "attack_rms_n": 2.008123305567882,
+        "tail_rms_n": 0.7833983139796188,
+        "tail_to_attack": 0.39011464674878604
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 13.59505078125,
+      "velocity": 70,
+      "held_ms": 24.738281250000327,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.7841592926782641,
+        "tail_rms_n": 0.2852627521953841,
+        "tail_to_attack": 0.15988636965658273
+      },
+      "after": {
+        "attack_rms_n": 3.421493818941689,
+        "tail_rms_n": 0.9037082271206599,
+        "tail_to_attack": 0.2641268039467592
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 14.1744765625,
+      "velocity": 55,
+      "held_ms": 29.949218749999673,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.0932196691131209,
+        "tail_rms_n": 0.17850766970522955,
+        "tail_to_attack": 0.16328618552028493
+      },
+      "after": {
+        "attack_rms_n": 2.0868055165218244,
+        "tail_rms_n": 0.8117762696386632,
+        "tail_to_attack": 0.38900427625459244
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 16.9596328125,
+      "velocity": 55,
+      "held_ms": 117.1875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.6988846159240483,
+        "tail_rms_n": 1.359276415626793,
+        "tail_to_attack": 0.8000993139180689
+      },
+      "after": {
+        "attack_rms_n": 2.0868026614245756,
+        "tail_rms_n": 2.0728036397063603,
+        "tail_to_attack": 0.9932916408546946
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 19.49348828125,
+      "velocity": 61,
+      "held_ms": 39.0625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.3484188589500086,
+        "tail_rms_n": 0.3247456717929288,
+        "tail_to_attack": 0.24083441850242504
+      },
+      "after": {
+        "attack_rms_n": 2.586639499993868,
+        "tail_rms_n": 1.557775221830277,
+        "tail_to_attack": 0.6022390139151473
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 26.39583203125,
+      "velocity": 61,
+      "held_ms": 28.644531250002103,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.3484272890462836,
+        "tail_rms_n": 0.22381595752012282,
+        "tail_to_attack": 0.1659829635147947
+      },
+      "after": {
+        "attack_rms_n": 2.5866395080347853,
+        "tail_rms_n": 0.9182496273008817,
+        "tail_to_attack": 0.354997139898527
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 26.6953125,
+      "velocity": 70,
+      "held_ms": 33.851562500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.7842889392320938,
+        "tail_rms_n": 0.408804522848918,
+        "tail_to_attack": 0.22911340975125677
+      },
+      "after": {
+        "attack_rms_n": 3.4215422875859685,
+        "tail_rms_n": 1.652554159101308,
+        "tail_to_attack": 0.48298516288899923
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 27.28255078125,
+      "velocity": 75,
+      "held_ms": 33.85546875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 2.0589561723621563,
+        "tail_rms_n": 0.5031426146539348,
+        "tail_to_attack": 0.24436781190767157
+      },
+      "after": {
+        "attack_rms_n": 3.926526944680432,
+        "tail_rms_n": 1.9040106343008905,
+        "tail_to_attack": 0.48490960615472156
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 27.890625,
+      "velocity": 75,
+      "held_ms": 29.945312500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 2.0591657907843666,
+        "tail_rms_n": 0.4457487220967839,
+        "tail_to_attack": 0.21647053583140172
+      },
+      "after": {
+        "attack_rms_n": 3.926580844243209,
+        "tail_rms_n": 1.5201185064062674,
+        "tail_to_attack": 0.3871354154429101
+      }
+    },
+    {
+      "key": 68,
+      "time_s": 33.6627578125,
+      "velocity": 37,
+      "held_ms": 89.84375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.49167019171832255,
+        "tail_rms_n": 0.17988490664524226,
+        "tail_to_attack": 0.3658649836317476
+      },
+      "after": {
+        "attack_rms_n": 0.8878191031894553,
+        "tail_rms_n": 0.8841822731240092,
+        "tail_to_attack": 0.9959036361659926
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 11.015625,
+      "velocity": 50,
+      "held_ms": 105.46875,
+      "pedal_at_50ms": 61,
+      "before": {
+        "attack_rms_n": 0.8641101222701937,
+        "tail_rms_n": 0.44509589170400615,
+        "tail_to_attack": 0.5150916303753604
+      },
+      "after": {
+        "attack_rms_n": 1.3720417864201406,
+        "tail_rms_n": 1.3738033402666057,
+        "tail_to_attack": 1.001283892272014
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 11.92578125,
+      "velocity": 60,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 71,
+      "before": {
+        "attack_rms_n": 1.8720801086893968,
+        "tail_rms_n": 1.0794005838426335,
+        "tail_to_attack": 0.5765782024137305
+      },
+      "after": {
+        "attack_rms_n": 2.0679226444658285,
+        "tail_rms_n": 1.3212018300975714,
+        "tail_to_attack": 0.6389029268736767
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 13.3125,
+      "velocity": 70,
+      "held_ms": 22.132812500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.6733536942742755,
+        "tail_rms_n": 0.16694634826687713,
+        "tail_to_attack": 0.09976752006352181
+      },
+      "after": {
+        "attack_rms_n": 3.3722671679851186,
+        "tail_rms_n": 0.6086945788866815,
+        "tail_to_attack": 0.18050010528980948
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 14.48046875,
+      "velocity": 67,
+      "held_ms": 32.55078125000033,
+      "pedal_at_50ms": 68,
+      "before": {
+        "attack_rms_n": 1.6575753313540127,
+        "tail_rms_n": 0.4660056715112022,
+        "tail_to_attack": 0.28113694907038655
+      },
+      "after": {
+        "attack_rms_n": 3.0832387622018484,
+        "tail_rms_n": 2.07268080304666,
+        "tail_to_attack": 0.6722414197875763
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 17.79296875,
+      "velocity": 52,
+      "held_ms": 88.53906250000065,
+      "pedal_at_50ms": 69,
+      "before": {
+        "attack_rms_n": 0.9223978905582259,
+        "tail_rms_n": 0.286512906556008,
+        "tail_to_attack": 0.3106174780848786
+      },
+      "after": {
+        "attack_rms_n": 1.8127862120137643,
+        "tail_rms_n": 1.8075247734761228,
+        "tail_to_attack": 0.9970975956774314
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 18.68098828125,
+      "velocity": 64,
+      "held_ms": 22.13671875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 2.380639109166986,
+        "tail_rms_n": 0.4144649652625339,
+        "tail_to_attack": 0.17409819223190034
+      },
+      "after": {
+        "attack_rms_n": 2.8054303906276354,
+        "tail_rms_n": 0.5827306460502308,
+        "tail_to_attack": 0.2077152396997672
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 25.53645703125,
+      "velocity": 51,
+      "held_ms": 28.644531250002103,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.8892622826620605,
+        "tail_rms_n": 0.10575244250595009,
+        "tail_to_attack": 0.1189215426852174
+      },
+      "after": {
+        "attack_rms_n": 1.738989472404911,
+        "tail_rms_n": 0.5884744193435959,
+        "tail_to_attack": 0.33840021959981936
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 25.84895703125,
+      "velocity": 48,
+      "held_ms": 33.85546875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.786481998068426,
+        "tail_rms_n": 0.1229488666360725,
+        "tail_to_attack": 0.156327629797034
+      },
+      "after": {
+        "attack_rms_n": 1.5260969121836765,
+        "tail_rms_n": 0.7249070132316985,
+        "tail_to_attack": 0.4750071947884597
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 26.9765625,
+      "velocity": 75,
+      "held_ms": 29.945312500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.9171438719648979,
+        "tail_rms_n": 0.31362719150026047,
+        "tail_to_attack": 0.16359084786830377
+      },
+      "after": {
+        "attack_rms_n": 3.8783041311884694,
+        "tail_rms_n": 1.400254782313087,
+        "tail_to_attack": 0.36104821461848385
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 27.2734375,
+      "velocity": 70,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.6733405461798014,
+        "tail_rms_n": 0.3134584639251625,
+        "tail_to_attack": 0.1873249677961734
+      },
+      "after": {
+        "attack_rms_n": 3.3722610647023075,
+        "tail_rms_n": 1.6706755312616461,
+        "tail_to_attack": 0.4954170211638487
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 28.26692578125,
+      "velocity": 65,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 91,
+      "before": {
+        "attack_rms_n": 2.409256998046511,
+        "tail_rms_n": 1.6838085614582698,
+        "tail_to_attack": 0.6988912195019238
+      },
+      "after": {
+        "attack_rms_n": 2.8967837229045115,
+        "tail_rms_n": 2.438676056097274,
+        "tail_to_attack": 0.8418564481755967
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 32.7721328125,
+      "velocity": 34,
+      "held_ms": 41.667968750005,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.3826402956214632,
+        "tail_rms_n": 0.08080408196599256,
+        "tail_to_attack": 0.211175045834509
+      },
+      "after": {
+        "attack_rms_n": 0.7059089748263361,
+        "tail_rms_n": 0.46039467705984544,
+        "tail_to_attack": 0.6522011951655796
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 33.0963515625,
+      "velocity": 39,
+      "held_ms": 37.761718750005,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.513092116001297,
+        "tail_rms_n": 0.09350631501456601,
+        "tail_to_attack": 0.18224079477831936
+      },
+      "after": {
+        "attack_rms_n": 0.9663318377501082,
+        "tail_rms_n": 0.5504911550586369,
+        "tail_to_attack": 0.5696709283017466
+      }
+    },
+    {
+      "key": 70,
+      "time_s": 33.3463515625,
+      "velocity": 44,
+      "held_ms": 32.5546875000029,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.657990307606954,
+        "tail_rms_n": 0.09483879028325191,
+        "tail_to_attack": 0.14413402323230454
+      },
+      "after": {
+        "attack_rms_n": 1.262697674346223,
+        "tail_rms_n": 0.5596200572843919,
+        "tail_to_attack": 0.443194019165468
+      }
+    },
+    {
+      "key": 71,
+      "time_s": 9.46484375,
+      "velocity": 19,
+      "held_ms": 65.10156250000065,
+      "pedal_at_50ms": 92,
+      "before": {
+        "attack_rms_n": 0.0688811543376857,
+        "tail_rms_n": 0.04724588876336626,
+        "tail_to_attack": 0.6859044279621991
+      },
+      "after": {
+        "attack_rms_n": 0.07844399454582467,
+        "tail_rms_n": 0.06706897555554567,
+        "tail_to_attack": 0.8549918441030684
+      }
+    },
+    {
+      "key": 71,
+      "time_s": 12.76171875,
+      "velocity": 65,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.392601513541751,
+        "tail_rms_n": 0.21829771080659144,
+        "tail_to_attack": 0.15675533071294967
+      },
+      "after": {
+        "attack_rms_n": 2.841466902119626,
+        "tail_rms_n": 1.2956573041168435,
+        "tail_to_attack": 0.455981839221964
+      }
+    },
+    {
+      "key": 71,
+      "time_s": 13.03515625,
+      "velocity": 65,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.392618050462218,
+        "tail_rms_n": 0.11925590778865017,
+        "tail_to_attack": 0.08563432575720847
+      },
+      "after": {
+        "attack_rms_n": 2.841638645102773,
+        "tail_rms_n": 0.5144906327960856,
+        "tail_to_attack": 0.18105420746679005
+      }
+    },
+    {
+      "key": 71,
+      "time_s": 16.2565078125,
+      "velocity": 34,
+      "held_ms": 50.78125,
+      "pedal_at_50ms": 87,
+      "before": {
+        "attack_rms_n": 0.5609304196921696,
+        "tail_rms_n": 0.39185285207030807,
+        "tail_to_attack": 0.6985765761916624
+      },
+      "after": {
+        "attack_rms_n": 0.6784352359822309,
+        "tail_rms_n": 0.5901439653766275,
+        "tail_to_attack": 0.8698604289357461
+      }
+    },
+    {
+      "key": 71,
+      "time_s": 19.4986953125,
+      "velocity": 58,
+      "held_ms": 26.042968749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1157887661317787,
+        "tail_rms_n": 0.10033426680605081,
+        "tail_to_attack": 0.08992227727286597
+      },
+      "after": {
+        "attack_rms_n": 2.234933063637501,
+        "tail_rms_n": 0.5296203232406508,
+        "tail_to_attack": 0.23697368474143865
+      }
+    },
+    {
+      "key": 71,
+      "time_s": 21.38020703125,
+      "velocity": 67,
+      "held_ms": 32.5507812500021,
+      "pedal_at_50ms": 97,
+      "before": {
+        "attack_rms_n": 2.6498696928617402,
+        "tail_rms_n": 1.7295025139790592,
+        "tail_to_attack": 0.652674551747967
+      },
+      "after": {
+        "attack_rms_n": 3.02705089680452,
+        "tail_rms_n": 2.2525217915929963,
+        "tail_to_attack": 0.7441307954124099
+      }
+    },
+    {
+      "key": 71,
+      "time_s": 26.39583203125,
+      "velocity": 60,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1939636865465826,
+        "tail_rms_n": 0.12171167207686608,
+        "tail_to_attack": 0.10193917407061566
+      },
+      "after": {
+        "attack_rms_n": 2.401505315348857,
+        "tail_rms_n": 0.640185301298891,
+        "tail_to_attack": 0.26657667472449204
+      }
+    },
+    {
+      "key": 71,
+      "time_s": 26.70442578125,
+      "velocity": 70,
+      "held_ms": 33.85546875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.612489348567286,
+        "tail_rms_n": 0.252374375230922,
+        "tail_to_attack": 0.1565122743013213
+      },
+      "after": {
+        "attack_rms_n": 3.314579023601022,
+        "tail_rms_n": 1.4086131612315895,
+        "tail_to_attack": 0.424974982102326
+      }
+    },
+    {
+      "key": 71,
+      "time_s": 33.65364453125,
+      "velocity": 45,
+      "held_ms": 48.175781249995,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.6638350781368922,
+        "tail_rms_n": 0.133931717724021,
+        "tail_to_attack": 0.20175450520016414
+      },
+      "after": {
+        "attack_rms_n": 1.2888906027230562,
+        "tail_rms_n": 0.9003206338598436,
+        "tail_to_attack": 0.6985237008926315
+      }
+    },
+    {
+      "key": 73,
+      "time_s": 12.49609375,
+      "velocity": 65,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.3205554560728943,
+        "tail_rms_n": 0.11194421208000133,
+        "tail_to_attack": 0.08477054982068245
+      },
+      "after": {
+        "attack_rms_n": 2.8036584664779554,
+        "tail_rms_n": 0.7366217230050764,
+        "tail_to_attack": 0.26273589733290303
+      }
+    },
+    {
+      "key": 73,
+      "time_s": 19.23828125,
+      "velocity": 65,
+      "held_ms": 22.132812500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.320718393689022,
+        "tail_rms_n": 0.07508859781632078,
+        "tail_to_attack": 0.056854359093601925
+      },
+      "after": {
+        "attack_rms_n": 2.8065419448185835,
+        "tail_rms_n": 0.41336896941883133,
+        "tail_to_attack": 0.14728765062000587
+      }
+    },
+    {
+      "key": 73,
+      "time_s": 20.3046875,
+      "velocity": 67,
+      "held_ms": 24.73828124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.4068180605054976,
+        "tail_rms_n": 0.10207876967110986,
+        "tail_to_attack": 0.07256003639477797
+      },
+      "after": {
+        "attack_rms_n": 2.992296905563133,
+        "tail_rms_n": 0.5983797241312035,
+        "tail_to_attack": 0.1999733793189857
+      }
+    },
+    {
+      "key": 73,
+      "time_s": 26.11067578125,
+      "velocity": 68,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.4478689508970612,
+        "tail_rms_n": 0.19339531924308478,
+        "tail_to_attack": 0.13357239211688474
+      },
+      "after": {
+        "attack_rms_n": 3.0871096523405326,
+        "tail_rms_n": 1.4405173242337177,
+        "tail_to_attack": 0.46662330997590923
+      }
+    },
+    {
+      "key": 73,
+      "time_s": 26.3828125,
+      "velocity": 71,
+      "held_ms": 40.36328124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.5732560027642353,
+        "tail_rms_n": 0.256376306978659,
+        "tail_to_attack": 0.16295905213658923
+      },
+      "after": {
+        "attack_rms_n": 3.3827259908651834,
+        "tail_rms_n": 1.9751252886596424,
+        "tail_to_attack": 0.5838856868671394
+      }
+    },
+    {
+      "key": 73,
+      "time_s": 33.3541640625,
+      "velocity": 71,
+      "held_ms": 20.8359375000029,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.5732019235851091,
+        "tail_rms_n": 0.09754466829487629,
+        "tail_to_attack": 0.062003908609891294
+      },
+      "after": {
+        "attack_rms_n": 3.3818866187039855,
+        "tail_rms_n": 0.4262324827073035,
+        "tail_to_attack": 0.1260339363093862
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 0.02083203125,
+      "velocity": 14,
+      "held_ms": 180.98828125,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.014698625955642648,
+        "tail_rms_n": 0.0012748337577541842,
+        "tail_to_attack": 0.08673149188239523
+      },
+      "after": {
+        "attack_rms_n": 0.014698625955642648,
+        "tail_rms_n": 0.0012748337577541842,
+        "tail_to_attack": 0.08673149188239523
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 0.51953125,
+      "velocity": 33,
+      "held_ms": 175.78125,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.34002385043609334,
+        "tail_rms_n": 0.3309399922475779,
+        "tail_to_attack": 0.9732846440716878
+      },
+      "after": {
+        "attack_rms_n": 0.34002385043609334,
+        "tail_rms_n": 0.3309399922475779,
+        "tail_to_attack": 0.9732846440716878
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 0.93489453125,
+      "velocity": 36,
+      "held_ms": 684.89453125,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.25127340869271275,
+        "tail_rms_n": 0.22782518486149334,
+        "tail_to_attack": 0.9066824302929136
+      },
+      "after": {
+        "attack_rms_n": 0.25127340869271275,
+        "tail_rms_n": 0.22782518486149334,
+        "tail_to_attack": 0.9066824302929136
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 2.4440078125,
+      "velocity": 31,
+      "held_ms": 169.2734374999998,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.2615709990692196,
+        "tail_rms_n": 0.2492408417426254,
+        "tail_to_attack": 0.9528611452704232
+      },
+      "after": {
+        "attack_rms_n": 0.2615709990692196,
+        "tail_rms_n": 0.2492408417426254,
+        "tail_to_attack": 0.9528611452704232
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 2.75911328125,
+      "velocity": 22,
+      "held_ms": 178.3867187500001,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.18958617800328947,
+        "tail_rms_n": 0.17241591759924232,
+        "tail_to_attack": 0.9094329524183496
+      },
+      "after": {
+        "attack_rms_n": 0.18958617800328947,
+        "tail_rms_n": 0.17241591759924232,
+        "tail_to_attack": 0.9094329524183496
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 3.10286328125,
+      "velocity": 39,
+      "held_ms": 285.15625,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.7009202314178945,
+        "tail_rms_n": 0.6892440490743917,
+        "tail_to_attack": 0.9833416388625522
+      },
+      "after": {
+        "attack_rms_n": 0.7009202314178945,
+        "tail_rms_n": 0.6892440490743917,
+        "tail_to_attack": 0.9833416388625522
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 4.5234375,
+      "velocity": 32,
+      "held_ms": 290.36328125000034,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.3608551984814054,
+        "tail_rms_n": 0.3431669914491647,
+        "tail_to_attack": 0.9509825350814444
+      },
+      "after": {
+        "attack_rms_n": 0.3608551984814054,
+        "tail_rms_n": 0.3431669914491647,
+        "tail_to_attack": 0.9509825350814444
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 5.80078125,
+      "velocity": 27,
+      "held_ms": 628.90625,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.2278774660278475,
+        "tail_rms_n": 0.21755248244477096,
+        "tail_to_attack": 0.9546906336854967
+      },
+      "after": {
+        "attack_rms_n": 0.2278774660278475,
+        "tail_rms_n": 0.21755248244477096,
+        "tail_to_attack": 0.9546906336854967
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 7.94140625,
+      "velocity": 20,
+      "held_ms": 74.21875,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.05903946531771066,
+        "tail_rms_n": 0.04880279822301666,
+        "tail_to_attack": 0.8266131469923186
+      },
+      "after": {
+        "attack_rms_n": 0.05903946531771066,
+        "tail_rms_n": 0.04880279822301666,
+        "tail_to_attack": 0.8266131469923186
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 10.3046875,
+      "velocity": 39,
+      "held_ms": 33.851562500000654,
+      "pedal_at_50ms": 90,
+      "before": {
+        "attack_rms_n": 0.4695790310519648,
+        "tail_rms_n": 0.2785996325052629,
+        "tail_to_attack": 0.5932965785996358
+      },
+      "after": {
+        "attack_rms_n": 0.5894005276258655,
+        "tail_rms_n": 0.46095600871587905,
+        "tail_to_attack": 0.782076002837379
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 11.38671875,
+      "velocity": 71,
+      "held_ms": 20.832031250000327,
+      "pedal_at_50ms": 100,
+      "before": {
+        "attack_rms_n": 2.370649173670561,
+        "tail_rms_n": 1.299698572080801,
+        "tail_to_attack": 0.548245850341673
+      },
+      "after": {
+        "attack_rms_n": 2.6930798735557295,
+        "tail_rms_n": 1.768560081994775,
+        "tail_to_attack": 0.6567053949498008
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 11.6744765625,
+      "velocity": 71,
+      "held_ms": 24.742187499999346,
+      "pedal_at_50ms": 102,
+      "before": {
+        "attack_rms_n": 2.4332420866984985,
+        "tail_rms_n": 1.557271471619247,
+        "tail_to_attack": 0.6399985764393067
+      },
+      "after": {
+        "attack_rms_n": 2.711509396393412,
+        "tail_rms_n": 1.9638987346581214,
+        "tail_to_attack": 0.7242824742817819
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 12.23567578125,
+      "velocity": 65,
+      "held_ms": 28.644531250000327,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.2377502817267283,
+        "tail_rms_n": 0.0746499437666091,
+        "tail_to_attack": 0.060310989113626715
+      },
+      "after": {
+        "attack_rms_n": 2.7195793475439,
+        "tail_rms_n": 0.7462625837807455,
+        "tail_to_attack": 0.27440368101585577
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 14.9869765625,
+      "velocity": 52,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 1.415692216504933,
+        "tail_rms_n": 0.852833573888654,
+        "tail_to_attack": 0.6024145389413337
+      },
+      "after": {
+        "attack_rms_n": 1.667632474183791,
+        "tail_rms_n": 1.1930547134621412,
+        "tail_to_attack": 0.7154182542805615
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 15.13801953125,
+      "velocity": 56,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 1.723345343389959,
+        "tail_rms_n": 0.9506828037580335,
+        "tail_to_attack": 0.5516496199699381
+      },
+      "after": {
+        "attack_rms_n": 2.059331401065873,
+        "tail_rms_n": 1.3603220350895933,
+        "tail_to_attack": 0.6605648971241418
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 17.0651015625,
+      "velocity": 39,
+      "held_ms": 36.460937499999346,
+      "pedal_at_50ms": 84,
+      "before": {
+        "attack_rms_n": 0.5574643410815459,
+        "tail_rms_n": 0.2485510884398176,
+        "tail_to_attack": 0.4458600669553132
+      },
+      "after": {
+        "attack_rms_n": 0.8196901349432446,
+        "tail_rms_n": 0.6118693691829571,
+        "tail_to_attack": 0.7464642345919205
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 18.15625,
+      "velocity": 53,
+      "held_ms": 29.945312500000654,
+      "pedal_at_50ms": 107,
+      "before": {
+        "attack_rms_n": 1.5964529611036118,
+        "tail_rms_n": 1.2107202487020876,
+        "tail_to_attack": 0.7583814106650089
+      },
+      "after": {
+        "attack_rms_n": 1.7413745963703662,
+        "tail_rms_n": 1.4388033344685833,
+        "tail_to_attack": 0.826245735677753
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 18.4375,
+      "velocity": 75,
+      "held_ms": 28.64453124999855,
+      "pedal_at_50ms": 108,
+      "before": {
+        "attack_rms_n": 3.447604003476651,
+        "tail_rms_n": 2.617604490917319,
+        "tail_to_attack": 0.7592532345007316
+      },
+      "after": {
+        "attack_rms_n": 3.742446060416237,
+        "tail_rms_n": 3.066371873282776,
+        "tail_to_attack": 0.8193496509450646
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 18.9609375,
+      "velocity": 71,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.4794518608379732,
+        "tail_rms_n": 0.06833531299018722,
+        "tail_to_attack": 0.046189615761800834
+      },
+      "after": {
+        "attack_rms_n": 3.2774219497893347,
+        "tail_rms_n": 0.496799267868196,
+        "tail_to_attack": 0.15158233376087846
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 19.2135390625,
+      "velocity": 57,
+      "held_ms": 57.2929687499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9464764047298769,
+        "tail_rms_n": 0.15314114855270505,
+        "tail_to_attack": 0.16180133787530745
+      },
+      "after": {
+        "attack_rms_n": 2.047625377234464,
+        "tail_rms_n": 1.748243426909168,
+        "tail_to_attack": 0.8537906622696563
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 19.49739453125,
+      "velocity": 62,
+      "held_ms": 26.04296875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1245771431366383,
+        "tail_rms_n": 0.04705270500704425,
+        "tail_to_attack": 0.04184035332232184
+      },
+      "after": {
+        "attack_rms_n": 2.458288983265651,
+        "tail_rms_n": 0.510689340180669,
+        "tail_to_attack": 0.20774178449201558
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 20.32421875,
+      "velocity": 70,
+      "held_ms": 24.73828124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.4390601183624885,
+        "tail_rms_n": 0.07105585033355846,
+        "tail_to_attack": 0.049376568377430374
+      },
+      "after": {
+        "attack_rms_n": 3.181125943959439,
+        "tail_rms_n": 0.5678384883429343,
+        "tail_to_attack": 0.17850235996508992
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 21.6510390625,
+      "velocity": 74,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 98,
+      "before": {
+        "attack_rms_n": 3.110518478789541,
+        "tail_rms_n": 2.150640867566195,
+        "tail_to_attack": 0.691409127523691
+      },
+      "after": {
+        "attack_rms_n": 3.5736459463985315,
+        "tail_rms_n": 2.8346424987366112,
+        "tail_to_attack": 0.7932074249250468
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 24.95703125,
+      "velocity": 75,
+      "held_ms": 24.73828124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.6571546915568305,
+        "tail_rms_n": 0.09760336878023958,
+        "tail_to_attack": 0.05889816399007694
+      },
+      "after": {
+        "attack_rms_n": 3.675141734983063,
+        "tail_rms_n": 0.6597721206115161,
+        "tail_to_attack": 0.17952290501649368
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 25.26692578125,
+      "velocity": 72,
+      "held_ms": 33.85546875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.5260396285946045,
+        "tail_rms_n": 0.14703295313956682,
+        "tail_to_attack": 0.09634936759471692
+      },
+      "after": {
+        "attack_rms_n": 3.3749232407443985,
+        "tail_rms_n": 1.4029736681039724,
+        "tail_to_attack": 0.41570535624819777
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 25.83333203125,
+      "velocity": 67,
+      "held_ms": 36.4570312500021,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.319788501796394,
+        "tail_rms_n": 0.13219036896886427,
+        "tail_to_attack": 0.10016026718594455
+      },
+      "after": {
+        "attack_rms_n": 2.9005525310133655,
+        "tail_rms_n": 1.4000954320107948,
+        "tail_to_attack": 0.48269956052878094
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 28.8346328125,
+      "velocity": 52,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 95,
+      "before": {
+        "attack_rms_n": 1.4345870907220002,
+        "tail_rms_n": 0.8982227578697263,
+        "tail_to_attack": 0.6261193647139736
+      },
+      "after": {
+        "attack_rms_n": 1.6672941139980115,
+        "tail_rms_n": 1.220443690881914,
+        "tail_to_attack": 0.7319906431837674
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 28.98046875,
+      "velocity": 70,
+      "held_ms": 37.757812500000654,
+      "pedal_at_50ms": 95,
+      "before": {
+        "attack_rms_n": 2.6792582834884424,
+        "tail_rms_n": 1.8313724180905373,
+        "tail_to_attack": 0.6835370928502114
+      },
+      "after": {
+        "attack_rms_n": 3.1246893712139476,
+        "tail_rms_n": 2.505881858956438,
+        "tail_to_attack": 0.8019619108516052
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 32.1822890625,
+      "velocity": 74,
+      "held_ms": 29.949218750005002,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.6087913747634128,
+        "tail_rms_n": 0.13234538002775767,
+        "tail_to_attack": 0.08226385478180491
+      },
+      "after": {
+        "attack_rms_n": 3.573767358204283,
+        "tail_rms_n": 1.1072479359559932,
+        "tail_to_attack": 0.3098265289748335
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 32.49348828125,
+      "velocity": 75,
+      "held_ms": 29.949218749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.6571504286724918,
+        "tail_rms_n": 0.1393122949757608,
+        "tail_to_attack": 0.08406738010342305
+      },
+      "after": {
+        "attack_rms_n": 3.6750305560808263,
+        "tail_rms_n": 1.1389262879334494,
+        "tail_to_attack": 0.30990933831800244
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 33.05598828125,
+      "velocity": 73,
+      "held_ms": 33.8554687499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.5672851961389793,
+        "tail_rms_n": 0.1537363879770125,
+        "tail_to_attack": 0.09809088247355582
+      },
+      "after": {
+        "attack_rms_n": 3.4736495885704843,
+        "tail_rms_n": 1.4439886926845358,
+        "tail_to_attack": 0.4156978577907688
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 33.640625,
+      "velocity": 77,
+      "held_ms": 28.644531250002103,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.7419484563328325,
+        "tail_rms_n": 0.14219202078055926,
+        "tail_to_attack": 0.08162814477295346
+      },
+      "after": {
+        "attack_rms_n": 3.881354576785836,
+        "tail_rms_n": 1.067198084746888,
+        "tail_to_attack": 0.2749550610835042
+      }
+    },
+    {
+      "key": 75,
+      "time_s": 34.53255078125,
+      "velocity": 65,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.2377502614788582,
+        "tail_rms_n": 0.06582519245701893,
+        "tail_to_attack": 0.05318131977477532
+      },
+      "after": {
+        "attack_rms_n": 2.719579336551767,
+        "tail_rms_n": 0.6530875570106108,
+        "tail_to_attack": 0.24014285894622195
+      }
+    },
+    {
+      "key": 76,
+      "time_s": 11.94921875,
+      "velocity": 63,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.7386222479053657,
+        "tail_rms_n": 0.47937434068910556,
+        "tail_to_attack": 0.2757208135732991
+      },
+      "after": {
+        "attack_rms_n": 2.091227365031342,
+        "tail_rms_n": 0.7053438404462639,
+        "tail_to_attack": 0.3372870172993804
+      }
+    },
+    {
+      "key": 76,
+      "time_s": 18.6953125,
+      "velocity": 71,
+      "held_ms": 29.945312500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 2.4658778135216046,
+        "tail_rms_n": 0.5464094364735352,
+        "tail_to_attack": 0.22158820419945674
+      },
+      "after": {
+        "attack_rms_n": 3.2350532676210686,
+        "tail_rms_n": 0.9668826215561972,
+        "tail_to_attack": 0.2988768782367546
+      }
+    },
+    {
+      "key": 76,
+      "time_s": 25.5299453125,
+      "velocity": 71,
+      "held_ms": 29.949218749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.4318593163409687,
+        "tail_rms_n": 0.08433570272141036,
+        "tail_to_attack": 0.05889943359584043
+      },
+      "after": {
+        "attack_rms_n": 3.2336597466930925,
+        "tail_rms_n": 0.9667202052549912,
+        "tail_to_attack": 0.2989554501655931
+      }
+    },
+    {
+      "key": 76,
+      "time_s": 32.75,
+      "velocity": 66,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.2327475029085198,
+        "tail_rms_n": 0.0724170805303105,
+        "tail_to_attack": 0.05874445525904623
+      },
+      "after": {
+        "attack_rms_n": 2.763054240815807,
+        "tail_rms_n": 0.9246170132283215,
+        "tail_to_attack": 0.3346358531692534
+      }
+    },
+    {
+      "key": 78,
+      "time_s": 25.52083203125,
+      "velocity": 71,
+      "held_ms": 33.85546875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.3179228504320435,
+        "tail_rms_n": 0.05719548717720014,
+        "tail_to_attack": 0.04339820586497171
+      },
+      "after": {
+        "attack_rms_n": 3.017777946328576,
+        "tail_rms_n": 1.0063748687608833,
+        "tail_to_attack": 0.33348208074263297
+      }
+    },
+    {
+      "key": 78,
+      "time_s": 32.74348828125,
+      "velocity": 70,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.2789275394848019,
+        "tail_rms_n": 0.059700299479073196,
+        "tail_to_attack": 0.04667997023750277
+      },
+      "after": {
+        "attack_rms_n": 2.921838209345454,
+        "tail_rms_n": 1.060286352196037,
+        "tail_to_attack": 0.3628833207823512
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 10.5390625,
+      "velocity": 73,
+      "held_ms": 20.832031250000327,
+      "pedal_at_50ms": 97,
+      "before": {
+        "attack_rms_n": 2.0675967672652513,
+        "tail_rms_n": 0.8216205001918856,
+        "tail_to_attack": 0.39737946644142735
+      },
+      "after": {
+        "attack_rms_n": 2.454174829351281,
+        "tail_rms_n": 1.2591605126642342,
+        "tail_to_attack": 0.513068791027032
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 11.09505078125,
+      "velocity": 57,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 85,
+      "before": {
+        "attack_rms_n": 0.7456266958095328,
+        "tail_rms_n": 0.16052341819593768,
+        "tail_to_attack": 0.21528657584028177
+      },
+      "after": {
+        "attack_rms_n": 1.2395966929319977,
+        "tail_rms_n": 0.6278796496360785,
+        "tail_to_attack": 0.5065193003628987
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 17.3111953125,
+      "velocity": 76,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 2.8424047858038963,
+        "tail_rms_n": 1.2580856393750577,
+        "tail_to_attack": 0.44261311606933657
+      },
+      "after": {
+        "attack_rms_n": 3.501612372978396,
+        "tail_rms_n": 1.9649912519805888,
+        "tail_to_attack": 0.5611675544512683
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 17.8815078125,
+      "velocity": 39,
+      "held_ms": 37.7617187499979,
+      "pedal_at_50ms": 88,
+      "before": {
+        "attack_rms_n": 0.3859397244342136,
+        "tail_rms_n": 0.1604860941600573,
+        "tail_to_attack": 0.41583201728023567
+      },
+      "after": {
+        "attack_rms_n": 0.5513856243243542,
+        "tail_rms_n": 0.38400285696870523,
+        "tail_to_attack": 0.6964324785203584
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 20.56640625,
+      "velocity": 63,
+      "held_ms": 33.851562500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9560151794928216,
+        "tail_rms_n": 0.037847801932704185,
+        "tail_to_attack": 0.03958912237437792
+      },
+      "after": {
+        "attack_rms_n": 2.25506243235723,
+        "tail_rms_n": 0.815148094565536,
+        "tail_to_attack": 0.36147473474313385
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 24.01692578125,
+      "velocity": 75,
+      "held_ms": 29.94921875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.424371879942087,
+        "tail_rms_n": 0.044551191610024174,
+        "tail_to_attack": 0.031277780920412133
+      },
+      "after": {
+        "attack_rms_n": 3.4004798409794765,
+        "tail_rms_n": 0.8709256760352589,
+        "tail_to_attack": 0.25611846467656074
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 24.55859375,
+      "velocity": 68,
+      "held_ms": 39.0625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1438191896915058,
+        "tail_rms_n": 0.061156485447762185,
+        "tail_to_attack": 0.053466916798498916
+      },
+      "after": {
+        "attack_rms_n": 2.7109776224646005,
+        "tail_rms_n": 1.3172830755280556,
+        "tail_to_attack": 0.48590702653254986
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 31.2682265625,
+      "velocity": 81,
+      "held_ms": 26.042968749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.678918293551168,
+        "tail_rms_n": 0.03738163538662495,
+        "tail_to_attack": 0.02226530947349266
+      },
+      "after": {
+        "attack_rms_n": 4.034735899435271,
+        "tail_rms_n": 0.6410486079682144,
+        "tail_to_attack": 0.15888242104221492
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 31.7890625,
+      "velocity": 71,
+      "held_ms": 42.96875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.2619845233134381,
+        "tail_rms_n": 0.07782584331815366,
+        "tail_to_attack": 0.06166941185127681
+      },
+      "after": {
+        "attack_rms_n": 3.000582640220985,
+        "tail_rms_n": 1.6830771332698484,
+        "tail_to_attack": 0.5609167735323211
+      }
+    },
+    {
+      "key": 79,
+      "time_s": 34.8385390625,
+      "velocity": 57,
+      "held_ms": 40.3671875000029,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.7468783046331254,
+        "tail_rms_n": 0.0405510513916226,
+        "tail_to_attack": 0.05429405452008906
+      },
+      "after": {
+        "attack_rms_n": 1.7468194183239463,
+        "tail_rms_n": 0.8977712507201957,
+        "tail_to_attack": 0.5139462278142048
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 10.24609375,
+      "velocity": 72,
+      "held_ms": 19.53125,
+      "pedal_at_50ms": 84,
+      "before": {
+        "attack_rms_n": 1.4286154515046683,
+        "tail_rms_n": 0.21011475316076753,
+        "tail_to_attack": 0.1470757949170067
+      },
+      "after": {
+        "attack_rms_n": 2.2395323676557273,
+        "tail_rms_n": 0.8275076770471773,
+        "tail_to_attack": 0.3695002086142593
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 10.81770703125,
+      "velocity": 68,
+      "held_ms": 20.832031250000327,
+      "pedal_at_50ms": 97,
+      "before": {
+        "attack_rms_n": 1.5943098252668197,
+        "tail_rms_n": 0.638451160686478,
+        "tail_to_attack": 0.40045614131470864
+      },
+      "after": {
+        "attack_rms_n": 1.911851578584438,
+        "tail_rms_n": 1.0032340210295907,
+        "tail_to_attack": 0.5247447198659633
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 17.02473828125,
+      "velocity": 75,
+      "held_ms": 29.94921875000145,
+      "pedal_at_50ms": 73,
+      "before": {
+        "attack_rms_n": 1.3650515469189428,
+        "tail_rms_n": 0.07753395666386259,
+        "tail_to_attack": 0.056799288524205876
+      },
+      "after": {
+        "attack_rms_n": 3.33207552646672,
+        "tail_rms_n": 1.8209102874574732,
+        "tail_to_attack": 0.5464792958604805
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 17.578125,
+      "velocity": 76,
+      "held_ms": 22.132812500000654,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 2.7528013670091998,
+        "tail_rms_n": 1.0043276844606974,
+        "tail_to_attack": 0.36483841387795307
+      },
+      "after": {
+        "attack_rms_n": 3.437141880207492,
+        "tail_rms_n": 1.7096175947984873,
+        "tail_to_attack": 0.49739511907936773
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 19.75130078125,
+      "velocity": 66,
+      "held_ms": 32.5507812500021,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9980298180370584,
+        "tail_rms_n": 0.030924756174066908,
+        "tail_to_attack": 0.03098580384591137
+      },
+      "after": {
+        "attack_rms_n": 2.4412603086813824,
+        "tail_rms_n": 0.8225672778091854,
+        "tail_to_attack": 0.3369436986641893
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 21.5,
+      "velocity": 68,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 98,
+      "before": {
+        "attack_rms_n": 2.2042209782068234,
+        "tail_rms_n": 1.3378488398768993,
+        "tail_to_attack": 0.6069486013898957
+      },
+      "after": {
+        "attack_rms_n": 2.6308582592270326,
+        "tail_rms_n": 1.9235245545661868,
+        "tail_to_attack": 0.7311395617076436
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 23.7096328125,
+      "velocity": 71,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1896704194634435,
+        "tail_rms_n": 0.035101214926575114,
+        "tail_to_attack": 0.02950499092211287
+      },
+      "after": {
+        "attack_rms_n": 2.9240921405775318,
+        "tail_rms_n": 0.8772147938095616,
+        "tail_to_attack": 0.29999560603323006
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 24.3046875,
+      "velocity": 73,
+      "held_ms": 20.83203124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.2698067474320576,
+        "tail_rms_n": 0.011733577213750509,
+        "tail_to_attack": 0.009240443270190078
+      },
+      "after": {
+        "attack_rms_n": 3.126050963121501,
+        "tail_rms_n": 0.20640726117064198,
+        "tail_to_attack": 0.06602811777724031
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 24.59505078125,
+      "velocity": 67,
+      "held_ms": 46.875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.035377857538295,
+        "tail_rms_n": 0.061354133161218814,
+        "tail_to_attack": 0.05925772191718861
+      },
+      "after": {
+        "attack_rms_n": 2.5354045215780596,
+        "tail_rms_n": 1.6582223874920403,
+        "tail_to_attack": 0.6540267532772037
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 30.9557265625,
+      "velocity": 70,
+      "held_ms": 33.8554687499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1504691471899489,
+        "tail_rms_n": 0.04070982772430198,
+        "tail_to_attack": 0.03538541457086163
+      },
+      "after": {
+        "attack_rms_n": 2.8252532119074165,
+        "tail_rms_n": 1.052304082935868,
+        "tail_to_attack": 0.37246363564893525
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 31.53125,
+      "velocity": 80,
+      "held_ms": 26.039062500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.5620042065384794,
+        "tail_rms_n": 0.03060727287264979,
+        "tail_to_attack": 0.01959487224460032
+      },
+      "after": {
+        "attack_rms_n": 3.867516681211981,
+        "tail_rms_n": 0.6179183083724239,
+        "tail_to_attack": 0.15977133631361198
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 31.82942578125,
+      "velocity": 65,
+      "held_ms": 41.66796875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9611834194063436,
+        "tail_rms_n": 0.04835215636153673,
+        "tail_to_attack": 0.05030481735879351
+      },
+      "after": {
+        "attack_rms_n": 2.348387257867622,
+        "tail_rms_n": 1.3125155033245623,
+        "tail_to_attack": 0.558900794120451
+      }
+    },
+    {
+      "key": 80,
+      "time_s": 33.9166640625,
+      "velocity": 63,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.8890853312201081,
+        "tail_rms_n": 0.006619371303952313,
+        "tail_to_attack": 0.007445147357080369
+      },
+      "after": {
+        "attack_rms_n": 2.16654057388013,
+        "tail_rms_n": 0.2320655895206201,
+        "tail_to_attack": 0.10711342880830801
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 9.94140625,
+      "velocity": 71,
+      "held_ms": 26.039062500000654,
+      "pedal_at_50ms": 103,
+      "before": {
+        "attack_rms_n": 1.5192056592258998,
+        "tail_rms_n": 0.7744497065695541,
+        "tail_to_attack": 0.509772789395854
+      },
+      "after": {
+        "attack_rms_n": 1.7574193149709225,
+        "tail_rms_n": 1.066334653417351,
+        "tail_to_attack": 0.6067616557605628
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 11.0768203125,
+      "velocity": 75,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 82,
+      "before": {
+        "attack_rms_n": 0.9821412161445944,
+        "tail_rms_n": 0.07226093359411448,
+        "tail_to_attack": 0.07357489168184544
+      },
+      "after": {
+        "attack_rms_n": 2.0780749921580144,
+        "tail_rms_n": 0.9076722746119138,
+        "tail_to_attack": 0.436785139149057
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 16.75,
+      "velocity": 76,
+      "held_ms": 28.64453124999855,
+      "pedal_at_50ms": 96,
+      "before": {
+        "attack_rms_n": 2.4954038241521195,
+        "tail_rms_n": 1.119606893147241,
+        "tail_to_attack": 0.44866761936924476
+      },
+      "after": {
+        "attack_rms_n": 3.1017117657449877,
+        "tail_rms_n": 1.770089226186468,
+        "tail_to_attack": 0.5706814042926769
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 17.8515625,
+      "velocity": 72,
+      "held_ms": 29.945312500000654,
+      "pedal_at_50ms": 82,
+      "before": {
+        "attack_rms_n": 1.4204430798205077,
+        "tail_rms_n": 0.25320413954877824,
+        "tail_to_attack": 0.17825715309956244
+      },
+      "after": {
+        "attack_rms_n": 2.688565589640389,
+        "tail_rms_n": 1.44934031952845,
+        "tail_to_attack": 0.5390756785376798
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 20.68359375,
+      "velocity": 66,
+      "held_ms": 33.851562500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.84034679622552,
+        "tail_rms_n": 0.017829059307657366,
+        "tail_to_attack": 0.0212163113939839
+      },
+      "after": {
+        "attack_rms_n": 2.1122074287276473,
+        "tail_rms_n": 0.719349250756848,
+        "tail_to_attack": 0.34056752238115645
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 23.41796875,
+      "velocity": 74,
+      "held_ms": 28.64453124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1311810592783595,
+        "tail_rms_n": 0.013276793238339617,
+        "tail_to_attack": 0.011737107096550563
+      },
+      "after": {
+        "attack_rms_n": 2.8921021533680773,
+        "tail_rms_n": 0.570510939189405,
+        "tail_to_attack": 0.19726514104109386
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 23.69140625,
+      "velocity": 69,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.9453254284020817,
+        "tail_rms_n": 0.0041626967177408065,
+        "tail_to_attack": 0.004403453660161418
+      },
+      "after": {
+        "attack_rms_n": 2.393746300556955,
+        "tail_rms_n": 0.20508436920393674,
+        "tail_to_attack": 0.08567506471183667
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 24.6197890625,
+      "velocity": 62,
+      "held_ms": 71.61718749999935,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.7087249779842797,
+        "tail_rms_n": 0.03761218445634011,
+        "tail_to_attack": 0.05307021147090768
+      },
+      "after": {
+        "attack_rms_n": 1.759061690758131,
+        "tail_rms_n": 1.5319976986309929,
+        "tail_to_attack": 0.8709175503507915
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 30.6705703125,
+      "velocity": 74,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.131192005988466,
+        "tail_rms_n": 0.010659403171644868,
+        "tail_to_attack": 0.009423159919107098
+      },
+      "after": {
+        "attack_rms_n": 2.892003475155591,
+        "tail_rms_n": 0.4778874604528898,
+        "tail_to_attack": 0.16524442814757656
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 30.9375,
+      "velocity": 74,
+      "held_ms": 28.64453124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.1311885808640525,
+        "tail_rms_n": 0.013240708282117222,
+        "tail_to_attack": 0.011705129017482987
+      },
+      "after": {
+        "attack_rms_n": 2.892359717793735,
+        "tail_rms_n": 0.5689300438877051,
+        "tail_to_attack": 0.19670099828443177
+      }
+    },
+    {
+      "key": 82,
+      "time_s": 31.8424453125,
+      "velocity": 64,
+      "held_ms": 63.804687499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.7738092716157243,
+        "tail_rms_n": 0.03881738743550243,
+        "tail_to_attack": 0.05016402472724473
+      },
+      "after": {
+        "attack_rms_n": 1.9324012978597294,
+        "tail_rms_n": 1.5938551331133208,
+        "tail_to_attack": 0.8248054557190723
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 9.3971328125,
+      "velocity": 51,
+      "held_ms": 26.042968749999673,
+      "pedal_at_50ms": 84,
+      "before": {
+        "attack_rms_n": 0.3029766039174219,
+        "tail_rms_n": 0.05603058395724376,
+        "tail_to_attack": 0.18493369861824455
+      },
+      "after": {
+        "attack_rms_n": 0.4226510607049547,
+        "tail_rms_n": 0.1786049075777575,
+        "tail_to_attack": 0.42258241888676684
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 9.6875,
+      "velocity": 62,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 102,
+      "before": {
+        "attack_rms_n": 0.8247194484792227,
+        "tail_rms_n": 0.374299475445335,
+        "tail_to_attack": 0.4538506714441387
+      },
+      "after": {
+        "attack_rms_n": 0.9603891230910089,
+        "tail_rms_n": 0.5467718889014075,
+        "tail_to_attack": 0.5693232834016531
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 16.21614453125,
+      "velocity": 53,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 83,
+      "before": {
+        "attack_rms_n": 0.6048433377878407,
+        "tail_rms_n": 0.18965154517001312,
+        "tail_to_attack": 0.31355482208607327
+      },
+      "after": {
+        "attack_rms_n": 0.9288821862509485,
+        "tail_rms_n": 0.5652243198208082,
+        "tail_to_attack": 0.6084994719320693
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 16.50390625,
+      "velocity": 68,
+      "held_ms": 20.83203124999855,
+      "pedal_at_50ms": 95,
+      "before": {
+        "attack_rms_n": 1.6757425929223295,
+        "tail_rms_n": 0.5285637500330997,
+        "tail_to_attack": 0.31542060950502954
+      },
+      "after": {
+        "attack_rms_n": 2.125303531135037,
+        "tail_rms_n": 0.9632624285818231,
+        "tail_to_attack": 0.45323522709595476
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 19.87109375,
+      "velocity": 56,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.4744804460338545,
+        "tail_rms_n": 0.0033379964135858008,
+        "tail_to_attack": 0.007035055799428314
+      },
+      "after": {
+        "attack_rms_n": 1.1327308127734896,
+        "tail_rms_n": 0.1820429133410715,
+        "tail_to_attack": 0.16071154001305898
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 22.80598828125,
+      "velocity": 56,
+      "held_ms": 42.96875,
+      "pedal_at_50ms": 65,
+      "before": {
+        "attack_rms_n": 0.47447978811804625,
+        "tail_rms_n": 0.015238780864802747,
+        "tail_to_attack": 0.03211681771576638
+      },
+      "after": {
+        "attack_rms_n": 1.132730414524232,
+        "tail_rms_n": 0.7776753439341447,
+        "tail_to_attack": 0.6865493624630737
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 23.1393203125,
+      "velocity": 73,
+      "held_ms": 28.648437499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 1.0014007472058026,
+        "tail_rms_n": 0.010597173160049881,
+        "tail_to_attack": 0.010582349962908511
+      },
+      "after": {
+        "attack_rms_n": 2.6130818537064853,
+        "tail_rms_n": 0.5124569384468988,
+        "tail_to_attack": 0.19611208800061591
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 30.0768203125,
+      "velocity": 59,
+      "held_ms": 36.460937499999346,
+      "pedal_at_50ms": 64,
+      "before": {
+        "attack_rms_n": 0.5540761590809954,
+        "tail_rms_n": 0.015739858665033836,
+        "tail_to_attack": 0.028407392029175846
+      },
+      "after": {
+        "attack_rms_n": 1.3549043382313108,
+        "tail_rms_n": 0.7989467450743782,
+        "tail_to_attack": 0.5896702243328275
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 30.39973828125,
+      "velocity": 72,
+      "held_ms": 28.644531250002103,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.965762877187748,
+        "tail_rms_n": 0.010445581588257456,
+        "tail_to_attack": 0.01081588641994032
+      },
+      "after": {
+        "attack_rms_n": 2.512661713538968,
+        "tail_rms_n": 0.4931231667372452,
+        "tail_to_attack": 0.19625529536274264
+      }
+    },
+    {
+      "key": 83,
+      "time_s": 34.04426953125,
+      "velocity": 56,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.4744807670160037,
+        "tail_rms_n": 0.0012315070528258097,
+        "tail_to_attack": 0.0025954836074193756
+      },
+      "after": {
+        "attack_rms_n": 1.1327339909016898,
+        "tail_rms_n": 0.09079411856968059,
+        "tail_to_attack": 0.08015484597350679
+      }
+    },
+    {
+      "key": 85,
+      "time_s": 9.05989453125,
+      "velocity": 61,
+      "held_ms": 24.738281250000327,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.5822379811882235,
+        "tail_rms_n": 0.4934054968489768,
+        "tail_to_attack": 0.8474292519392869
+      },
+      "after": {
+        "attack_rms_n": 0.5822379811882235,
+        "tail_rms_n": 0.4934054968489768,
+        "tail_to_attack": 0.8474292519392869
+      }
+    },
+    {
+      "key": 85,
+      "time_s": 15.92578125,
+      "velocity": 70,
+      "held_ms": 32.55078125000033,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 1.397485904902133,
+        "tail_rms_n": 0.5929116408506551,
+        "tail_to_attack": 0.42427021179306784
+      },
+      "after": {
+        "attack_rms_n": 1.8510471738055405,
+        "tail_rms_n": 1.103626107682132,
+        "tail_to_attack": 0.5962171700968611
+      }
+    },
+    {
+      "key": 85,
+      "time_s": 22.60676953125,
+      "velocity": 53,
+      "held_ms": 28.644531250002103,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.30531327190253066,
+        "tail_rms_n": 0.0017303277827438134,
+        "tail_to_attack": 0.005667384755210411
+      },
+      "after": {
+        "attack_rms_n": 0.6316977408282547,
+        "tail_rms_n": 0.1086677656617606,
+        "tail_to_attack": 0.17202493952136055
+      }
+    },
+    {
+      "key": 85,
+      "time_s": 22.7486953125,
+      "velocity": 60,
+      "held_ms": 61.1992187499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.4543666425070686,
+        "tail_rms_n": 0.011276463835661561,
+        "tail_to_attack": 0.024817983497734723
+      },
+      "after": {
+        "attack_rms_n": 1.059056981255478,
+        "tail_rms_n": 0.8685807166106173,
+        "tail_to_attack": 0.8201454048118759
+      }
+    },
+    {
+      "key": 85,
+      "time_s": 29.7994765625,
+      "velocity": 70,
+      "held_ms": 32.554687499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.7244821306461701,
+        "tail_rms_n": 0.006302450083321988,
+        "tail_to_attack": 0.008699248493128179
+      },
+      "after": {
+        "attack_rms_n": 1.8510483047976745,
+        "tail_rms_n": 0.536188872838614,
+        "tail_to_attack": 0.28966768260389686
+      }
+    },
+    {
+      "key": 85,
+      "time_s": 30.07161328125,
+      "velocity": 60,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 64,
+      "before": {
+        "attack_rms_n": 0.4543668304151973,
+        "tail_rms_n": 0.0073997446487420945,
+        "tail_to_attack": 0.016285838123307236
+      },
+      "after": {
+        "attack_rms_n": 1.0592094080008299,
+        "tail_rms_n": 0.5317584991812134,
+        "tail_to_attack": 0.5020333988392943
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 1.40364453125,
+      "velocity": 39,
+      "held_ms": 110.67578124999989,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.09414347835400702,
+        "tail_rms_n": 0.018777133126673694,
+        "tail_to_attack": 0.1994522982894915
+      },
+      "after": {
+        "attack_rms_n": 0.09414347835400702,
+        "tail_rms_n": 0.018777133126673694,
+        "tail_to_attack": 0.1994522982894915
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 1.76953125,
+      "velocity": 48,
+      "held_ms": 57.289062499999986,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.14960308684741233,
+        "tail_rms_n": 0.04749808413519326,
+        "tail_to_attack": 0.31749401122744836
+      },
+      "after": {
+        "attack_rms_n": 0.14960308684741233,
+        "tail_rms_n": 0.04749808413519326,
+        "tail_to_attack": 0.31749401122744836
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 2.1171875,
+      "velocity": 47,
+      "held_ms": 62.5,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.14009316532189506,
+        "tail_rms_n": 0.038304477949067925,
+        "tail_to_attack": 0.2734214610759555
+      },
+      "after": {
+        "attack_rms_n": 0.14009316532189506,
+        "tail_rms_n": 0.038304477949067925,
+        "tail_to_attack": 0.2734214610759555
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 3.47395703125,
+      "velocity": 36,
+      "held_ms": 88.54296875000011,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.07908058009636335,
+        "tail_rms_n": 0.008131876939129775,
+        "tail_to_attack": 0.10283026413337772
+      },
+      "after": {
+        "attack_rms_n": 0.07908058009636335,
+        "tail_rms_n": 0.008131876939129775,
+        "tail_to_attack": 0.10283026413337772
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 3.8203125,
+      "velocity": 43,
+      "held_ms": 71.61328124999989,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.1178062868793588,
+        "tail_rms_n": 0.03402423576687953,
+        "tail_to_attack": 0.28881511053584547
+      },
+      "after": {
+        "attack_rms_n": 0.1178062868793588,
+        "tail_rms_n": 0.03402423576687953,
+        "tail_to_attack": 0.28881511053584547
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 4.15625,
+      "velocity": 50,
+      "held_ms": 50.78125,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.17222859910150878,
+        "tail_rms_n": 0.06935355697592607,
+        "tail_to_attack": 0.4026831625974627
+      },
+      "after": {
+        "attack_rms_n": 0.17222859910150878,
+        "tail_rms_n": 0.06935355697592607,
+        "tail_to_attack": 0.4026831625974627
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 4.9361953125,
+      "velocity": 35,
+      "held_ms": 80.73046875000057,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.07476759994089555,
+        "tail_rms_n": 0.005885322101869316,
+        "tail_to_attack": 0.07871487257209962
+      },
+      "after": {
+        "attack_rms_n": 0.07476759994089555,
+        "tail_rms_n": 0.005885322101869316,
+        "tail_to_attack": 0.07871487257209962
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 5.35546875,
+      "velocity": 39,
+      "held_ms": 83.33203125000033,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.09440817610537193,
+        "tail_rms_n": 0.019689898232608607,
+        "tail_to_attack": 0.20856136666205788
+      },
+      "after": {
+        "attack_rms_n": 0.09440817610537193,
+        "tail_rms_n": 0.019689898232608607,
+        "tail_to_attack": 0.20856136666205788
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 6.3359375,
+      "velocity": 40,
+      "held_ms": 66.40625,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.09961272350299658,
+        "tail_rms_n": 0.022294366799706422,
+        "tail_to_attack": 0.22381043320269983
+      },
+      "after": {
+        "attack_rms_n": 0.09961272350299658,
+        "tail_rms_n": 0.022294366799706422,
+        "tail_to_attack": 0.22381043320269983
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 6.95051953125,
+      "velocity": 25,
+      "held_ms": 188.80078124999943,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.039827985206370965,
+        "tail_rms_n": 0.005432493961745388,
+        "tail_to_attack": 0.13639891482324834
+      },
+      "after": {
+        "attack_rms_n": 0.039827985206370965,
+        "tail_rms_n": 0.005432493961745388,
+        "tail_to_attack": 0.13639891482324834
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 8.19140625,
+      "velocity": 45,
+      "held_ms": 67.70703125000033,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.12978919006444037,
+        "tail_rms_n": 0.03893595712897689,
+        "tail_to_attack": 0.29999383700326027
+      },
+      "after": {
+        "attack_rms_n": 0.12978919006444037,
+        "tail_rms_n": 0.03893595712897689,
+        "tail_to_attack": 0.29999383700326027
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 8.41536328125,
+      "velocity": 50,
+      "held_ms": 37.76171874999967,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.17695865822065127,
+        "tail_rms_n": 0.07715789267703625,
+        "tail_to_attack": 0.4360221390288087
+      },
+      "after": {
+        "attack_rms_n": 0.17695865822065127,
+        "tail_rms_n": 0.07715789267703625,
+        "tail_to_attack": 0.4360221390288087
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 8.765625,
+      "velocity": 61,
+      "held_ms": 52.08203125000033,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.3563501991037559,
+        "tail_rms_n": 0.2314919378124396,
+        "tail_to_attack": 0.6496192183830877
+      },
+      "after": {
+        "attack_rms_n": 0.3563501991037559,
+        "tail_rms_n": 0.2314919378124396,
+        "tail_to_attack": 0.6496192183830877
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 11.78645703125,
+      "velocity": 60,
+      "held_ms": 87.23828125000033,
+      "pedal_at_50ms": 102,
+      "before": {
+        "attack_rms_n": 0.29209854599427265,
+        "tail_rms_n": 0.12719513400661348,
+        "tail_to_attack": 0.4354528146439574
+      },
+      "after": {
+        "attack_rms_n": 0.3200513709061377,
+        "tail_rms_n": 0.19548775935212964,
+        "tail_to_attack": 0.6108011935667066
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 12.07421875,
+      "velocity": 52,
+      "held_ms": 105.46875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.20920580878760053,
+        "tail_rms_n": 0.0020462546263948227,
+        "tail_to_attack": 0.009781060278647974
+      },
+      "after": {
+        "attack_rms_n": 0.30933746992918837,
+        "tail_rms_n": 0.2110131168041204,
+        "tail_to_attack": 0.6821453503593478
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 12.36328125,
+      "velocity": 57,
+      "held_ms": 49.476562500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.29141697168210023,
+        "tail_rms_n": 0.00264801065954735,
+        "tail_to_attack": 0.009086672763987134
+      },
+      "after": {
+        "attack_rms_n": 0.5316469984273948,
+        "tail_rms_n": 0.299269480374651,
+        "tail_to_attack": 0.5629101288258683
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 12.61328125,
+      "velocity": 60,
+      "held_ms": 39.0625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.34473894905680785,
+        "tail_rms_n": 0.0020052681577745987,
+        "tail_to_attack": 0.005816772845832863
+      },
+      "after": {
+        "attack_rms_n": 0.678213774514094,
+        "tail_rms_n": 0.27467264996435337,
+        "tail_to_attack": 0.40499420726325186
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 12.89192578125,
+      "velocity": 64,
+      "held_ms": 36.45703125000033,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.4256229390576941,
+        "tail_rms_n": 0.0026677774250226964,
+        "tail_to_attack": 0.006267936194719696
+      },
+      "after": {
+        "attack_rms_n": 0.9072340411636123,
+        "tail_rms_n": 0.32201723552250877,
+        "tail_to_attack": 0.3549439515182782
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 13.1640625,
+      "velocity": 65,
+      "held_ms": 18.226562500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.44741192904289945,
+        "tail_rms_n": 0.0005640619416375228,
+        "tail_to_attack": 0.0012607217309653772
+      },
+      "after": {
+        "attack_rms_n": 0.9704651352569494,
+        "tail_rms_n": 0.011556318503197422,
+        "tail_to_attack": 0.011908020271266792
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 13.4401015625,
+      "velocity": 62,
+      "held_ms": 22.136718749999673,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.3838658616323491,
+        "tail_rms_n": 0.00028460812691588497,
+        "tail_to_attack": 0.000741425991114758
+      },
+      "after": {
+        "attack_rms_n": 0.7879114375686537,
+        "tail_rms_n": 0.028630481592267297,
+        "tail_to_attack": 0.03633718236229134
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 13.7526015625,
+      "velocity": 45,
+      "held_ms": 32.554687499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.1446178894523421,
+        "tail_rms_n": 0.00047966957394223153,
+        "tail_to_attack": 0.003316806625782653
+      },
+      "after": {
+        "attack_rms_n": 0.1713443915873596,
+        "tail_rms_n": 0.025900588637971993,
+        "tail_to_attack": 0.15116099452118123
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 14.015625,
+      "velocity": 72,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.6171020121149395,
+        "tail_rms_n": 0.0019200696738828507,
+        "tail_to_attack": 0.0031114299357125163
+      },
+      "after": {
+        "attack_rms_n": 1.474677577285192,
+        "tail_rms_n": 0.07720002754994353,
+        "tail_to_attack": 0.05235044510005023
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 14.3072890625,
+      "velocity": 63,
+      "held_ms": 26.042968749999673,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.4044312974708062,
+        "tail_rms_n": 0.0007676476674688668,
+        "tail_to_attack": 0.0018980916468866493
+      },
+      "after": {
+        "attack_rms_n": 0.8464032739552145,
+        "tail_rms_n": 0.07731378488731061,
+        "tail_to_attack": 0.09134391048137827
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 14.6432265625,
+      "velocity": 64,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 90,
+      "before": {
+        "attack_rms_n": 0.6357126817696864,
+        "tail_rms_n": 0.10620773917573272,
+        "tail_to_attack": 0.16706877528394332
+      },
+      "after": {
+        "attack_rms_n": 0.9072340411625325,
+        "tail_rms_n": 0.31952590698691646,
+        "tail_to_attack": 0.3521978811305129
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 15.2604140625,
+      "velocity": 63,
+      "held_ms": 50.78125,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 0.6494839868465347,
+        "tail_rms_n": 0.3098894635780193,
+        "tail_to_attack": 0.47713179978868736
+      },
+      "after": {
+        "attack_rms_n": 0.8464032613974274,
+        "tail_rms_n": 0.6163574029850925,
+        "tail_to_attack": 0.7282077363070116
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 15.4205703125,
+      "velocity": 65,
+      "held_ms": 41.66796874999967,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 0.7392331735364951,
+        "tail_rms_n": 0.3139735350475914,
+        "tail_to_attack": 0.42472868681682735
+      },
+      "after": {
+        "attack_rms_n": 0.9714617774042561,
+        "tail_rms_n": 0.6261356696741306,
+        "tail_to_attack": 0.6445293929599205
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 15.6783828125,
+      "velocity": 72,
+      "held_ms": 36.460937499999346,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 1.100203961592194,
+        "tail_rms_n": 0.4327507604215388,
+        "tail_to_attack": 0.39333684982852657
+      },
+      "after": {
+        "attack_rms_n": 1.4738327866097563,
+        "tail_rms_n": 0.8682326086408072,
+        "tail_to_attack": 0.5890984489753377
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 18.55859375,
+      "velocity": 63,
+      "held_ms": 82.03125,
+      "pedal_at_50ms": 107,
+      "before": {
+        "attack_rms_n": 0.7488082184686329,
+        "tail_rms_n": 0.5154066256924531,
+        "tail_to_attack": 0.688302575987343
+      },
+      "after": {
+        "attack_rms_n": 0.8463227261885153,
+        "tail_rms_n": 0.6869255194082747,
+        "tail_to_attack": 0.8116590730133183
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 18.8190078125,
+      "velocity": 64,
+      "held_ms": 93.75,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.42562292285891845,
+        "tail_rms_n": 0.005618949742159553,
+        "tail_to_attack": 0.013201708461604806
+      },
+      "after": {
+        "attack_rms_n": 0.9070442239564956,
+        "tail_rms_n": 0.7397617345621066,
+        "tail_to_attack": 0.8155740536390733
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 19.08333203125,
+      "velocity": 62,
+      "held_ms": 78.125,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.3838660425577509,
+        "tail_rms_n": 0.0045793440792035785,
+        "tail_to_attack": 0.01192953679541643
+      },
+      "after": {
+        "attack_rms_n": 0.7880602343,
+        "tail_rms_n": 0.6359986765148056,
+        "tail_to_attack": 0.8070432294807208
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 19.3385390625,
+      "velocity": 67,
+      "held_ms": 106.77343749999935,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.492653281934511,
+        "tail_rms_n": 0.007472237273712517,
+        "tail_to_attack": 0.015167334812773683
+      },
+      "after": {
+        "attack_rms_n": 1.1034392729287852,
+        "tail_rms_n": 0.9096156675435164,
+        "tail_to_attack": 0.8243459244741075
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 19.6119765625,
+      "velocity": 63,
+      "held_ms": 122.39843749999935,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.40443129747397794,
+        "tail_rms_n": 0.0050627594565797445,
+        "tail_to_attack": 0.012518218763486015
+      },
+      "after": {
+        "attack_rms_n": 0.8464032739566925,
+        "tail_rms_n": 0.686908863114287,
+        "tail_to_attack": 0.8115621527586787
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 20.0182265625,
+      "velocity": 69,
+      "held_ms": 36.460937499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.5420944062975054,
+        "tail_rms_n": 0.004505410370531795,
+        "tail_to_attack": 0.008311117617508107
+      },
+      "after": {
+        "attack_rms_n": 1.245466028234128,
+        "tail_rms_n": 0.4487219271993778,
+        "tail_to_attack": 0.36028435704151146
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 20.4322890625,
+      "velocity": 61,
+      "held_ms": 59.898437499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.3639589157829728,
+        "tail_rms_n": 0.003701080938429071,
+        "tail_to_attack": 0.010168952532642475
+      },
+      "after": {
+        "attack_rms_n": 0.7317909109819152,
+        "tail_rms_n": 0.5182289271891402,
+        "tail_to_attack": 0.7081652961414646
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 20.8268203125,
+      "velocity": 73,
+      "held_ms": 44.273437499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.6459965244712739,
+        "tail_rms_n": 0.007128801560834372,
+        "tail_to_attack": 0.011035355904846474
+      },
+      "after": {
+        "attack_rms_n": 1.5543993942351242,
+        "tail_rms_n": 0.8176307853765921,
+        "tail_to_attack": 0.5260107462785811
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 21.76953125,
+      "velocity": 75,
+      "held_ms": 32.55078124999855,
+      "pedal_at_50ms": 98,
+      "before": {
+        "attack_rms_n": 1.3512621995328318,
+        "tail_rms_n": 0.5657408684059554,
+        "tail_to_attack": 0.41867586364922177
+      },
+      "after": {
+        "attack_rms_n": 1.7232174189564984,
+        "tail_rms_n": 0.9809192027750095,
+        "tail_to_attack": 0.5692370515666034
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 22.07421875,
+      "velocity": 66,
+      "held_ms": 39.0625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.4697662830780714,
+        "tail_rms_n": 0.003865338831230179,
+        "tail_to_attack": 0.00822821681859145
+      },
+      "after": {
+        "attack_rms_n": 1.0356447527713348,
+        "tail_rms_n": 0.4332553218601782,
+        "tail_to_attack": 0.4183435687776219
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 22.3502578125,
+      "velocity": 65,
+      "held_ms": 36.460937499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.44741278150554037,
+        "tail_rms_n": 0.0030397458061443582,
+        "tail_to_attack": 0.006794052230505437
+      },
+      "after": {
+        "attack_rms_n": 0.9701432399726411,
+        "tail_rms_n": 0.34573640190473387,
+        "tail_to_attack": 0.3563766541469525
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 25.72395703125,
+      "velocity": 39,
+      "held_ms": 29.94921875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.10317917687160733,
+        "tail_rms_n": 7.797117521283967e-05,
+        "tail_to_attack": 0.0007556871219263976
+      },
+      "after": {
+        "attack_rms_n": 0.10788267940849357,
+        "tail_rms_n": 0.006465347058846697,
+        "tail_to_attack": 0.05992942606074801
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 25.9596328125,
+      "velocity": 66,
+      "held_ms": 29.949218749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.46976544263140096,
+        "tail_rms_n": 0.0022178409109891327,
+        "tail_to_attack": 0.004721166585957984
+      },
+      "after": {
+        "attack_rms_n": 1.0355135414136287,
+        "tail_rms_n": 0.18870091617909326,
+        "tail_to_attack": 0.18222930809913762
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 26.24348828125,
+      "velocity": 65,
+      "held_ms": 33.85546875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.44741132459920985,
+        "tail_rms_n": 0.002591623873801254,
+        "tail_to_attack": 0.005792486088998363
+      },
+      "after": {
+        "attack_rms_n": 0.9703718969112161,
+        "tail_rms_n": 0.2795391770279956,
+        "tail_to_attack": 0.2880742712333228
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 26.5625,
+      "velocity": 75,
+      "held_ms": 29.945312500000654,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.6992585403319453,
+        "tail_rms_n": 0.0035524761294186964,
+        "tail_to_attack": 0.005080347145609832
+      },
+      "after": {
+        "attack_rms_n": 1.7224537656994792,
+        "tail_rms_n": 0.31838244199343657,
+        "tail_to_attack": 0.184842373324397
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 26.8385390625,
+      "velocity": 73,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.645996965383546,
+        "tail_rms_n": 0.005013124542030921,
+        "tail_to_attack": 0.007760291163371785
+      },
+      "after": {
+        "attack_rms_n": 1.555010856455549,
+        "tail_rms_n": 0.5114360210860016,
+        "tail_to_attack": 0.32889546652539486
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 27.1158828125,
+      "velocity": 59,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.32622928795121625,
+        "tail_rms_n": 0.00036138681063086853,
+        "tail_to_attack": 0.0011077693633837979
+      },
+      "after": {
+        "attack_rms_n": 0.6267334274940972,
+        "tail_rms_n": 0.031161270900547433,
+        "tail_to_attack": 0.04972013544122141
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 27.4596328125,
+      "velocity": 70,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.5666717483314552,
+        "tail_rms_n": 0.001788378813968066,
+        "tail_to_attack": 0.0031559343115902354
+      },
+      "after": {
+        "attack_rms_n": 1.3192063581348068,
+        "tail_rms_n": 0.06931685087032922,
+        "tail_to_attack": 0.052544357782155174
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 27.7421875,
+      "velocity": 71,
+      "held_ms": 19.53125,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.5916796376395057,
+        "tail_rms_n": 0.001266639382666362,
+        "tail_to_attack": 0.0021407520254027924
+      },
+      "after": {
+        "attack_rms_n": 1.396244166506963,
+        "tail_rms_n": 0.02529812358575689,
+        "tail_to_attack": 0.01811869599358554
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 28.0455703125,
+      "velocity": 63,
+      "held_ms": 24.742187499999346,
+      "pedal_at_50ms": 60,
+      "before": {
+        "attack_rms_n": 0.4044294110424913,
+        "tail_rms_n": 0.0012145053839822083,
+        "tail_to_attack": 0.0030030095507930466
+      },
+      "after": {
+        "attack_rms_n": 0.8462494881132456,
+        "tail_rms_n": 0.16948383578403545,
+        "tail_to_attack": 0.20027644112601817
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 28.4765625,
+      "velocity": 59,
+      "held_ms": 24.73828124999855,
+      "pedal_at_50ms": 95,
+      "before": {
+        "attack_rms_n": 0.4992598005222784,
+        "tail_rms_n": 0.12753170653050322,
+        "tail_to_attack": 0.255441568492179
+      },
+      "after": {
+        "attack_rms_n": 0.6268127459080127,
+        "tail_rms_n": 0.2497662318824838,
+        "tail_to_attack": 0.39847025050626206
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 29.10676953125,
+      "velocity": 64,
+      "held_ms": 40.3632812500021,
+      "pedal_at_50ms": 95,
+      "before": {
+        "attack_rms_n": 0.7071623897999535,
+        "tail_rms_n": 0.30772189843062675,
+        "tail_to_attack": 0.4351502609148615
+      },
+      "after": {
+        "attack_rms_n": 0.9074564569849897,
+        "tail_rms_n": 0.5770321248138371,
+        "tail_to_attack": 0.63587858169087
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 29.26301953125,
+      "velocity": 74,
+      "held_ms": 53.38671875000145,
+      "pedal_at_50ms": 95,
+      "before": {
+        "attack_rms_n": 1.245372771049042,
+        "tail_rms_n": 0.67145556045016,
+        "tail_to_attack": 0.539160302890321
+      },
+      "after": {
+        "attack_rms_n": 1.6384051480505473,
+        "tail_rms_n": 1.2693681894668172,
+        "tail_to_attack": 0.7747584234443917
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 29.54036328125,
+      "velocity": 66,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.4697657172115202,
+        "tail_rms_n": 0.003187342642558042,
+        "tail_to_attack": 0.00678496221792806
+      },
+      "after": {
+        "attack_rms_n": 1.035784581333203,
+        "tail_rms_n": 0.33558599222469876,
+        "tail_to_attack": 0.3239920715876573
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 32.6080703125,
+      "velocity": 58,
+      "held_ms": 28.6484375000029,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.30844989730856953,
+        "tail_rms_n": 0.000901283240159472,
+        "tail_to_attack": 0.0029219761394760303
+      },
+      "after": {
+        "attack_rms_n": 0.5779695366307744,
+        "tail_rms_n": 0.08212973465378683,
+        "tail_to_attack": 0.14210045590387915
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 33.7578125,
+      "velocity": 70,
+      "held_ms": 114.5820312500021,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.5666713370594713,
+        "tail_rms_n": 0.009212215233980664,
+        "tail_to_attack": 0.016256716427169242
+      },
+      "after": {
+        "attack_rms_n": 1.3199041872720418,
+        "tail_rms_n": 1.0962067825754378,
+        "tail_to_attack": 0.8305199673932859
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 34.1796875,
+      "velocity": 73,
+      "held_ms": 46.875,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.645997162906959,
+        "tail_rms_n": 0.007608950631504228,
+        "tail_to_attack": 0.011778613078212732
+      },
+      "after": {
+        "attack_rms_n": 1.5553290087487173,
+        "tail_rms_n": 0.8833007000144342,
+        "tail_to_attack": 0.5679188744284152
+      }
+    },
+    {
+      "key": 87,
+      "time_s": 34.6705703125,
+      "velocity": 54,
+      "held_ms": 101.5625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.24487839220857266,
+        "tail_rms_n": 0.003040167069219542,
+        "tail_to_attack": 0.012415007472893366
+      },
+      "after": {
+        "attack_rms_n": 0.4076133285102665,
+        "tail_rms_n": 0.3019694213495711,
+        "tail_to_attack": 0.740823226888091
+      }
+    },
+    {
+      "key": 92,
+      "time_s": 32.9244765625,
+      "velocity": 65,
+      "held_ms": 22.136718750005002,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.26585911250767724,
+        "tail_rms_n": 4.571431375496257e-05,
+        "tail_to_attack": 0.00017194939576743859
+      },
+      "after": {
+        "attack_rms_n": 0.32734785856052045,
+        "tail_rms_n": 0.15760932902715166,
+        "tail_to_attack": 0.48147353008577165
+      }
+    },
+    {
+      "key": 92,
+      "time_s": 33.20051953125,
+      "velocity": 70,
+      "held_ms": 28.644531249994998,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.31806221779806276,
+        "tail_rms_n": 0.0005426817840985622,
+        "tail_to_attack": 0.0017062126644765774
+      },
+      "after": {
+        "attack_rms_n": 0.4082361507900012,
+        "tail_rms_n": 0.21666641957201302,
+        "tail_to_attack": 0.5307379543745192
+      }
+    },
+    {
+      "key": 92,
+      "time_s": 33.48958203125,
+      "velocity": 75,
+      "held_ms": 22.136718749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.3800329061863149,
+        "tail_rms_n": 0.0003207982338190428,
+        "tail_to_attack": 0.0008441327806012889
+      },
+      "after": {
+        "attack_rms_n": 0.537945767658731,
+        "tail_rms_n": 0.31978694134080377,
+        "tail_to_attack": 0.5944594428776588
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 1.38411328125,
+      "velocity": 54,
+      "held_ms": 134.1132812499999,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.15351383725193898,
+        "tail_rms_n": 0.009887179053232165,
+        "tail_to_attack": 0.06440578406626522
+      },
+      "after": {
+        "attack_rms_n": 0.15351383725193898,
+        "tail_rms_n": 0.009887179053232165,
+        "tail_to_attack": 0.06440578406626522
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 1.75130078125,
+      "velocity": 56,
+      "held_ms": 126.30078124999989,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.16400458604948162,
+        "tail_rms_n": 0.011299766189720062,
+        "tail_to_attack": 0.06889908667743488
+      },
+      "after": {
+        "attack_rms_n": 0.16400458604948162,
+        "tail_rms_n": 0.011299766189720062,
+        "tail_to_attack": 0.06889908667743488
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 2.09765625,
+      "velocity": 52,
+      "held_ms": 131.5078125000002,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.14322182549416138,
+        "tail_rms_n": 0.007796737898496974,
+        "tail_to_attack": 0.0544381966337583
+      },
+      "after": {
+        "attack_rms_n": 0.14322182549416138,
+        "tail_rms_n": 0.007796737898496974,
+        "tail_to_attack": 0.0544381966337583
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 3.45442578125,
+      "velocity": 49,
+      "held_ms": 169.26953125000034,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.12835159012272032,
+        "tail_rms_n": 0.0035629450684079153,
+        "tail_to_attack": 0.02775925927369727
+      },
+      "after": {
+        "attack_rms_n": 0.12835159012272032,
+        "tail_rms_n": 0.0035629450684079153,
+        "tail_to_attack": 0.02775925927369727
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 3.7916640625,
+      "velocity": 49,
+      "held_ms": 136.71875,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.1283466110791266,
+        "tail_rms_n": 0.0035549867481610873,
+        "tail_to_attack": 0.027698329689199296
+      },
+      "after": {
+        "attack_rms_n": 0.1283466110791266,
+        "tail_rms_n": 0.0035549867481610873,
+        "tail_to_attack": 0.027698329689199296
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 4.1393203125,
+      "velocity": 54,
+      "held_ms": 147.13671875000057,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.15352285540258045,
+        "tail_rms_n": 0.009940354685468956,
+        "tail_to_attack": 0.06474837026319324
+      },
+      "after": {
+        "attack_rms_n": 0.15352285540258045,
+        "tail_rms_n": 0.009940354685468956,
+        "tail_to_attack": 0.06474837026319324
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 4.9205703125,
+      "velocity": 43,
+      "held_ms": 143.23046875000057,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.10143725198208936,
+        "tail_rms_n": 0.0033833965873960327,
+        "tail_to_attack": 0.03335457656121673
+      },
+      "after": {
+        "attack_rms_n": 0.10143725198208936,
+        "tail_rms_n": 0.0033833965873960327,
+        "tail_to_attack": 0.03335457656121673
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 5.34505078125,
+      "velocity": 48,
+      "held_ms": 160.15625,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.12360404334859162,
+        "tail_rms_n": 0.002211912818256716,
+        "tail_to_attack": 0.017895149368363436
+      },
+      "after": {
+        "attack_rms_n": 0.12360404334859162,
+        "tail_rms_n": 0.002211912818256716,
+        "tail_to_attack": 0.017895149368363436
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 6.3203125,
+      "velocity": 42,
+      "held_ms": 164.0625,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.0972416703222933,
+        "tail_rms_n": 0.003553121085265522,
+        "tail_to_attack": 0.03653907911586896
+      },
+      "after": {
+        "attack_rms_n": 0.0972416703222933,
+        "tail_rms_n": 0.003553121085265522,
+        "tail_to_attack": 0.03653907911586896
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 6.93880078125,
+      "velocity": 38,
+      "held_ms": 207.03125,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.08107841583917569,
+        "tail_rms_n": 0.0020354105901205298,
+        "tail_to_attack": 0.025104222487004422
+      },
+      "after": {
+        "attack_rms_n": 0.08107841583917569,
+        "tail_rms_n": 0.0020354105901205298,
+        "tail_to_attack": 0.025104222487004422
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 8.61328125,
+      "velocity": 46,
+      "held_ms": 53.382812500000654,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.11444803710212775,
+        "tail_rms_n": 0.0013215144415965499,
+        "tail_to_attack": 0.011546851086815023
+      },
+      "after": {
+        "attack_rms_n": 0.11444803710212775,
+        "tail_rms_n": 0.0013215144415965499,
+        "tail_to_attack": 0.011546851086815023
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 8.90364453125,
+      "velocity": 59,
+      "held_ms": 63.80078125000033,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.18002084642692645,
+        "tail_rms_n": 0.01161762277657665,
+        "tail_to_attack": 0.06453487475014424
+      },
+      "after": {
+        "attack_rms_n": 0.18002084642692645,
+        "tail_rms_n": 0.01161762277657665,
+        "tail_to_attack": 0.06453487475014424
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 9.1953125,
+      "velocity": 48,
+      "held_ms": 41.664062500000654,
+      "pedal_at_50ms": 127,
+      "before": {
+        "attack_rms_n": 0.12361815988216594,
+        "tail_rms_n": 0.0023935406545064425,
+        "tail_to_attack": 0.01936237084250396
+      },
+      "after": {
+        "attack_rms_n": 0.12361815988216594,
+        "tail_rms_n": 0.002395013816379226,
+        "tail_to_attack": 0.01937428787697679
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 9.53515625,
+      "velocity": 62,
+      "held_ms": 28.644531250000327,
+      "pedal_at_50ms": 100,
+      "before": {
+        "attack_rms_n": 0.19604130715351525,
+        "tail_rms_n": 0.0011912733388864324,
+        "tail_to_attack": 0.006076644540803713
+      },
+      "after": {
+        "attack_rms_n": 0.19638051752924213,
+        "tail_rms_n": 0.009116985552558141,
+        "tail_to_attack": 0.04642510197683216
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 9.8190078125,
+      "velocity": 58,
+      "held_ms": 24.742187499999346,
+      "pedal_at_50ms": 103,
+      "before": {
+        "attack_rms_n": 0.17417179722347223,
+        "tail_rms_n": 0.0022472572031422776,
+        "tail_to_attack": 0.012902532091684855
+      },
+      "after": {
+        "attack_rms_n": 0.17470335455693906,
+        "tail_rms_n": 0.012075573997810675,
+        "tail_to_attack": 0.06912044722000471
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 10.07551953125,
+      "velocity": 69,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 83,
+      "before": {
+        "attack_rms_n": 0.23770288838163992,
+        "tail_rms_n": 0.0024441234513185818,
+        "tail_to_attack": 0.010282262314770278
+      },
+      "after": {
+        "attack_rms_n": 0.2379296408419601,
+        "tail_rms_n": 0.010288473133771698,
+        "tail_to_attack": 0.043241662103821715
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 10.3893203125,
+      "velocity": 64,
+      "held_ms": 29.949218749999673,
+      "pedal_at_50ms": 96,
+      "before": {
+        "attack_rms_n": 0.20747830237516404,
+        "tail_rms_n": 0.0008871205056325097,
+        "tail_to_attack": 0.004275726644554913
+      },
+      "after": {
+        "attack_rms_n": 0.2076603813306121,
+        "tail_rms_n": 0.006746062505054546,
+        "tail_to_attack": 0.03248603542875263
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 10.6666640625,
+      "velocity": 76,
+      "held_ms": 32.554687499999346,
+      "pedal_at_50ms": 97,
+      "before": {
+        "attack_rms_n": 0.28379595793724016,
+        "tail_rms_n": 0.005282295576110017,
+        "tail_to_attack": 0.0186130049719671
+      },
+      "after": {
+        "attack_rms_n": 0.2858729524114972,
+        "tail_rms_n": 0.028437695478203254,
+        "tail_to_attack": 0.09947669144043007
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 10.9479140625,
+      "velocity": 65,
+      "held_ms": 22.136718749999673,
+      "pedal_at_50ms": 64,
+      "before": {
+        "attack_rms_n": 0.2133331506638675,
+        "tail_rms_n": 0.0003171521265810052,
+        "tail_to_attack": 0.001486651866313629
+      },
+      "after": {
+        "attack_rms_n": 0.2135532212987817,
+        "tail_rms_n": 0.006917170764842132,
+        "tail_to_attack": 0.03239085190461415
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 11.23567578125,
+      "velocity": 64,
+      "held_ms": 22.136718749999673,
+      "pedal_at_50ms": 94,
+      "before": {
+        "attack_rms_n": 0.20747518671397608,
+        "tail_rms_n": 0.0003386798140758075,
+        "tail_to_attack": 0.001632387079341248
+      },
+      "after": {
+        "attack_rms_n": 0.2076414182991252,
+        "tail_rms_n": 0.006542849933055427,
+        "tail_to_attack": 0.03151033154488424
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 11.52734375,
+      "velocity": 72,
+      "held_ms": 22.132812500000654,
+      "pedal_at_50ms": 101,
+      "before": {
+        "attack_rms_n": 0.25699874472554146,
+        "tail_rms_n": 0.002381134752566608,
+        "tail_to_attack": 0.009265161022905036
+      },
+      "after": {
+        "attack_rms_n": 0.25786874776622576,
+        "tail_rms_n": 0.018481518727241547,
+        "tail_to_attack": 0.07167025429539917
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 15.5416640625,
+      "velocity": 68,
+      "held_ms": 89.84375,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 0.25005235385633306,
+        "tail_rms_n": 0.006957416514690451,
+        "tail_to_attack": 0.027823839317616728
+      },
+      "after": {
+        "attack_rms_n": 0.2526622721523293,
+        "tail_rms_n": 0.028315567766404134,
+        "tail_to_attack": 0.11206884005750083
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 15.79817578125,
+      "velocity": 67,
+      "held_ms": 71.61328125000033,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 0.24338963899690746,
+        "tail_rms_n": 0.006776068822267755,
+        "tail_to_attack": 0.027840416092460914
+      },
+      "after": {
+        "attack_rms_n": 0.24618173147714856,
+        "tail_rms_n": 0.028328764270962748,
+        "tail_to_attack": 0.11507256895539514
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 16.0494765625,
+      "velocity": 58,
+      "held_ms": 41.6679687499979,
+      "pedal_at_50ms": 63,
+      "before": {
+        "attack_rms_n": 0.18645310794456377,
+        "tail_rms_n": 0.0013640771363759307,
+        "tail_to_attack": 0.007315925979530994
+      },
+      "after": {
+        "attack_rms_n": 0.1871072122912487,
+        "tail_rms_n": 0.01107208835562511,
+        "tail_to_attack": 0.05917510191103932
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 16.3515625,
+      "velocity": 61,
+      "held_ms": 40.36328124999855,
+      "pedal_at_50ms": 94,
+      "before": {
+        "attack_rms_n": 0.20464652242425166,
+        "tail_rms_n": 0.0025363438304479326,
+        "tail_to_attack": 0.01239377928538581
+      },
+      "after": {
+        "attack_rms_n": 0.20590048955650592,
+        "tail_rms_n": 0.01714571300641424,
+        "tail_to_attack": 0.08327184186567409
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 16.6197890625,
+      "velocity": 72,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 95,
+      "before": {
+        "attack_rms_n": 0.27731357199369444,
+        "tail_rms_n": 0.004589184076111418,
+        "tail_to_attack": 0.016548717912067308
+      },
+      "after": {
+        "attack_rms_n": 0.279356525548956,
+        "tail_rms_n": 0.026527231837841263,
+        "tail_to_attack": 0.0949583396547237
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 16.8815078125,
+      "velocity": 71,
+      "held_ms": 22.136718749997897,
+      "pedal_at_50ms": 85,
+      "before": {
+        "attack_rms_n": 0.27048884908532755,
+        "tail_rms_n": 0.0020393121237848246,
+        "tail_to_attack": 0.007539357465865477
+      },
+      "after": {
+        "attack_rms_n": 0.27247479118866663,
+        "tail_rms_n": 0.027763005879000255,
+        "tail_to_attack": 0.10189201635088742
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 17.1640625,
+      "velocity": 69,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 91,
+      "before": {
+        "attack_rms_n": 0.2565194709067773,
+        "tail_rms_n": 0.0026483524680584584,
+        "tail_to_attack": 0.010324177181157941
+      },
+      "after": {
+        "attack_rms_n": 0.25917499818331413,
+        "tail_rms_n": 0.028293614211969773,
+        "tail_to_attack": 0.1091679923229236
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 17.43489453125,
+      "velocity": 80,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 93,
+      "before": {
+        "attack_rms_n": 0.33591969444036324,
+        "tail_rms_n": 0.001850247749071565,
+        "tail_to_attack": 0.005508006168420842
+      },
+      "after": {
+        "attack_rms_n": 0.33626145904058935,
+        "tail_rms_n": 0.012303256235074247,
+        "tail_to_attack": 0.0365883627287454
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 17.7135390625,
+      "velocity": 67,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.24325529323424291,
+        "tail_rms_n": 0.0004447810669066598,
+        "tail_to_attack": 0.0018284538066695119
+      },
+      "after": {
+        "attack_rms_n": 0.24591306907131671,
+        "tail_rms_n": 0.027645041306727323,
+        "tail_to_attack": 0.1124179426946603
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 17.9908828125,
+      "velocity": 69,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 97,
+      "before": {
+        "attack_rms_n": 0.25671243127505733,
+        "tail_rms_n": 0.003636205839491187,
+        "tail_to_attack": 0.014164510154146508
+      },
+      "after": {
+        "attack_rms_n": 0.25960095177702613,
+        "tail_rms_n": 0.029320125037268666,
+        "tail_to_attack": 0.11294305678221093
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 18.29036328125,
+      "velocity": 72,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 107,
+      "before": {
+        "attack_rms_n": 0.27794913098282714,
+        "tail_rms_n": 0.010282352416395229,
+        "tail_to_attack": 0.03699364837024986
+      },
+      "after": {
+        "attack_rms_n": 0.2792046208235833,
+        "tail_rms_n": 0.0263998802990313,
+        "tail_to_attack": 0.09455388030885127
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 20.13411328125,
+      "velocity": 72,
+      "held_ms": 31.25,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.27643668055902315,
+        "tail_rms_n": 6.107514875093887e-05,
+        "tail_to_attack": 0.00022093720930026312
+      },
+      "after": {
+        "attack_rms_n": 0.27933444317104505,
+        "tail_rms_n": 0.026944088384620053,
+        "tail_to_attack": 0.09645816705862284
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 20.96484375,
+      "velocity": 63,
+      "held_ms": 36.45703124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.21664979942874255,
+        "tail_rms_n": 5.773262568471995e-05,
+        "tail_to_attack": 0.0002664790174601965
+      },
+      "after": {
+        "attack_rms_n": 0.21904506531045156,
+        "tail_rms_n": 0.02136596643126105,
+        "tail_to_attack": 0.09754141870751193
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 21.9322890625,
+      "velocity": 83,
+      "held_ms": 36.460937499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.3607891810171588,
+        "tail_rms_n": 0.003835121569273551,
+        "tail_to_attack": 0.010629813118179827
+      },
+      "after": {
+        "attack_rms_n": 0.3630693270550073,
+        "tail_rms_n": 0.03172978125805691,
+        "tail_to_attack": 0.08739317505951046
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 22.21614453125,
+      "velocity": 74,
+      "held_ms": 75.5195312500021,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.2906647926672549,
+        "tail_rms_n": 6.435010415499961e-05,
+        "tail_to_attack": 0.00022138940036217544
+      },
+      "after": {
+        "attack_rms_n": 0.29248847569509207,
+        "tail_rms_n": 0.022036843081421332,
+        "tail_to_attack": 0.07534260291470044
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 22.4869765625,
+      "velocity": 73,
+      "held_ms": 41.6679687499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.28350451647419395,
+        "tail_rms_n": 7.470607119342962e-05,
+        "tail_to_attack": 0.0002635092806369092
+      },
+      "after": {
+        "attack_rms_n": 0.28579935701860204,
+        "tail_rms_n": 0.024330963011987786,
+        "tail_to_attack": 0.08513302222161451
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 22.99609375,
+      "velocity": 72,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 65,
+      "before": {
+        "attack_rms_n": 0.2768086381303736,
+        "tail_rms_n": 0.0010908510892383477,
+        "tail_to_attack": 0.003940813034615523
+      },
+      "after": {
+        "attack_rms_n": 0.2793897766588565,
+        "tail_rms_n": 0.0272316012895238,
+        "tail_to_attack": 0.09746813793682373
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 23.28255078125,
+      "velocity": 78,
+      "held_ms": 29.94921875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.32030095315471213,
+        "tail_rms_n": 6.775217870050589e-05,
+        "tail_to_attack": 0.0002115266221758015
+      },
+      "after": {
+        "attack_rms_n": 0.32064099306143173,
+        "tail_rms_n": 0.010587688932535363,
+        "tail_to_attack": 0.03302038467210854
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 23.5533828125,
+      "velocity": 57,
+      "held_ms": 26.042968749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.1804946323579128,
+        "tail_rms_n": 1.4292454665344583e-05,
+        "tail_to_attack": 7.918492909530563e-05
+      },
+      "after": {
+        "attack_rms_n": 0.18084467366689702,
+        "tail_rms_n": 0.008002331662068091,
+        "tail_to_attack": 0.04424975035099908
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 23.87890625,
+      "velocity": 74,
+      "held_ms": 32.55078124999855,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.2906647931532994,
+        "tail_rms_n": 3.076997434715133e-05,
+        "tail_to_attack": 0.00010586068582073837
+      },
+      "after": {
+        "attack_rms_n": 0.29261463924890724,
+        "tail_rms_n": 0.022524138661151924,
+        "tail_to_attack": 0.07697543335141269
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 24.15364453125,
+      "velocity": 85,
+      "held_ms": 28.644531250002103,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.376735050452574,
+        "tail_rms_n": 4.0877372652153806e-05,
+        "tail_to_attack": 0.00010850429924969175
+      },
+      "after": {
+        "attack_rms_n": 0.38395300010858674,
+        "tail_rms_n": 0.04901505455766977,
+        "tail_to_attack": 0.12765899613704723
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 24.4283828125,
+      "velocity": 71,
+      "held_ms": 33.8554687499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.2694584993460178,
+        "tail_rms_n": 7.908745773419752e-05,
+        "tail_to_attack": 0.0002935051517251995
+      },
+      "after": {
+        "attack_rms_n": 0.2725896254352548,
+        "tail_rms_n": 0.02749124559116329,
+        "tail_to_attack": 0.10085213458607208
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 24.8190078125,
+      "velocity": 66,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.23583707034102544,
+        "tail_rms_n": 2.8508888955873565e-06,
+        "tail_to_attack": 1.2088383270131834e-05
+      },
+      "after": {
+        "attack_rms_n": 0.2392858634381043,
+        "tail_rms_n": 0.027052387076267104,
+        "tail_to_attack": 0.11305468149088843
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 25.1080703125,
+      "velocity": 76,
+      "held_ms": 20.835937499999346,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.305275472586304,
+        "tail_rms_n": 7.138905325709771e-06,
+        "tail_to_attack": 2.3385125785667374e-05
+      },
+      "after": {
+        "attack_rms_n": 0.3063719839814929,
+        "tail_rms_n": 0.017046690318881556,
+        "tail_to_attack": 0.05564049981773562
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 29.40234375,
+      "velocity": 64,
+      "held_ms": 40.36328124999855,
+      "pedal_at_50ms": 76,
+      "before": {
+        "attack_rms_n": 0.22379452208241327,
+        "tail_rms_n": 0.004392448281960034,
+        "tail_to_attack": 0.01962714833718091
+      },
+      "after": {
+        "attack_rms_n": 0.22571658656124977,
+        "tail_rms_n": 0.023221258468867845,
+        "tail_to_attack": 0.10287794451723464
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 29.66926953125,
+      "velocity": 69,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.2557621840550705,
+        "tail_rms_n": 7.210066688860535e-05,
+        "tail_to_attack": 0.00028190511101156647
+      },
+      "after": {
+        "attack_rms_n": 0.2591262928240867,
+        "tail_rms_n": 0.02800387280610254,
+        "tail_to_attack": 0.10807036407190664
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 29.91536328125,
+      "velocity": 69,
+      "held_ms": 35.15625,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.25576217612479557,
+        "tail_rms_n": 7.210064351345306e-05,
+        "tail_to_attack": 0.0002819050283583471
+      },
+      "after": {
+        "attack_rms_n": 0.259200293453439,
+        "tail_rms_n": 0.027932212403693223,
+        "tail_to_attack": 0.10776304313370995
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 30.2643203125,
+      "velocity": 63,
+      "held_ms": 39.0625,
+      "pedal_at_50ms": 37,
+      "before": {
+        "attack_rms_n": 0.2168505725871709,
+        "tail_rms_n": 0.0004522714309420027,
+        "tail_to_attack": 0.0020856363234189566
+      },
+      "after": {
+        "attack_rms_n": 0.21902364493796053,
+        "tail_rms_n": 0.021399533795618472,
+        "tail_to_attack": 0.09770421728521589
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 30.5377578125,
+      "velocity": 75,
+      "held_ms": 19.53125,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.29792041731550784,
+        "tail_rms_n": 2.5593246796537164e-06,
+        "tail_to_attack": 8.590632030913494e-06
+      },
+      "after": {
+        "attack_rms_n": 0.2995147678970404,
+        "tail_rms_n": 0.020355818586224202,
+        "tail_to_attack": 0.06796265415941564
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 30.8033828125,
+      "velocity": 62,
+      "held_ms": 23.4375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.21041593161675623,
+        "tail_rms_n": 1.8037694462374116e-05,
+        "tail_to_attack": 8.572399591503985e-05
+      },
+      "after": {
+        "attack_rms_n": 0.21221744583437666,
+        "tail_rms_n": 0.018640314711441477,
+        "tail_to_attack": 0.08783592054910111
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 31.11458203125,
+      "velocity": 87,
+      "held_ms": 26.04296875000145,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.3941417773550211,
+        "tail_rms_n": 1.7523571410665483e-05,
+        "tail_to_attack": 4.4460071013688105e-05
+      },
+      "after": {
+        "attack_rms_n": 0.4078180075211794,
+        "tail_rms_n": 0.06962675802833647,
+        "tail_to_attack": 0.17072997450883898
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 31.4127578125,
+      "velocity": 72,
+      "held_ms": 22.136718749997897,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.2764366896092553,
+        "tail_rms_n": 1.968054209317483e-05,
+        "tail_to_attack": 7.119366868773236e-05
+      },
+      "after": {
+        "attack_rms_n": 0.2795588724591109,
+        "tail_rms_n": 0.0271313743911287,
+        "tail_to_attack": 0.09705066468636947
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 31.67317578125,
+      "velocity": 59,
+      "held_ms": 27.34375,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.19220879250431036,
+        "tail_rms_n": 5.723339164059651e-06,
+        "tail_to_attack": 2.9776677172202214e-05
+      },
+      "after": {
+        "attack_rms_n": 0.19319459480570964,
+        "tail_rms_n": 0.014176439964735756,
+        "tail_to_attack": 0.07337907139168465
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 32.03645703125,
+      "velocity": 75,
+      "held_ms": 19.53125,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.2979204173165536,
+        "tail_rms_n": 2.556000377102153e-06,
+        "tail_to_attack": 8.579473673287353e-06
+      },
+      "after": {
+        "attack_rms_n": 0.29938257484423175,
+        "tail_rms_n": 0.019718414377578174,
+        "tail_to_attack": 0.06586360073841181
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 32.34765625,
+      "velocity": 77,
+      "held_ms": 19.53125,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.31273432892312897,
+        "tail_rms_n": 1.0285345788128993e-05,
+        "tail_to_attack": 3.28884450375039e-05
+      },
+      "after": {
+        "attack_rms_n": 0.3133900429517081,
+        "tail_rms_n": 0.013782253186015002,
+        "tail_to_attack": 0.04397795493502256
+      }
+    },
+    {
+      "key": 99,
+      "time_s": 34.35286328125,
+      "velocity": 34,
+      "held_ms": 45.5742187499979,
+      "pedal_at_50ms": 0,
+      "before": {
+        "attack_rms_n": 0.0705160042693959,
+        "tail_rms_n": 4.09764044424696e-06,
+        "tail_to_attack": 5.810936803214962e-05
+      },
+      "after": {
+        "attack_rms_n": 0.0706182677635336,
+        "tail_rms_n": 0.0025708600460946467,
+        "tail_to_attack": 0.036405028436879996
+      }
+    }
+  ]
+}

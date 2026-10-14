@@ -52,7 +52,11 @@ def main():
                 else:continue
                 declared.append([e['time_s'],kind,e['value']])
             parsed=np.loadtxt(voice['events_path'],ndmin=2)
-            np.testing.assert_allclose(parsed,np.asarray(declared),rtol=0,atol=1e-14)
+            # The producer serializes seconds with .16g. Compare that exact
+            # representation: its final digit can differ by >1e-14 s once
+            # timestamps exceed 100 seconds, without changing a native tick.
+            serialized=np.asarray([[float(f'{t:.16g}'),kind,value] for t,kind,value in declared])
+            np.testing.assert_array_equal(parsed,serialized)
             if data['attacks']!=expected or len(data['launch_work_j'])!=expected:raise ValueError('strike count changed')
             if data['felt_heat_j']<0 or data['peak_contact_force_n']<=0:raise ValueError('felt control failed')
             # This excerpt starts at full soft pedal, so the unstruck first wire

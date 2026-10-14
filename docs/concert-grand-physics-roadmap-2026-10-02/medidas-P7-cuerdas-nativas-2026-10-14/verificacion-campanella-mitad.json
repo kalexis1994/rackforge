@@ -1,0 +1,26 @@
+{
+  "measurement_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\campanella-mitad.json",
+  "measurement_sha256": "32872f7bc6bc38514ebf0591ea5be4a49b436fa139a5c2115a1fb297a21354c3",
+  "verifier_sha256": "ae6581a9dea475938d03c587e147b8c126bd0dfd73a5ae0917884a46b7303836",
+  "all_retained_artifact_hashes_passed": true,
+  "original_MIDI_events_preserved": true,
+  "no_clipping": true,
+  "common_gain_verified": true,
+  "body_feedback": false,
+  "complete_reciprocal_piano": false,
+  "perceptual_quality_decided_by_listener": true,
+  "variants": [
+    {
+      "nonlinear_transverse": 8,
+      "strikes": 1621,
+      "frames": 6655362,
+      "rate_hz": 48000,
+      "stereo": true,
+      "float32": true,
+      "common_gain_exact": true,
+      "peak": 0.5499603748321533,
+      "render_wall_seconds": 893.7284608000045,
+      "wav_path": "C:\\SHARED\\Piano-Campanella-mitad-2026-10-14\\Campanella-hibrido-NL8.wav"
+    }
+  ]
+}

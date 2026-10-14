@@ -66,6 +66,17 @@ las próximas escuchas offline y como opción por defecto del productor;
 `--modes 8 12` conserva la comparación. La valoración del timbre general
 sigue pendiente. Las fuentes de los renders medidos están en **552dadb0**.
 
+Para evaluar más música, el usuario pide la obra completa o al menos un 50 %.
+Ya se entrega la [primera mitad de La Campanella](RESULTADOS-P7-Campanella-mitad.md):
+**2 min 18,65 s** de audio, con 1.621 golpes y 51 alturas. El render tarda
+**15 min 1,7 s** incluida preparación, con ocho procesos, ocho modos no lineales,
+vuelo limitado a 64 kHz y reposo de residuos transversales menores a 1e−18 J;
+los ataques conservan el reloj fino original. Pasan la autenticación de
+fuentes/artefactos, conservación de eventos, estados finitos y reconstrucción
+exacta del WAV sin saturación. Las fuentes de simulación están en **d736c9c9**.
+El nuevo audio está en `C:/SHARED/Piano-Campanella-mitad-2026-10-14/`;
+la valoración del timbre sobre este pasaje más largo sigue pendiente.
+
 El usuario pide avanzar hacia una prueba tocable. El
 [cuerpo con presión estéreo nativa](RESULTADOS-P7-presion-realtime.md)
 ya conserva los 161 modos, las pérdidas y los puertos recíprocos; conversión

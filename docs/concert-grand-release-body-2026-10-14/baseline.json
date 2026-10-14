@@ -1,0 +1,5760 @@
+{
+  "stage": "unchanged release baseline; no candidate fitted",
+  "release": "0.171.35",
+  "research_comparison": "0.172.0",
+  "release_ref": "v0.1.32",
+  "release_commit": "91eb43f88495f0485e7a7ed61718280ddce23a8d",
+  "source_sha256": {
+    "plugins/concert-grand/src/lib.rs": "e16dc6ca43d2c37652eaa0444b360c5d1f6cc96b37cf65816749f18f8adea841",
+    "plugins/concert-grand/src/math.rs": "8fcbef468ccce24de475503793ee778f715f419c31bb2300d0cc0ffd4bd472ee",
+    "crates/rackforge-plugin-sdk/src/lib.rs": "af557b4b598264ce09d000916c91388804b763337c6517d13f09d32faca793ab",
+    "crates/rackforge-plugin-sdk/src/portable.rs": "d5b3e171d927b3777cc11eabad67ffb9c3aa22a857075bb6b82d78294aee7988",
+    "tools/concert-grand-release-probe.rs": "317935110022c4e58e35c4ba1093a72dd939823ff029477aa4c3fbe462a26b5d",
+    "tools/measure-concert-grand-release-body.py": "5f5652eea6e7b6c0bc545a943e242723bf23094b0f883c0ab43fcf595f79a386"
+  },
+  "probe_sha256": "a81d0c0832b199e50731ea211d326d4a1c7303bae8d2fedd8c4956d6698a3700",
+  "research_binary_sha256": "a42697f5e87c444105b82b1d833653157229d669f69e48f14a1a5378497e5831",
+  "reference_manifest_sha256": "5a4db7c5b1ac7358d3ccd6a0ad499627b17e11c201fb0ab436a82217692abaeb",
+  "rate_hz": 44100,
+  "block_frames": 256,
+  "warmup_frames": 8820,
+  "duration_s": 4,
+  "note_off_s": 2,
+  "output_gain": 1.0,
+  "per_note_normalization": false,
+  "self_check": {
+    "opposite_stereo_phase_preserves_energy": true,
+    "expected_slope_db_per_s": -6.080122746645525,
+    "maximum_slope_error_db_per_s": 7.993299631081641e-07
+  },
+  "alignment": "Analysis only: first 1 ms stereo energy block above -40 dB of first-second peak; raw audio untouched",
+  "reference_scope": "Previously used Steinway ORTF corpus, not new or blind validation. Recordings do not uniquely identify mechanics.",
+  "cases": [
+    {
+      "note": 48,
+      "velocity": 60,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.06542178,
+        "rms": 0.009579358786715262,
+        "wall_seconds": 0.1802983
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\48-60\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\48-60\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "4c3a56765ca72aaba0085c45713cbd09d66c998789ea8c11a1ea0b976918a3e5",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\48-60\\release.f32",
+      "release_raw_sha256": "3da088c1d0974e060ce19e24a3a8b9d8c8ff2cf30c516211c9abfd646b24cc70",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\48-60\\research-0.172\\performance.f32",
+      "research_raw_sha256": "da4f9033bfb5249e6727381f3786cae00a788628618ef445e8b42229477f89a7",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\48-60.wav",
+      "reference_sha256": "97ee393b824dd066a7d165823a2795a1b7e4d32ab63c15b7254f7ef879601678",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C3v8.wav",
+          "sha256": "dedfcf606ddb944b75f3731391e0526449af54bbde165f26b60e1dcf17acf516",
+          "layer": 8,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "542486ee82c7324bc05fcda51c47ce6d5b32ae3842f752bec422f10971e3b408",
+      "release": {
+        "analysis_onset_frame": 176,
+        "peak": 0.06542178243398666,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 130.88150024414062,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -19.819295002078114,
+                "mean_level_db": -29.82023474927374,
+                "residual_rms_db": 0.20808618343547117
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -22.87798737127334,
+                "mean_level_db": -37.854016506226586,
+                "residual_rms_db": 0.08363644660691284
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -14.415030061231889,
+                "mean_level_db": -47.751860208448804,
+                "residual_rms_db": 0.18446065408566412
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -16.459129630616836
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 261.4265441894531,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": 8.812814126414512,
+                "mean_level_db": -40.923608903733026,
+                "residual_rms_db": 0.3288642869443256
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -7.530269331514578,
+                "mean_level_db": -41.713412182568874,
+                "residual_rms_db": 0.06893302165962428
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -11.141573339563468,
+                "mean_level_db": -46.85392525443114,
+                "residual_rms_db": 0.039592037827079624
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -1.788431829422862
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 392.6445007324219,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -16.228224837321,
+                "mean_level_db": -43.105656748748885,
+                "residual_rms_db": 0.08186274471666584
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -33.94279486880599,
+                "mean_level_db": -51.59251063308517,
+                "residual_rms_db": 0.39833076083253277
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 26.413761161453323,
+                "mean_level_db": -65.14425587930859,
+                "residual_rms_db": 1.885823130750366
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -19.410400584536163
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -30.931133925822515
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -34.789286763949924
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -46.7368488054182
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -52.86865329394733
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -71.92610879688371
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 44,
+        "peak": 0.07520995289087296,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 130.88150024414062,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -24.082541074485146,
+                "mean_level_db": -44.631038706218824,
+                "residual_rms_db": 1.0242167129517936
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -11.720738709812586,
+                "mean_level_db": -49.75072240710085,
+                "residual_rms_db": 0.4029566952068068
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -5.5912990017521365,
+                "mean_level_db": -54.03419580626167,
+                "residual_rms_db": 0.06633461105371821
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -9.945716479517486
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 261.76300048828125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -23.113766624209976,
+                "mean_level_db": -37.13668137743783,
+                "residual_rms_db": 0.14454761612635864
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -24.12271192837504,
+                "mean_level_db": -45.87819974326359,
+                "residual_rms_db": 0.06028320081261777
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -11.670519318890445,
+                "mean_level_db": -55.116201162470226,
+                "residual_rms_db": 0.14321944783405424
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.16415608373478
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 392.6445007324219,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -16.707403350132232,
+                "mean_level_db": -40.51101609708055,
+                "residual_rms_db": 0.05032646938811522
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -10.935250071674227,
+                "mean_level_db": -45.341569701099466,
+                "residual_rms_db": 0.08164744568552702
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -5.422966808424364,
+                "mean_level_db": -49.36993891142521,
+                "residual_rms_db": 0.056751447758015876
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -9.593843604893905
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -33.974850965229464
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -39.69088662312646
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -48.82473032382933
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -51.592050265910174
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -82.13984168222994
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 44,
+        "peak": 0.05856145918369293,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 130.20858764648438,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -15.58933225791626,
+                "mean_level_db": -44.67595461876957,
+                "residual_rms_db": 0.3245668877140728
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -10.841996347151937,
+                "mean_level_db": -48.897596392760796,
+                "residual_rms_db": 0.08444184125138077
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -12.518260074254176,
+                "mean_level_db": -54.68237332972974,
+                "residual_rms_db": 0.16890916770517186
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -10.795936867726809
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 261.4265441894531,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": 18.466926972992354,
+                "mean_level_db": -49.37127549537865,
+                "residual_rms_db": 0.677876983321128
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -7.466953061923126,
+                "mean_level_db": -49.87152249068117,
+                "residual_rms_db": 0.09353504668162965
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -5.804678937167254,
+                "mean_level_db": -53.06826625596392,
+                "residual_rms_db": 0.022558908560904267
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -0.7843418918281841
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 391.9715881347656,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -4.359136190981059,
+                "mean_level_db": -40.12590518903099,
+                "residual_rms_db": 0.09171554694398702
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -10.88737880856207,
+                "mean_level_db": -43.44902731715041,
+                "residual_rms_db": 0.052638300968978986
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -10.478411808454357,
+                "mean_level_db": -48.91067907456504,
+                "residual_rms_db": 0.02556873330202379
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -7.255140808981416
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -36.79300478263351
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -41.1212014612742
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -48.584286636294244
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -54.11570749315561
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -94.33710966944363
+          }
+        ]
+      }
+    },
+    {
+      "note": 48,
+      "velocity": 110,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.2569819,
+        "rms": 0.0335495727533473,
+        "wall_seconds": 0.1910198
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\48-110\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\48-110\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "4bd22d0036ba527fc9ff767539c14d74635268c5186670a2177a65711d0a5357",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\48-110\\release.f32",
+      "release_raw_sha256": "9dfd9a007de3cf224876794ccb86570b6a9f2651c235c31f9ecaee9f1047f666",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\48-110\\research-0.172\\performance.f32",
+      "research_raw_sha256": "04b9be95a3ae324b65595f461805e8a3c810220cc9748b47b931800984af1be4",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\48-110.wav",
+      "reference_sha256": "3b0e2dc4dfa920ff4ae3ed3b857d75039716164bfb6c3bea65f436649d367e8d",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C3v14.wav",
+          "sha256": "f422ead802c308b95e0a181f6ce2cce0858f943f9f272cf5009e722367e132d8",
+          "layer": 14,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "04d71414a14d0cd625406f0e2316d7d9c829025a2bd0a4a45dde1ee53851515b",
+      "release": {
+        "analysis_onset_frame": 44,
+        "peak": 0.25698190927505493,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 130.88150024414062,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -19.751685683149326,
+                "mean_level_db": -19.04818412726786,
+                "residual_rms_db": 0.2135248839873597
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -23.05255890935313,
+                "mean_level_db": -27.125990191758127,
+                "residual_rms_db": 0.08187457346537086
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -14.62742573420134,
+                "mean_level_db": -37.13870163520598,
+                "residual_rms_db": 0.1878329033536491
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -16.54949083871037
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 261.4265441894531,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": 8.127582458902443,
+                "mean_level_db": -30.08449033164352,
+                "residual_rms_db": 0.32120049217471486
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -7.9937436596998985,
+                "mean_level_db": -31.059432875021248,
+                "residual_rms_db": 0.06924532342231361
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -11.409135871219409,
+                "mean_level_db": -36.38009778102536,
+                "residual_rms_db": 0.041580238701100496
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -2.174526902842466
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 392.98095703125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -16.770372246513794,
+                "mean_level_db": -30.963236659992816,
+                "residual_rms_db": 0.07502259523980309
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -35.4204276242843,
+                "mean_level_db": -39.7381936621891,
+                "residual_rms_db": 0.43304467730798274
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 27.66859992812019,
+                "mean_level_db": -52.50961904084774,
+                "residual_rms_db": 1.7486985860522108
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -19.448970558754866
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -20.06905907533039
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -23.924667480125983
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -35.96345511364949
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -41.997799884091975
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -61.20991864789736
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.2555064260959625,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 130.88150024414062,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -24.452738630996397,
+                "mean_level_db": -35.12412604086323,
+                "residual_rms_db": 1.0963599666351267
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -11.913282703749712,
+                "mean_level_db": -40.23156441305229,
+                "residual_rms_db": 0.484666041764013
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -5.601832469389801,
+                "mean_level_db": -44.50271508592915,
+                "residual_rms_db": 0.068229656883677
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -9.91256279529049
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 261.76300048828125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -23.666686592677102,
+                "mean_level_db": -27.267165740813542,
+                "residual_rms_db": 0.15242348289822
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -24.984936545293465,
+                "mean_level_db": -36.288275180103746,
+                "residual_rms_db": 0.0728816199649275
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -11.44508215197801,
+                "mean_level_db": -45.50675207847593,
+                "residual_rms_db": 0.15538205083108644
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.48961468024177
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 392.6445007324219,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -16.768926257065797,
+                "mean_level_db": -29.769091641417717,
+                "residual_rms_db": 0.05525315281454566
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -10.994401894192523,
+                "mean_level_db": -34.61209476571082,
+                "residual_rms_db": 0.07660581697928943
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -5.453645515028529,
+                "mean_level_db": -38.665533638918674,
+                "residual_rms_db": 0.05738124484740056
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -9.647370617337842
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -23.549105566086297
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -29.25122386556331
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -38.06614210593084
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -40.83900699122273
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -69.81009847082488
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 88,
+        "peak": 0.23985588550567627,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 130.20858764648438,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -16.801962097069165,
+                "mean_level_db": -34.07167501907487,
+                "residual_rms_db": 0.464286890146965
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -11.054418371344767,
+                "mean_level_db": -38.23628752018065,
+                "residual_rms_db": 0.03757144850484607
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -12.700510439712206,
+                "mean_level_db": -44.51904123869054,
+                "residual_rms_db": 0.040473039839383405
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -11.184848288878726
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 261.4265441894531,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": 13.931391581527667,
+                "mean_level_db": -37.835988521991524,
+                "residual_rms_db": 0.7147619661845375
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -7.442538546974912,
+                "mean_level_db": -38.690224848713,
+                "residual_rms_db": 0.07445606821738164
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.008141614837115,
+                "mean_level_db": -42.23023931683792,
+                "residual_rms_db": 0.017710797786149386
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -1.4490995737829167
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 391.9715881347656,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -5.033236850975277,
+                "mean_level_db": -28.396823968676372,
+                "residual_rms_db": 0.09748215821201471
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -12.851772230154747,
+                "mean_level_db": -32.06023874809558,
+                "residual_rms_db": 0.036798716136348976
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -11.760502025014482,
+                "mean_level_db": -38.73496876504095,
+                "residual_rms_db": 0.09098070610727875
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -8.474373993167614
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -25.05004825040809
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -29.168146115840013
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -37.75543949407733
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -43.06020984085956
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -89.17606723519401
+          }
+        ]
+      }
+    },
+    {
+      "note": 57,
+      "velocity": 60,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.053981684,
+        "rms": 0.005458165895818674,
+        "wall_seconds": 0.1783224
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\57-60\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\57-60\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "83f18be87fc742605bb9ae559dcd227540c595974342a77ebac135472e5ed293",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\57-60\\release.f32",
+      "release_raw_sha256": "d42fa8fe6fdd15be875833b4d0af20c63c9f14780fe2fc42042751ef3faf575e",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\57-60\\research-0.172\\performance.f32",
+      "research_raw_sha256": "abb4570fbcd15d621b110b340eac8e06a933347cb4fd2b027f81ae734b3af888",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\57-60.wav",
+      "reference_sha256": "58832dda97ea618a5b61335920ce6be4ec9cf4e4d9bad860a9e419d08fc34479",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\A3v8.wav",
+          "sha256": "d62f166cf7e56816b51c71ab7e94b5bdf1dcc01003dd7a84528af68a0acda669",
+          "layer": 8,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "2e4efa2f04694f69457ccd7a01d632644b323c24345a9a6618e8448e6bf10515",
+      "release": {
+        "analysis_onset_frame": 88,
+        "peak": 0.053981684148311615,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 220.04241943359375,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -4.99417915081359,
+                "mean_level_db": -39.16544127204383,
+                "residual_rms_db": 0.1355729570417062
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -4.716255860576637,
+                "mean_level_db": -40.813100868819895,
+                "residual_rms_db": 0.029925590191237226
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -5.716681752557047,
+                "mean_level_db": -43.583020689764,
+                "residual_rms_db": 0.014133356204980399
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -3.764871393276273
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 440.4212951660156,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -44.11228000772707,
+                "mean_level_db": -40.510139389966554,
+                "residual_rms_db": 0.47985367992231126
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 19.794290947240867,
+                "mean_level_db": -56.029836419304374,
+                "residual_rms_db": 2.6324511099023002
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 27.351738147710822,
+                "mean_level_db": -50.3546623228229,
+                "residual_rms_db": 1.5713488511318883
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.05430172855386
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 660.4637145996094,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -19.32074669512705,
+                "mean_level_db": -49.790876011666754,
+                "residual_rms_db": 0.05974581344801959
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -26.106925535192453,
+                "mean_level_db": -57.83327184080973,
+                "residual_rms_db": 0.06172430175135239
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 0.4940069749297591,
+                "mean_level_db": -65.7287207423284,
+                "residual_rms_db": 0.3289953178198463
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -15.618019298169862
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -35.49578719239524
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -41.039663221725846
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -45.19474987980645
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -48.986759604592336
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -88.83680018422956
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.05911729112267494,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 220.04241943359375,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -18.89691970384757,
+                "mean_level_db": -39.27627039719576,
+                "residual_rms_db": 0.3031588921114126
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -10.652290192085513,
+                "mean_level_db": -44.85760860387246,
+                "residual_rms_db": 0.14591892139872126
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.401088909446162,
+                "mean_level_db": -49.17275767167136,
+                "residual_rms_db": 0.09637383257980216
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -10.350916036879248
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 440.0848388671875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -18.67999876455848,
+                "mean_level_db": -39.368302190768674,
+                "residual_rms_db": 0.07879100315562837
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -12.524568543245728,
+                "mean_level_db": -44.77324094977931,
+                "residual_rms_db": 0.07883636796012863
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.574954000444264,
+                "mean_level_db": -49.535223809101126,
+                "residual_rms_db": 0.06560604388847992
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -11.00419551845878
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 660.4637145996094,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -23.841011588852442,
+                "mean_level_db": -46.62839006254667,
+                "residual_rms_db": 0.1051782119959962
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -15.271103895282446,
+                "mean_level_db": -53.28348017839213,
+                "residual_rms_db": 0.10516967504302538
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.599511556863096,
+                "mean_level_db": -58.938605638121956,
+                "residual_rms_db": 0.07539017159394681
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.138660826094274
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -34.23366573425311
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -40.73990573981451
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -48.48376943621269
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -51.33722798343538
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -93.013073424245
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 88,
+        "peak": 0.04657011851668358,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 220.04241943359375,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -29.790477605691063,
+                "mean_level_db": -41.28089869191954,
+                "residual_rms_db": 0.3307706329143268
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -32.07681274024068,
+                "mean_level_db": -51.645403666242004,
+                "residual_rms_db": 0.31894271211123215
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.685988093965615,
+                "mean_level_db": -60.584414451509765,
+                "residual_rms_db": 0.17136010401012636
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -19.463191692378523
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 439.7483825683594,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -6.225369306263145,
+                "mean_level_db": -35.88387429457136,
+                "residual_rms_db": 0.16903425388688095
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -12.56988196052112,
+                "mean_level_db": -39.098844632636705,
+                "residual_rms_db": 0.08846878181891246
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -24.055470873280356,
+                "mean_level_db": -48.383775225541655,
+                "residual_rms_db": 0.38413030589591834
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -9.968448919565091
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 660.8001708984375,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -44.30831422513276,
+                "mean_level_db": -58.004202102107556,
+                "residual_rms_db": 0.927007170408104
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -2.264560323675179,
+                "mean_level_db": -64.24658867691889,
+                "residual_rms_db": 0.4264809242619185
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -10.076722379605505,
+                "mean_level_db": -65.27260694046105,
+                "residual_rms_db": 0.4898925120447938
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.156202471727255
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -36.11257807240686
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -39.24721567668477
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -49.44988090034384
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -58.45404970925607
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -92.6194022106115
+          }
+        ]
+      }
+    },
+    {
+      "note": 57,
+      "velocity": 110,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.2542217,
+        "rms": 0.020125645690496918,
+        "wall_seconds": 0.1858308
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\57-110\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\57-110\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "1ef6086a75f1ff4fc1d4cbda9fe42e5a1f83fbe1ceb1f8e6afea4805601df753",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\57-110\\release.f32",
+      "release_raw_sha256": "44e4b06e64f33c54c719f465ea36eb26ab73072ab8a2871b1b4068d02bfefac8",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\57-110\\research-0.172\\performance.f32",
+      "research_raw_sha256": "756789e288350e869e1476ec443f9eb8ccf7c9d1d2d4599dd6ff19a9be849907",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\57-110.wav",
+      "reference_sha256": "428acc1605b4a74bdb797c50e124a085034fc3dffa7b8feccf24fd7fa3a504bc",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\A3v14.wav",
+          "sha256": "e0e7c09cf9d54d588887393c8074bcae193fdc5480032380c223c9e006254007",
+          "layer": 14,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "b0355f9df276739f2eab399b9d30589fd9cc9e4162e79afbde7a4523e692beb7",
+      "release": {
+        "analysis_onset_frame": 0,
+        "peak": 0.25422170758247375,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 220.04241943359375,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -4.964373108464504,
+                "mean_level_db": -28.356700657692805,
+                "residual_rms_db": 0.14172049097322367
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -4.757825684062127,
+                "mean_level_db": -30.019374446234465,
+                "residual_rms_db": 0.03057883178566527
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -5.771925676688272,
+                "mean_level_db": -32.815489096906234,
+                "residual_rms_db": 0.014248339626718105
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -3.798292748658767
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 440.4212951660156,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -45.78210725668079,
+                "mean_level_db": -29.312835818912895,
+                "residual_rms_db": 0.5054055622636089
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 23.83867119737328,
+                "mean_level_db": -45.09284703160019,
+                "residual_rms_db": 2.8682057950173316
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 27.544294959554453,
+                "mean_level_db": -38.72306301484787,
+                "residual_rms_db": 1.7324085133568214
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.07642967175963
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 660.4637145996094,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -19.894837145564072,
+                "mean_level_db": -36.97350327444362,
+                "residual_rms_db": 0.062009958862941014
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -27.03345030013831,
+                "mean_level_db": -45.290153698363774,
+                "residual_rms_db": 0.061956949770013196
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 1.4100730994451127,
+                "mean_level_db": -52.92754309067517,
+                "residual_rms_db": 0.2722477021253605
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -15.841127549549
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -23.717647925032
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -29.84170417512101
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -34.08335863536482
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -38.05604383542742
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -77.30203270155403
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 44,
+        "peak": 0.2077341377735138,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 220.04241943359375,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -18.976748555291586,
+                "mean_level_db": -29.96401503921929,
+                "residual_rms_db": 0.29431624378892746
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -10.584715047752919,
+                "mean_level_db": -35.52513361258645,
+                "residual_rms_db": 0.1457379197226861
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.372904637852212,
+                "mean_level_db": -39.82384501443051,
+                "residual_rms_db": 0.09621588033152928
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -10.311805054974194
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 440.0848388671875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -18.72690555657515,
+                "mean_level_db": -28.93888367370721,
+                "residual_rms_db": 0.07718806678656479
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -12.618419593382598,
+                "mean_level_db": -34.37348460998812,
+                "residual_rms_db": 0.0790302705956109
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.609774721863449,
+                "mean_level_db": -39.16961045370491,
+                "residual_rms_db": 0.06654075852465068
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -11.060811099189113
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 660.1272583007812,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -23.92512876151923,
+                "mean_level_db": -34.40048118781747,
+                "residual_rms_db": 0.10449111685724699
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -15.385280342151638,
+                "mean_level_db": -41.0897632518683,
+                "residual_rms_db": 0.10596869847265238
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.6370573607794405,
+                "mean_level_db": -46.784441217278754,
+                "residual_rms_db": 0.07709116030735153
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.205993552678976
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -23.552520028950813
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -30.195795179744227
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -38.008230580763744
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -40.899707121104385
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -83.1022187489613
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 88,
+        "peak": 0.22073546051979065,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 220.04241943359375,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -37.8887553675247,
+                "mean_level_db": -29.707634169503727,
+                "residual_rms_db": 0.15500425368512177
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -35.10493935323503,
+                "mean_level_db": -40.74823545046845,
+                "residual_rms_db": 0.5205659645542148
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.3738349816573105,
+                "mean_level_db": -50.66751976535442,
+                "residual_rms_db": 0.1499496552994011
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -21.637674405831085
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 439.7483825683594,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -6.992123463203827,
+                "mean_level_db": -23.333285792538533,
+                "residual_rms_db": 0.1946390920243041
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -12.758224936280504,
+                "mean_level_db": -26.584468427027854,
+                "residual_rms_db": 0.10645353305160506
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -23.27732532549194,
+                "mean_level_db": -35.77931027645959,
+                "residual_rms_db": 0.33470551678681265
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -10.05089030774586
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 660.8001708984375,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -29.76390927252238,
+                "mean_level_db": -42.50418256073786,
+                "residual_rms_db": 0.5360036977249373
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -12.488847638200602,
+                "mean_level_db": -50.88413298045621,
+                "residual_rms_db": 0.6769874238216939
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -10.455388938901226,
+                "mean_level_db": -53.537475282161274,
+                "residual_rms_db": 0.34748240916448764
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -14.278571806256991
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -23.290377751217463
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -26.73456077226099
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -36.813454151255904
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -46.599907979484485
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -84.27915977600735
+          }
+        ]
+      }
+    },
+    {
+      "note": 60,
+      "velocity": 60,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.033499513,
+        "rms": 0.0036113223260106618,
+        "wall_seconds": 0.1922732
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\60-60\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\60-60\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "9e4873fc4ce205640f082e8a8bba1f9308ac95f7002818e628adfd8599eb06b1",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\60-60\\release.f32",
+      "release_raw_sha256": "e14be91eda03580caddd4a735dd92a279de4c6e235894249c5c43481beaba408",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\60-60\\research-0.172\\performance.f32",
+      "research_raw_sha256": "3c53eac2420cb8ec399d76cfa2d88e4482c6f8d3023be8136128c72d8270f186",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\60-60.wav",
+      "reference_sha256": "9ccd7ffbe8343a7c85e20f955070186e8339b368d12991a4c63caf4103339d87",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C4v8.wav",
+          "sha256": "8848a6d80c5d5224267fded56f69f42fc84b84884747112b3b0a6552292d51ce",
+          "layer": 8,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "556e4769dde876845fda4cce6cc105f4996771b2e57af453a72210b025eef2a3",
+      "release": {
+        "analysis_onset_frame": 44,
+        "peak": 0.03349951282143593,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 261.76300048828125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -16.703618385985667,
+                "mean_level_db": -38.705142884449735,
+                "residual_rms_db": 0.125913306204228
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -19.073373933073743,
+                "mean_level_db": -44.77215105537613,
+                "residual_rms_db": 0.06843005987532716
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -32.334758735694166,
+                "mean_level_db": -57.73590780900082,
+                "residual_rms_db": 0.4056656961197823
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -16.086544170269896
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.5260009765625,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -64.7816919104849,
+                "mean_level_db": -56.653844542656344,
+                "residual_rms_db": 0.7860554531891778
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 35.181550597836086,
+                "mean_level_db": -68.68339807459913,
+                "residual_rms_db": 3.00543450912552
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 33.62061097493901,
+                "mean_level_db": -67.6947895245725,
+                "residual_rms_db": 1.6516176298697405
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.708388286772873
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.2890014648438,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -29.113071127060277,
+                "mean_level_db": -53.241179209343365,
+                "residual_rms_db": 0.08544124759717035
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -50.86941557279411,
+                "mean_level_db": -66.65660164825096,
+                "residual_rms_db": 0.5215162350672978
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 9.431125952759535,
+                "mean_level_db": -73.9842109793624,
+                "residual_rms_db": 0.8500777078902584
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -22.587199054244685
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -38.30083120683164
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -43.708143474503835
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -56.304872814807
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -63.710617239848155
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -92.75225941814456
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.07137994468212128,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 261.76300048828125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -43.241298034544826,
+                "mean_level_db": -40.653397628920054,
+                "residual_rms_db": 0.44666273104038917
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -19.82304899183433,
+                "mean_level_db": -52.193941704957716,
+                "residual_rms_db": 0.3337390952670401
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.298310958818978,
+                "mean_level_db": -59.04665441862472,
+                "residual_rms_db": 0.07898750049364488
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -21.69481537391635
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.5260009765625,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -19.913640191553583,
+                "mean_level_db": -35.92971911125853,
+                "residual_rms_db": 0.12469187526103212
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -12.624407178501118,
+                "mean_level_db": -41.657377480870856,
+                "residual_rms_db": 0.08654387408510116
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.355982304452854,
+                "mean_level_db": -46.355032128746636,
+                "residual_rms_db": 0.06019300437558286
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -11.26270115233335
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.2890014648438,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -22.155900114929782,
+                "mean_level_db": -46.53940935620909,
+                "residual_rms_db": 0.09799514299152724
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -14.502379286725978,
+                "mean_level_db": -52.924236994395834,
+                "residual_rms_db": 0.0942654315879169
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.975512337583316,
+                "mean_level_db": -58.55571817738993,
+                "residual_rms_db": 0.08122114037882412
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -12.851483828893187
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -31.890644813402155
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -39.689553996450634
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -48.702715296268906
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -51.71801179799962
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -90.06174961939772
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 44,
+        "peak": 0.08353342115879059,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 261.090087890625,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -9.620685480476274,
+                "mean_level_db": -31.613866029578517,
+                "residual_rms_db": 0.38043634022890643
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -6.5904950851280075,
+                "mean_level_db": -33.671792666992395,
+                "residual_rms_db": 0.03722183783572007
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.206816715677919,
+                "mean_level_db": -37.382986525165066,
+                "residual_rms_db": 0.011238423912323658
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -5.781030565808361
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 522.5166320800781,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -18.104680867402877,
+                "mean_level_db": -34.63340288589418,
+                "residual_rms_db": 0.18386734925929088
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -20.45527629501047,
+                "mean_level_db": -42.13750979949793,
+                "residual_rms_db": 0.12109612199335983
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -3.2619718451902706,
+                "mean_level_db": -47.57858851205336,
+                "residual_rms_db": 0.07125178197799398
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.158792966977508
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 784.2796325683594,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -26.73481708062791,
+                "mean_level_db": -53.27457272295941,
+                "residual_rms_db": 0.4121262610310243
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -18.69284355570807,
+                "mean_level_db": -59.924694551725864,
+                "residual_rms_db": 0.13414197605212566
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -10.380308571485486,
+                "mean_level_db": -66.9081034262152,
+                "residual_rms_db": 0.12512811349179367
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.83067123194067
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -31.213296404146014
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -34.09232777142455
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -39.791393331477245
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -43.868782418017446
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -94.58154256924419
+          }
+        ]
+      }
+    },
+    {
+      "note": 60,
+      "velocity": 110,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.14259025,
+        "rms": 0.013266023434909515,
+        "wall_seconds": 0.1797963
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\60-110\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\60-110\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "b4ba653d77846f0b8413cb121aae55251414f6f453c84fd3074e638caf756613",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\60-110\\release.f32",
+      "release_raw_sha256": "6904ca795c95530f799bebd4b614c1d30cdf7299581070d032eb771912239ef7",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\60-110\\research-0.172\\performance.f32",
+      "research_raw_sha256": "a217a16e96a28e5dbc80f19c5f7767f03ea15fb08f7a94f50336749ef9e81a54",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\60-110.wav",
+      "reference_sha256": "a05297275308c5fc7805efe8500f7733019dba4217009f067df53000d05e82a1",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C4v14.wav",
+          "sha256": "37973ad4c5db9d0b1a34d6b7dae4e5fa482525cd4dea5a553ac88da63860228c",
+          "layer": 14,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "285e426bf7dfdcc192cbd21c838c6decb8df9724bf9a879429007d121e250376",
+      "release": {
+        "analysis_onset_frame": 44,
+        "peak": 0.1425902545452118,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 261.76300048828125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -16.721490002257195,
+                "mean_level_db": -28.011938711771077,
+                "residual_rms_db": 0.12480695640648637
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -19.090579315334757,
+                "mean_level_db": -34.08409799752269,
+                "residual_rms_db": 0.06866278603357302
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -32.444734008362076,
+                "mean_level_db": -47.07292560834175,
+                "residual_rms_db": 0.4104723311855277
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -16.107646588931765
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.5260009765625,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -65.02146319310042,
+                "mean_level_db": -44.98596884229712,
+                "residual_rms_db": 0.791613258726295
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 34.54258644945979,
+                "mean_level_db": -56.949512788283755,
+                "residual_rms_db": 2.988007439323624
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 34.005459460067584,
+                "mean_level_db": -55.988497227221615,
+                "residual_rms_db": 1.6905241246976859
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.70269160726935
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.2890014648438,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -29.19307169145417,
+                "mean_level_db": -39.87571715995459,
+                "residual_rms_db": 0.08645992104048678
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -51.45277094567873,
+                "mean_level_db": -53.3785123613523,
+                "residual_rms_db": 0.5425281338475676
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 9.428610090314166,
+                "mean_level_db": -60.64656392090449,
+                "residual_rms_db": 0.8707108974601828
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -22.669419847010737
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -26.46737731593538
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -32.736518129712024
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -44.306982569663276
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -51.43435995518908
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -81.55938454008802
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.2528018653392792,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 261.76300048828125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -43.230278484064804,
+                "mean_level_db": -31.422530136343468,
+                "residual_rms_db": 0.44623279518788384
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -19.829495270112094,
+                "mean_level_db": -42.964081910343495,
+                "residual_rms_db": 0.3341674628994652
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.296696920522755,
+                "mean_level_db": -49.816801104127535,
+                "residual_rms_db": 0.07911878975385055
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -21.694222819955467
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 523.5260009765625,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -19.91304186306146,
+                "mean_level_db": -24.99425580936989,
+                "residual_rms_db": 0.12516368557856677
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -12.624372042571189,
+                "mean_level_db": -30.72234180150855,
+                "residual_rms_db": 0.08668569212050375
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.355646496823222,
+                "mean_level_db": -35.42009047984658,
+                "residual_rms_db": 0.060227428368571916
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -11.26315987332579
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 785.2890014648438,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -22.171993159132484,
+                "mean_level_db": -34.211336999612506,
+                "residual_rms_db": 0.09658161734501605
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -14.513970504640673,
+                "mean_level_db": -40.60059514087625,
+                "residual_rms_db": 0.09350991929257442
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.969830285171332,
+                "mean_level_db": -46.232007489256986,
+                "residual_rms_db": 0.08108102836276311
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -12.856171167962238
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -21.329443871365463
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -28.755245515325125
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -37.52316701295111
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -40.55214635351702
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -77.10485635522899
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 44,
+        "peak": 0.305433452129364,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 261.090087890625,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -12.444868795409294,
+                "mean_level_db": -22.549116996940757,
+                "residual_rms_db": 0.419822141855231
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -7.019755720565786,
+                "mean_level_db": -24.95338265298721,
+                "residual_rms_db": 0.034853858704653976
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.501567261425496,
+                "mean_level_db": -28.826167840464105,
+                "residual_rms_db": 0.006490397903162023
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -6.640804268121681
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 522.5166320800781,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -18.63267974354152,
+                "mean_level_db": -24.202074927654454,
+                "residual_rms_db": 0.19310503480380764
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -21.846123503621946,
+                "mean_level_db": -31.91403879828381,
+                "residual_rms_db": 0.11670056561002264
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -3.9808956867213015,
+                "mean_level_db": -37.58766926604133,
+                "residual_rms_db": 0.055403313993213195
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.432629468958861
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 784.6160888671875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -26.487875627755454,
+                "mean_level_db": -41.940229435052345,
+                "residual_rms_db": 0.3278303415103403
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -30.5908635580068,
+                "mean_level_db": -51.75259980491699,
+                "residual_rms_db": 0.2954861646892627
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.835017392653706,
+                "mean_level_db": -59.2135886487071,
+                "residual_rms_db": 0.421285053830691
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.235498378573638
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -20.86633720033991
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -24.43168865530611
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -31.00659925427184
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -35.25783008429811
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -86.4635042671288
+          }
+        ]
+      }
+    },
+    {
+      "note": 63,
+      "velocity": 60,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.046054162,
+        "rms": 0.0035920486737042504,
+        "wall_seconds": 0.1731372
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\63-60\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\63-60\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "088fde68392fbf4940b5dd60814f49671bec2a3ff336c96d8180746d0eff7f04",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\63-60\\release.f32",
+      "release_raw_sha256": "d38df8835222898316ffa2d043d9e086d6137c27e84dd5c91a938ba8d9047927",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\63-60\\research-0.172\\performance.f32",
+      "research_raw_sha256": "48b293fd476cad8613a7f54e2bb8004e431a1bbd462ac47d37be84b504380560",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\63-60.wav",
+      "reference_sha256": "cbfebd4366bc481eb70319b42a383cfe981532c925efadcaeaab76564795bf52",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\D#4v8.wav",
+          "sha256": "6b36f35b97f7255f1bbffef5bfd47bc81caf31aa42ef42dee6dea0d7da6a7eb6",
+          "layer": 8,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "f330753c0da02acbd51643310a9e36cef05e4c918ecb00c2d6d257fbcb69d703",
+      "release": {
+        "analysis_onset_frame": 44,
+        "peak": 0.046054162085056305,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 310.8856201171875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -17.99707536269485,
+                "mean_level_db": -53.4819562597421,
+                "residual_rms_db": 0.25375531014308883
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -35.87110378047962,
+                "mean_level_db": -63.04714818095041,
+                "residual_rms_db": 0.331877999696662
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 14.37630088047031,
+                "mean_level_db": -79.43309823259708,
+                "residual_rms_db": 2.1058398946394683
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -22.19563165982575
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 623.7899780273438,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -99.34286538026561,
+                "mean_level_db": -47.996745352465766,
+                "residual_rms_db": 2.025984872939803
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 11.791257791317127,
+                "mean_level_db": -54.94950689908796,
+                "residual_rms_db": 6.068120846853194
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -25.15463408342304,
+                "mean_level_db": -52.36278051898804,
+                "residual_rms_db": 3.410884475340964
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -15.751245605593418
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 934.3391418457031,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -33.193009883500025,
+                "mean_level_db": -49.99888822363988,
+                "residual_rms_db": 0.12851342135559127
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -33.701483178014776,
+                "mean_level_db": -63.39181816466561,
+                "residual_rms_db": 0.7521482386738864
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -8.21132677596299,
+                "mean_level_db": -68.54416307292077,
+                "residual_rms_db": 0.18805563860644786
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -20.99356929626623
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -35.34992301003436
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -48.29933398567128
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -52.8455899226081
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -59.38587666256971
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -92.93202240609878
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.05768340453505516,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 311.2220764160156,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -26.083354137089973,
+                "mean_level_db": -40.58621062826037,
+                "residual_rms_db": 0.17294144179478205
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -16.3832757702218,
+                "mean_level_db": -47.28457364795138,
+                "residual_rms_db": 0.08600522750851158
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -8.020461506524907,
+                "mean_level_db": -53.14310993822311,
+                "residual_rms_db": 0.0763360417774211
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.337397484378734
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 622.4441528320312,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -35.860705462083324,
+                "mean_level_db": -45.7205116195922,
+                "residual_rms_db": 0.15703175380841938
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -22.086638490859343,
+                "mean_level_db": -55.56925483594156,
+                "residual_rms_db": 0.30234767409948665
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -10.321551913442784,
+                "mean_level_db": -63.52733929213761,
+                "residual_rms_db": 0.1563189287046143
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -19.384306618923624
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 934.002685546875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -21.3989862058743,
+                "mean_level_db": -51.3628359023057,
+                "residual_rms_db": 0.1477166081905849
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -15.04749671401723,
+                "mean_level_db": -57.81291426938488,
+                "residual_rms_db": 0.16632767577251176
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.893988198569008,
+                "mean_level_db": -63.52119887345247,
+                "residual_rms_db": 0.1022135759264889
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.078270944847667
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -35.342324205303754
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -44.18844789425745
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -54.598735680149176
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -58.22345918441706
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -98.43847662848216
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 88,
+        "peak": 0.057909563183784485,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 310.8856201171875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -26.580337280742103,
+                "mean_level_db": -35.544448466962,
+                "residual_rms_db": 0.5211882766997883
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -36.23816330522131,
+                "mean_level_db": -46.781360589008706,
+                "residual_rms_db": 0.2706751523929529
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 5.7039784393277015,
+                "mean_level_db": -48.32522829700386,
+                "residual_rms_db": 0.42957788647332695
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -16.873478425302274
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 622.1076965332031,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -49.936948911848546,
+                "mean_level_db": -46.21157729685903,
+                "residual_rms_db": 0.5282656508215641
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 24.955485719744626,
+                "mean_level_db": -51.73769433833547,
+                "residual_rms_db": 0.6110663775627542
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -22.90276925724382,
+                "mean_level_db": -53.596807020087255,
+                "residual_rms_db": 0.43156684678938867
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -10.826274385171132
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 932.6568603515625,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -17.3746112694861,
+                "mean_level_db": -55.53593587714995,
+                "residual_rms_db": 0.521915679210579
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -6.940031410727202,
+                "mean_level_db": -56.33108897521421,
+                "residual_rms_db": 0.47879141379978435
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -1.2236480828256158,
+                "mean_level_db": -60.9709717513894,
+                "residual_rms_db": 0.1576612803455085
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -6.749034916519818
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -32.619187326155654
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -40.91692804566727
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -49.59987382315077
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -51.64770326856218
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -86.204628092921
+          }
+        ]
+      }
+    },
+    {
+      "note": 63,
+      "velocity": 110,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.23460756,
+        "rms": 0.014757176606916526,
+        "wall_seconds": 0.180204
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\63-110\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\63-110\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "e94ac4d4252aa6922aa0c8c2045c13d0858c06d4febae001159cf2ed0c8cbdf7",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\63-110\\release.f32",
+      "release_raw_sha256": "072c23bc5767c4ec4db358e46d445cac572889eb1a7a807528fa14c8cd9a703d",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\63-110\\research-0.172\\performance.f32",
+      "research_raw_sha256": "75d8e2dc2c2854b5bc9309b18dd2b71c7f7f97307b6d5a2a4e511ead7b982625",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\63-110.wav",
+      "reference_sha256": "e8bfeb914b92d64182444757a5d253ab2da8b7cff3e4e114a436aff489fd7b2c",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\D#4v14.wav",
+          "sha256": "60060f5797a1296e3a651aa33fd45e483260f9c5b7219e535ee35510f9354db9",
+          "layer": 14,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "d59997ba57c8db14da571710624e84bad18217393ae8b97ba815a55d8d28b8bf",
+      "release": {
+        "analysis_onset_frame": 44,
+        "peak": 0.23460756242275238,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 310.8856201171875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -18.225974818489473,
+                "mean_level_db": -42.90444794327889,
+                "residual_rms_db": 0.2573982913073617
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -36.55011941606421,
+                "mean_level_db": -52.6230345179131,
+                "residual_rms_db": 0.34172461746205945
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 13.978717181683114,
+                "mean_level_db": -68.54153583386372,
+                "residual_rms_db": 1.756417791628853
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -22.140036860408237
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 623.7899780273438,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -100.76570617912085,
+                "mean_level_db": -36.89013389259697,
+                "residual_rms_db": 2.845126882250423
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 19.484250355096403,
+                "mean_level_db": -42.70801857652747,
+                "residual_rms_db": 6.391404756809858
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -24.428188901121295,
+                "mean_level_db": -40.14181635814507,
+                "residual_rms_db": 3.4556906519930193
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -15.233540538970317
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 934.3391418457031,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -35.321102070220036,
+                "mean_level_db": -36.87988324856482,
+                "residual_rms_db": 0.1449147897421675
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -34.718568873197924,
+                "mean_level_db": -51.30336867602635,
+                "residual_rms_db": 1.0020721305593439
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -8.365257652527289,
+                "mean_level_db": -56.23460150612814,
+                "residual_rms_db": 0.19907036265810354
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -22.107802856286895
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -22.973146744332823
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -36.26553173633455
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -40.56946927247273
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -47.28246473454831
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -80.63180639988543
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.21965400874614716,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 311.2220764160156,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -26.092529304301024,
+                "mean_level_db": -31.373951758663928,
+                "residual_rms_db": 0.17184571869435253
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -16.446768308185028,
+                "mean_level_db": -38.089433950306294,
+                "residual_rms_db": 0.08721754881174557
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -8.034301556358171,
+                "mean_level_db": -43.962750096381484,
+                "residual_rms_db": 0.07769748157999756
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.364384516414788
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 622.4441528320312,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -35.992697773481375,
+                "mean_level_db": -33.82089913371945,
+                "residual_rms_db": 0.15851741300832595
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -22.276402936053064,
+                "mean_level_db": -43.73717973763536,
+                "residual_rms_db": 0.3006140957027181
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -10.370118089995861,
+                "mean_level_db": -51.75267007283649,
+                "residual_rms_db": 0.16039645187696386
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -19.5056137144624
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 934.002685546875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -21.53555437855578,
+                "mean_level_db": -40.291023195814404,
+                "residual_rms_db": 0.14611888113884042
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -15.15636672955718,
+                "mean_level_db": -46.7723530511113,
+                "residual_rms_db": 0.16575351588847134
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.938987720096692,
+                "mean_level_db": -52.517934463835765,
+                "residual_rms_db": 0.10412926644129497
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.137963005676347
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -24.417612689276353
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -33.03870696068466
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -43.52597289280028
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -47.21414474410893
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -85.89341212382847
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 44,
+        "peak": 0.2665032148361206,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 310.8856201171875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -27.186177547501313,
+                "mean_level_db": -23.11995299636099,
+                "residual_rms_db": 0.5621164777071452
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -36.06192653987415,
+                "mean_level_db": -33.77898764996193,
+                "residual_rms_db": 0.2708524196591867
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 6.674104941812543,
+                "mean_level_db": -36.36428173506695,
+                "residual_rms_db": 0.38345689757554413
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.06289459330681
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 622.1076965332031,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -50.847117056462835,
+                "mean_level_db": -31.365361884215318,
+                "residual_rms_db": 0.3386115019489299
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 26.11437600346373,
+                "mean_level_db": -37.9940036739937,
+                "residual_rms_db": 0.6113653759473594
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -21.375007958474168,
+                "mean_level_db": -39.11098501032679,
+                "residual_rms_db": 0.385354276047071
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -11.94045982846539
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 934.002685546875,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -32.771651454964775,
+                "mean_level_db": -41.8738210519482,
+                "residual_rms_db": 0.4644506570917032
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 1.7421600951840537,
+                "mean_level_db": -42.742840343123326,
+                "residual_rms_db": 0.564713308357267
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.480746473891188,
+                "mean_level_db": -48.847504590782115,
+                "residual_rms_db": 0.5177123192891374
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -8.69411055934939
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -19.41431427294553
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -28.039528829309056
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -36.83601561570449
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -39.10114918267913
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -81.16278755442339
+          }
+        ]
+      }
+    },
+    {
+      "note": 72,
+      "velocity": 60,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.040993325,
+        "rms": 0.004166415191323636,
+        "wall_seconds": 0.1698914
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\72-60\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\72-60\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "6a03e1cb0a58d9fa0e9f0a7c52e269e7898b5dd2fbb85592f1fd7d0717d7c72a",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\72-60\\release.f32",
+      "release_raw_sha256": "9c5727ff3a3b1570e93ba71b017e97df2ced82f8b61ec2897975937d63493917",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\72-60\\research-0.172\\performance.f32",
+      "research_raw_sha256": "f61f49d27a217b2db9381d2ba77c830150c59602910483a4993d685f1191e646",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\72-60.wav",
+      "reference_sha256": "a3fc6b8bf8cef32f9eaf4710739585a2ce264b961301597a016646a5b15f31ec",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C5v8.wav",
+          "sha256": "80b88181e6fb0a2bae411f1d3d50cfe8960b069cd57dd86fcd0307234eabb197",
+          "layer": 8,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "40d963077ed6142c9e9a33658cdb063512d4d62cea9861689524b4be477183b2",
+      "release": {
+        "analysis_onset_frame": 0,
+        "peak": 0.04099332541227341,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.5260009765625,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -16.476032225036935,
+                "mean_level_db": -37.25598812250223,
+                "residual_rms_db": 0.12394806566082389
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -46.127305880721956,
+                "mean_level_db": -47.66029317643286,
+                "residual_rms_db": 0.5678633934851312
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 10.321847815727088,
+                "mean_level_db": -48.74926544979517,
+                "residual_rms_db": 0.8972713858263364
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -14.00960479659988
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1049.4071960449219,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -71.39092945388869,
+                "mean_level_db": -61.76494078287444,
+                "residual_rms_db": 5.674219953299106
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 41.55176619358882,
+                "mean_level_db": -63.675416483221696,
+                "residual_rms_db": 2.9297079386052443
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -40.96575138213555,
+                "mean_level_db": -67.83720421675734,
+                "residual_rms_db": 4.483174094958293
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -16.627228368583346
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1572.5967407226562,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -47.083886056704436,
+                "mean_level_db": -56.96106168569323,
+                "residual_rms_db": 0.4706646539282115
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 5.874443527093195,
+                "mean_level_db": -66.93046782962264,
+                "residual_rms_db": 0.7668613611119572
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -13.328497024997288,
+                "mean_level_db": -68.26498787126064,
+                "residual_rms_db": 1.090592255970746
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -18.08122307710542
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -36.38465464986526
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -43.104827371798805
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -51.23361797585761
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -55.168665555307186
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -96.26883517244211
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.0394478440284729,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.1895446777344,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -17.95941475405416,
+                "mean_level_db": -37.12258090281825,
+                "residual_rms_db": 0.20947927541563768
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -11.939846357626406,
+                "mean_level_db": -42.31269905754528,
+                "residual_rms_db": 0.12453441329885809
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.822727681324778,
+                "mean_level_db": -46.9825678444838,
+                "residual_rms_db": 0.06165557913763539
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -10.339668630497378
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1047.052001953125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -32.8807081231351,
+                "mean_level_db": -57.58497428368994,
+                "residual_rms_db": 0.13171200489534304
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -19.631981012742948,
+                "mean_level_db": -66.48672715354209,
+                "residual_rms_db": 0.16332859474570016
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -9.17129148806976,
+                "mean_level_db": -73.52107017320952,
+                "residual_rms_db": 0.10928675153016827
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.503946951202714
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1571.923828125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -9.867721780912388,
+                "mean_level_db": -66.1860349880039,
+                "residual_rms_db": 0.36244970670055493
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -22.374675025795316,
+                "mean_level_db": -72.53479469707412,
+                "residual_rms_db": 0.35479041567266395
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -22.52950987127878,
+                "mean_level_db": -81.8740231396759,
+                "residual_rms_db": 0.8492534797407946
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -14.744877029917873
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -35.39991277463209
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -42.28247094349192
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -49.90173026939746
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -53.116519487601074
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -97.4507967405335
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 44,
+        "peak": 0.06965085119009018,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 522.8530883789062,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -10.481918133697162,
+                "mean_level_db": -28.794406909274176,
+                "residual_rms_db": 0.27225743786634127
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -21.229800667824662,
+                "mean_level_db": -34.900441904790526,
+                "residual_rms_db": 0.07383069485660478
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -14.754992091589802,
+                "mean_level_db": -45.269819839005635,
+                "residual_rms_db": 0.2413622414391896
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.203460131131347
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1047.052001953125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -28.695145817665626,
+                "mean_level_db": -49.19543791018661,
+                "residual_rms_db": 0.495663536138286
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -15.868359082266396,
+                "mean_level_db": -59.931055498468154,
+                "residual_rms_db": 0.5425018941877162
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -7.360194053772387,
+                "mean_level_db": -67.12389450370286,
+                "residual_rms_db": 1.002897541459246
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -18.269219912660425
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1574.9519348144531,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -5.804881234120501,
+                "mean_level_db": -57.95850888543448,
+                "residual_rms_db": 0.7359366175875338
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -32.05798011824959,
+                "mean_level_db": -68.3458671727396,
+                "residual_rms_db": 0.624756734395582
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -0.16122524668337268,
+                "mean_level_db": -72.2603717519641,
+                "residual_rms_db": 0.2772135037394562
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -14.25153371066159
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -30.592173496076075
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -34.13782361168578
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -47.779962299542696
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -54.522620181181026
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -94.49488683395725
+          }
+        ]
+      }
+    },
+    {
+      "note": 72,
+      "velocity": 110,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.18280455,
+        "rms": 0.01536135650814337,
+        "wall_seconds": 0.1767431
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\72-110\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\72-110\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "0c55e5b98459fc6c11ce1a5da713389a9fa3f61d76ba5aa3e47cda38d2c77100",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\72-110\\release.f32",
+      "release_raw_sha256": "aab8df76f1a6232cbc6aa465805da0b283959d6bc4b81cc048ee65516dd50d19",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\72-110\\research-0.172\\performance.f32",
+      "research_raw_sha256": "8c56373ed2a61f27c47f713adf1ff3571d0420f4f688ce8459a5248eefac4b8f",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\72-110.wav",
+      "reference_sha256": "7581b6a5dafbde1acabfac889941a79783c08bddc77c04041c034f5c0e712a83",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C5v14.wav",
+          "sha256": "d4ba7b59a81f8935b2e76cdecad631473b220cd9c7b6618758226975df4d81b2",
+          "layer": 14,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "940eb30713c9c1eb03a27c6a872f1e85829e7c240b710e1836a676539a9ebf1b",
+      "release": {
+        "analysis_onset_frame": 0,
+        "peak": 0.18280455470085144,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.5260009765625,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -16.37395469434377,
+                "mean_level_db": -26.53425664339243,
+                "residual_rms_db": 0.12344497881525499
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -46.29153976338625,
+                "mean_level_db": -36.9063763110651,
+                "residual_rms_db": 0.5985540920937221
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 10.669113922775644,
+                "mean_level_db": -38.18953327660603,
+                "residual_rms_db": 0.9182256684161243
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -14.111784738272299
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1049.4071960449219,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -76.72351619633261,
+                "mean_level_db": -47.15139417817945,
+                "residual_rms_db": 6.15144263634989
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 46.311821215398744,
+                "mean_level_db": -49.071695828470524,
+                "residual_rms_db": 3.300915798896618
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -42.76849917609446,
+                "mean_level_db": -52.85457448986674,
+                "residual_rms_db": 4.50875431043544
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -16.89387068124494
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1572.5967407226562,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -47.49756240385113,
+                "mean_level_db": -45.31019374917913,
+                "residual_rms_db": 0.45665380185151083
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 6.038041494841701,
+                "mean_level_db": -55.61378490252147,
+                "residual_rms_db": 0.8189805049387663
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -13.581325514986228,
+                "mean_level_db": -56.810592585591046,
+                "residual_rms_db": 1.1159158997790029
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -18.35054914258548
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -24.40368967159388
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -32.222625670070656
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -40.380824393640786
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -44.44335588503107
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -84.24733592673554
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.17117874324321747,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.1895446777344,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -17.982168052423987,
+                "mean_level_db": -27.304985236565795,
+                "residual_rms_db": 0.20910337946120325
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -11.984017195155685,
+                "mean_level_db": -32.50812644546531,
+                "residual_rms_db": 0.12447588799504133
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.846226665757875,
+                "mean_level_db": -37.19653009446736,
+                "residual_rms_db": 0.06198929209393479
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -10.366915198175448
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1047.052001953125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -32.86821406513814,
+                "mean_level_db": -41.95669653340881,
+                "residual_rms_db": 0.13503933728185785
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -19.639298901779217,
+                "mean_level_db": -50.856949865006854,
+                "residual_rms_db": 0.16267166100995928
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -9.193450437219436,
+                "mean_level_db": -57.90070257502478,
+                "residual_rms_db": 0.10885038708157041
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.508934968141112
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1571.923828125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -9.712058678018034,
+                "mean_level_db": -46.85103324513902,
+                "residual_rms_db": 0.3662034257722536
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -22.27308738735666,
+                "mean_level_db": -53.163910150731375,
+                "residual_rms_db": 0.3528188998042314
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -22.15290112512007,
+                "mean_level_db": -62.5317957839175,
+                "residual_rms_db": 0.8867959247843592
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -14.712654555774556
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -25.151052791468977
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -32.257464972898
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -40.04459687597092
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -43.29722318106137
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -84.58964970182663
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 44,
+        "peak": 0.22989042103290558,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 523.1895446777344,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -11.602869378376615,
+                "mean_level_db": -19.56443823447066,
+                "residual_rms_db": 0.2944668512812753
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -20.02388398115512,
+                "mean_level_db": -25.856349757866628,
+                "residual_rms_db": 0.04566687490442423
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -15.191548501203448,
+                "mean_level_db": -35.57121911231182,
+                "residual_rms_db": 0.17198984973747156
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.092607769963731
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 1046.7155456542969,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -33.67228781592325,
+                "mean_level_db": -36.74855352520374,
+                "residual_rms_db": 0.5316116906553897
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -15.082879186658966,
+                "mean_level_db": -49.82461990828029,
+                "residual_rms_db": 1.3469923557281926
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -15.744977904639441,
+                "mean_level_db": -57.59908292964555,
+                "residual_rms_db": 1.2687642019570897
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -20.947991074138145
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 1575.2883911132812,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -6.805291186709901,
+                "mean_level_db": -43.16864173143231,
+                "residual_rms_db": 0.7475900452268999
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -41.47449563854249,
+                "mean_level_db": -53.21564870010615,
+                "residual_rms_db": 0.2445517294656081
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 1.5618088775026504,
+                "mean_level_db": -63.3270252753297,
+                "residual_rms_db": 0.1728745647135368
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -18.270568305105805
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -20.727723765092065
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -24.894938109782974
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -38.054087094149736
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -45.686895571678086
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -90.19013769825735
+          }
+        ]
+      }
+    },
+    {
+      "note": 84,
+      "velocity": 60,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.034002364,
+        "rms": 0.0013274688030139893,
+        "wall_seconds": 0.1703189
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\84-60\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\84-60\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "3769c33fefa9c8ac7f29146587cd23087787e18976753d737db924cdec9e8306",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\84-60\\release.f32",
+      "release_raw_sha256": "25df73bb501a7a49837a8ebf06411cc6eff630dcb1caffe660ba8b85cdd41885",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\84-60\\research-0.172\\performance.f32",
+      "research_raw_sha256": "c514e735b5897f18f426d57fd3a0e69cbf57277e62599a04cdff7260701373c3",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\84-60.wav",
+      "reference_sha256": "2a22ffd277d8c524e19dd10174deb2b875e2b1893e8cadfac259871a05dbb9a1",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C6v8.wav",
+          "sha256": "25c7b37efb6b04fe6c2052d2644e6200c4b60cd61978459f49447e52036cef30",
+          "layer": 8,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "e3059750056823459423937d6b6bbb137d04abd354d708f9f2d0ba1eee3fee72",
+      "release": {
+        "analysis_onset_frame": 0,
+        "peak": 0.03400236368179321,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1048.0613708496094,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -96.01917271896893,
+                "mean_level_db": -63.07102533747058,
+                "residual_rms_db": 0.5966189586186089
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 11.455106144983855,
+                "mean_level_db": -70.0824799361307,
+                "residual_rms_db": 0.2910469608318651
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -12.647820553230924,
+                "mean_level_db": -71.29089736867837,
+                "residual_rms_db": 0.3013858207432512
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -19.7569984273023
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2097.8050231933594,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -19.294308855705367,
+                "mean_level_db": -67.70856031419764,
+                "residual_rms_db": 0.6464378523337421
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -19.375491503842618,
+                "mean_level_db": -71.8862492336667,
+                "residual_rms_db": 0.6554071651852066
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.480184530691624,
+                "mean_level_db": -85.3263579580011,
+                "residual_rms_db": 1.054590394775714
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.502856296068906
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3150.9132385253906,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -23.941111010298624,
+                "mean_level_db": -78.468348616384,
+                "residual_rms_db": 1.2827515438266894
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -20.907856658094897,
+                "mean_level_db": -87.78091827054254,
+                "residual_rms_db": 2.0049215619978784
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -39.580690017604724,
+                "mean_level_db": -112.21892847360921,
+                "residual_rms_db": 5.526583725253656
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -26.390373652926158
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -41.927398636410196
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -64.6198728391899
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -73.82234644307962
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -83.99728261338086
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -119.80568871534864
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.05799011513590813,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.7249145507812,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -41.792580301355144,
+                "mean_level_db": -39.25627022565674,
+                "residual_rms_db": 0.12238915592437369
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -23.478159369043254,
+                "mean_level_db": -50.46173986757625,
+                "residual_rms_db": 0.1842299056227946
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -10.503365313377211,
+                "mean_level_db": -58.58373977947217,
+                "residual_rms_db": 0.1003351473273844
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -21.611655350497614
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2097.132110595703,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -13.928649704848066,
+                "mean_level_db": -70.61320098841264,
+                "residual_rms_db": 0.8983057194995077
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -22.55390774939572,
+                "mean_level_db": -76.16011762728299,
+                "residual_rms_db": 0.4965309315260438
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -9.009427164021764,
+                "mean_level_db": -88.84737153253236,
+                "residual_rms_db": 0.585051720941661
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.20998709795758
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3149.9038696289062,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -31.9674500055273,
+                "mean_level_db": -79.3304441783904,
+                "residual_rms_db": 0.966453861626799
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -21.080190498900382,
+                "mean_level_db": -93.53671113323271,
+                "residual_rms_db": 2.1738697969657745
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -32.40407272495202,
+                "mean_level_db": -107.79554624827777,
+                "residual_rms_db": 4.476541226206053
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -28.67712419504967
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -33.16405308042122
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -45.038904278032845
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -61.37276437571063
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -66.50071134259181
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -107.70969366194308
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 44,
+        "peak": 0.07189081609249115,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1046.7155456542969,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -108.34711344613473,
+                "mean_level_db": -42.11206492722783,
+                "residual_rms_db": 4.0846569282620635
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -25.658971121453924,
+                "mean_level_db": -46.141308245261484,
+                "residual_rms_db": 1.695961538702377
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 12.044754095536359,
+                "mean_level_db": -45.77687898455465,
+                "residual_rms_db": 1.584284482093708
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -16.853045319653475
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2103.5247802734375,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -20.36959498090137,
+                "mean_level_db": -66.0412583853441,
+                "residual_rms_db": 3.3494364497706353
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 14.24285440743558,
+                "mean_level_db": -69.03323045148593,
+                "residual_rms_db": 2.2436089054770223
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -6.876971119316166,
+                "mean_level_db": -82.01079711593528,
+                "residual_rms_db": 4.245019507963524
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.330152682959472
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3184.558868408203,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -21.66419663021692,
+                "mean_level_db": -84.66384438460165,
+                "residual_rms_db": 4.277312338912383
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -34.25341499027788,
+                "mean_level_db": -87.47458742186635,
+                "residual_rms_db": 2.4697913463886088
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -26.980042345396033,
+                "mean_level_db": -96.44467688818091,
+                "residual_rms_db": 2.5935987952788957
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.582740727610869
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -30.303125261042617
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -42.79454378507567
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -48.19441379864117
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -54.222475084356674
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -97.85313223230656
+          }
+        ]
+      }
+    },
+    {
+      "note": 84,
+      "velocity": 110,
+      "native": {
+        "frames": 176400,
+        "rate": 44100,
+        "block": 256,
+        "warmup_frames": 8820,
+        "events": 2,
+        "peak": 0.12982905,
+        "rms": 0.004914465643016197,
+        "wall_seconds": 0.1709857
+      },
+      "command": [
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\probe.exe",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\84-110\\events.txt",
+        "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\84-110\\release.f32",
+        "44100",
+        "176400",
+        "256",
+        "concert"
+      ],
+      "events_sha256": "10c8050a46a8484d94af9ebd8a708756f1c4960d9cc54366310b45cc84154229",
+      "release_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\84-110\\release.f32",
+      "release_raw_sha256": "525bb65e142a7920d99d00b1913e15e9afb8ccb20e23f32cb9e0a2b0662b7ed6",
+      "research_raw_path": "C:\\Users\\kalex\\.codex\\worktrees\\concert-grand-release-base\\rackforge\\local\\concert-grand-release-body-2026-10-14\\cases\\84-110\\research-0.172\\performance.f32",
+      "research_raw_sha256": "4d7d205aef6ec5ca8119f0e3e306b9a74133008a806acc16097e437c2afcc556",
+      "reference_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\concert-grand-identified-body\\reference\\84-110.wav",
+      "reference_sha256": "11468e8dbefcb40deb2848117d2ec7a4e4b8c03be214b570691c52cf5eb30e26",
+      "reference_metadata": {
+        "mapping_sha256": "f6425f0eab821366c4162245dbd4c21fe0c0738fd150afe18f262c0522f95dd5",
+        "sfz_sha256": "af913e9ed5341d2071eb855c4990e1c76426a80db7eb05aca7981c89fbfc2794",
+        "dll_sha256": "aa4bfa4ad9a57cfbb3c832a50be14bfe5aeaf7a36ffcdf0178547abe8719e653",
+        "source": {
+          "file": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\local\\reference-audio\\bitklavier-grand\\microphones\\stage_lid_ortf\\notes\\C6v14.wav",
+          "sha256": "97bba1bb81ccb3c1810c3f0123f1eed158a07690b0c5c95772ecf0832e2aa0a6",
+          "layer": 14,
+          "transposition": 0
+        }
+      },
+      "reference_metadata_sha256": "7bc1070d01de5d01be5dafb46c10af1888b68717d21e15835a16900d253d7507",
+      "release": {
+        "analysis_onset_frame": 0,
+        "peak": 0.1298290491104126,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1048.0613708496094,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -102.55809032493785,
+                "mean_level_db": -52.70945810096805,
+                "residual_rms_db": 0.8420239260961284
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 13.721993973938806,
+                "mean_level_db": -58.01654597194394,
+                "residual_rms_db": 0.379580506307403
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -13.02708293507563,
+                "mean_level_db": -58.97355727258877,
+                "residual_rms_db": 0.3255822133721352
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -18.72233900954693
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2097.8050231933594,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -0.8223908086351532,
+                "mean_level_db": -60.52856625483216,
+                "residual_rms_db": 0.759040405128773
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -28.766418788506794,
+                "mean_level_db": -63.83293233207023,
+                "residual_rms_db": 0.8898781293776218
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 11.059040230923157,
+                "mean_level_db": -81.26618872102135,
+                "residual_rms_db": 1.9270903938629127
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -17.955078225307787
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3150.2403259277344,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -30.964540625023208,
+                "mean_level_db": -61.71632141855655,
+                "residual_rms_db": 0.8196750415019073
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -36.407115787305074,
+                "mean_level_db": -72.93921026303839,
+                "residual_rms_db": 0.9237183831945898
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -19.706659037594385,
+                "mean_level_db": -86.00864788599723,
+                "residual_rms_db": 1.6652304480187652
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -19.80300252070205
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -30.532065576220916
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -53.72234333054115
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -61.60513337012805
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -72.56287966565831
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -109.67273940947746
+          }
+        ]
+      },
+      "research": {
+        "analysis_onset_frame": 0,
+        "peak": 0.18299661576747894,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.7249145507812,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -42.509723240363755,
+                "mean_level_db": -29.075517278752457,
+                "residual_rms_db": 0.12063622486290082
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -24.605023025550015,
+                "mean_level_db": -40.639221440151616,
+                "residual_rms_db": 0.1917181766376133
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -10.731285960175208,
+                "mean_level_db": -49.08192837453187,
+                "residual_rms_db": 0.108027975753951
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -22.24970342109616
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2097.132110595703,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -14.56403666012617,
+                "mean_level_db": -51.97271847426786,
+                "residual_rms_db": 0.9106298675238531
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -24.5874891756513,
+                "mean_level_db": -57.830837332792065,
+                "residual_rms_db": 0.5290495458487833
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -9.010061955449169,
+                "mean_level_db": -70.78918822528807,
+                "residual_rms_db": 0.6025689232307211
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -13.792440929026696
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3149.567413330078,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -31.945808286794666,
+                "mean_level_db": -63.51383900141683,
+                "residual_rms_db": 0.9307057879809494
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -23.167614734989293,
+                "mean_level_db": -77.84643073238148,
+                "residual_rms_db": 2.182907327704399
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -23.546555715122693,
+                "mean_level_db": -90.35160473493926,
+                "residual_rms_db": 1.7141245247545598
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -27.86153501633715
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -22.909761525239638
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -34.84070295320783
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -51.83627961035852
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -57.05862264788831
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -96.34555319288965
+          }
+        ]
+      },
+      "reference": {
+        "analysis_onset_frame": 44,
+        "peak": 0.24131831526756287,
+        "partials": [
+          {
+            "harmonic": 1,
+            "frequency_hz": 1047.052001953125,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -112.90896189308977,
+                "mean_level_db": -31.193139914445943,
+                "residual_rms_db": 2.7546560437371883
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -27.168057598506337,
+                "mean_level_db": -36.54960718635878,
+                "residual_rms_db": 1.7764922478352374
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": 15.741892651381226,
+                "mean_level_db": -37.4874928075105,
+                "residual_rms_db": 1.5390993504745605
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -18.71742765610313
+          },
+          {
+            "harmonic": 2,
+            "frequency_hz": 2103.8612365722656,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": -34.5626914883316,
+                "mean_level_db": -50.887970853707074,
+                "residual_rms_db": 4.587535795705178
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": 21.51401915038394,
+                "mean_level_db": -55.76513956241333,
+                "residual_rms_db": 3.847360519903133
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -27.7814562903926,
+                "mean_level_db": -66.84060625102677,
+                "residual_rms_db": 2.7010098609571123
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -19.674700116621146
+          },
+          {
+            "harmonic": 3,
+            "frequency_hz": 3184.8953247070312,
+            "slopes": [
+              {
+                "window_s": [
+                  0.15,
+                  0.4
+                ],
+                "slope_db_per_s": 5.72591725048619,
+                "mean_level_db": -66.9360087013896,
+                "residual_rms_db": 4.865181050443864
+              },
+              {
+                "window_s": [
+                  0.45,
+                  0.8
+                ],
+                "slope_db_per_s": -67.8575229189158,
+                "mean_level_db": -69.76092486795808,
+                "residual_rms_db": 2.6097230904470656
+              },
+              {
+                "window_s": [
+                  0.9,
+                  1.4
+                ],
+                "slope_db_per_s": -30.397782532486872,
+                "mean_level_db": -77.72120713143693,
+                "residual_rms_db": 4.103837222584538
+              }
+            ],
+            "fall_from_100_200ms_to_500_1400ms_db": -11.896045029115434
+          }
+        ],
+        "stages": [
+          {
+            "window_s": [
+              0,
+              0.1
+            ],
+            "stereo_rms_db": -20.079039425022383
+          },
+          {
+            "window_s": [
+              0.15,
+              0.8
+            ],
+            "stereo_rms_db": -32.369798891284404
+          },
+          {
+            "window_s": [
+              0.9,
+              1.4
+            ],
+            "stereo_rms_db": -39.75475808617568
+          },
+          {
+            "window_s": [
+              1.5,
+              1.9
+            ],
+            "stereo_rms_db": -45.62977230064053
+          },
+          {
+            "window_s": [
+              2.3,
+              2.8
+            ],
+            "stereo_rms_db": -92.95286153952216
+          }
+        ]
+      }
+    }
+  ],
+  "sources_unchanged": true,
+  "total_seconds": 9.734052900006645
+}

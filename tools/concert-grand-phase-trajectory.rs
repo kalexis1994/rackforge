@@ -5,6 +5,8 @@
 mod collocation;
 #[path = "concert-grand-phase-profile.rs"]
 mod profile;
+#[path = "concert-grand-observation.rs"]
+mod observation;
 #[allow(dead_code)]
 #[path = "concert-grand-native-strings.rs"]
 mod native;
@@ -836,6 +838,12 @@ fn main() {
         (data[19 + 3 * nt] * p[4]).round() as usize
     };
     assert!(total % frames == 0 && total > 0);
+    let mut observation = args.iter().find_map(|x| x.strip_prefix("--observation-trace="))
+        .map(|path| {
+            assert!(!bench, "observation traces are excluded from CPU benchmarks");
+            observation::Observation::new(path.to_string(), nt, nl, p[0], p[1], total / frames)
+        });
+    if let Some(o) = &mut observation { o.sample(0., &model.v); }
     let mut times = Vec::with_capacity(buffers);
     let mut last = Instant::now();
     let allocations_before = phase::allocation_count();
@@ -856,6 +864,7 @@ fn main() {
                 raw_max = raw_max.max(stats.raw_work_relative);
                 residual_max = residual_max.max(stats.residual);
                 completed += frames;
+                if let Some(o) = &mut observation { o.sample(completed as f64 / p[4], &model.v); }
                 let clock = profile::start();
                 work_max =
                     work_max.max((model.energy() - initial).abs() / initial.abs().max(1e-30));
@@ -873,6 +882,8 @@ fn main() {
     }
     let allocations = phase::allocation_count() - allocations_before;
     let elapsed = start.elapsed().as_secs_f64();
+    let observation_samples = observation.as_ref().map(|o|o.len()).unwrap_or(0);
+    if let Some(o) = &observation { o.write(); }
     let energy = model.energy();
     let final_wires = wire_energies(&mut model.wires, &model.omega2, &model.q, &model.v, None);
     model.q.push(q[size - 1]);
@@ -888,5 +899,5 @@ fn main() {
     let failure_json = failure
         .map(|s| format!("{:?}", s))
         .unwrap_or_else(|| "null".to_string());
-    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"initial_wire_energy_j\":{:?},\"final_wire_energy_j\":{:?},\"per_wire_energy_constraint\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false,\"temporal_collocation\":{},\"buffer_microframes\":{},\"profile\":{},\"axial_elimination\":{},\"audited_residual_relative_max\":{}}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,initial_wires,final_wires,model.per_wire_constraint,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0),model.collocation.is_some(),buffer_microframes,model.profile.json(elapsed),model.collocation.as_ref().is_some_and(|c|c.eliminates_axial()),model.collocation.as_ref().map(|c|c.audited_residual_max()).unwrap_or(0.));
+    println!("{{\"q\":{:?},\"v\":{:?},\"completed\":{},\"completed_microframes\":{},\"failure\":{},\"frames\":{},\"cubic_order\":{},\"energy_j\":{},\"initial_energy_j\":{},\"initial_wire_energy_j\":{:?},\"final_wire_energy_j\":{:?},\"per_wire_energy_constraint\":{},\"work_relative_max\":{},\"raw_local_work_relative_max\":{},\"numerical_lambda_abs_max\":{},\"midpoint_residual_relative_max\":{},\"maximum_iterations\":{},\"allocations\":{},\"seconds\":{},\"buffers\":{},\"mean_ms\":{},\"p99_ms\":{},\"max_ms\":{},\"known_prepared_bytes\":{},\"numerical_energy_constraint\":{},\"forced_axial_waveform\":{},\"high_axial_modes_per_wire\":{},\"contact_included\":false,\"nonlinear_step\":true,\"full_piano_realtime\":false,\"temporal_collocation\":{},\"buffer_microframes\":{},\"profile\":{},\"axial_elimination\":{},\"audited_residual_relative_max\":{},\"observation_samples\":{}}}",model.q,model.v,failure.is_none(),completed,failure_json,frames,order,energy,initial,initial_wires,final_wires,model.per_wire_constraint,work_max,raw_max,lambda_max,residual_max,max_iterations,allocations,elapsed,times.len(),mean,p99,maximum,model.prepare_bytes(),model.constrained,model.forced_axial,model.waves.first().map(|w|w.high_modes()).unwrap_or(0),model.collocation.is_some(),buffer_microframes,model.profile.json(elapsed),model.collocation.as_ref().is_some_and(|c|c.eliminates_axial()),model.collocation.as_ref().map(|c|c.audited_residual_max()).unwrap_or(0.),observation_samples);
 }

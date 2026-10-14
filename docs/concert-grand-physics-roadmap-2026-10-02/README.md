@@ -307,6 +307,16 @@ rechazado frente a 0,125 ms y la fidelidad sigue limitada a 6 ms. Ver
 [medición](medidas-P7-cuerdas-nativas-2026-10-14/collocation-axial-elimination.json)
 y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
 
+La [prueba de viabilidad modal](RESULTADOS-P7-viabilidad-tiempo-real.md)
+contrasta 96 ms de C4, dos intensidades prescritas y modelos de 4–96 modos.
+La auditoría autentica 130 ejecuciones. Ninguna configuración probada pasa
+ambas intensidades, refinamiento temporal y plazo de CPU. Ocho modos a
+16 kHz/orden 8 caben en el caso suave, con 4,52 % de error mecánico y pérdida
+casi completa de la banda 2–6 kHz. Orden 16 resuelve el caso fuerte, pero
+consume 0,1231 ms medios/0,1550 ms máximos para una nota. El recorte simple
+no demuestra un piano fiel y polifónico. El modelo completo y la fábrica
+mantienen sus parámetros; pasan 32 pruebas actuales, suite acumulada 58.
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

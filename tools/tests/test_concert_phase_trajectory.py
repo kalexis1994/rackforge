@@ -32,6 +32,23 @@ class PhaseTrajectoryTests(unittest.TestCase):
         f=fixture(transverse=nt,seed=83,duration=duration);f['launch_speeds'][:]=0
         return f
 
+    def test_observation_trace_preserves_state_and_samples_mechanical_velocity(self):
+        f=self.coast(4,.000125);path=self.folder/'observation.json'
+        plain=self.run_native(f,'verify',1,8,'--collocation')
+        observed=self.run_native(f,'verify',1,8,'--collocation',f'--observation-trace={path}')
+        for key in ['q','v','work_relative_max','maximum_iterations','midpoint_residual_relative_max']:
+            self.assertEqual(observed[key],plain[key],key)
+        self.assertEqual(observed['allocations'],0)
+        trace=json.loads(path.read_text(encoding='utf-8'));rows=np.asarray(trace['rows'])
+        self.assertFalse(trace['acoustic_pressure']);self.assertEqual(len(rows),observed['completed_microframes']+1)
+        nt=f['transverse'];nl=f['axial'];width=nl+2*nt;n=np.arange(1,nt+1)
+        root=np.sqrt(f['parameters'][0]*f['parameters'][1]/2)
+        weights=np.sin(np.pi*n[:,None]*np.array([.125,.31,.73]))*np.exp(-1.2*(n*.02)**2)[:,None]/root
+        for row,v in [(rows[0],f['v']),(rows[-1],observed['v'])]:
+            expected=np.concatenate([np.asarray(v)[i*width+nl:i*width+nl+nt] @ weights for i in range(3)])
+            np.testing.assert_allclose(row[1:],expected,rtol=1e-14,atol=1e-17)
+        self.assertAlmostEqual(rows[-1,0],.000125)
+
     def test_cubic_gradient_matches_independent_spatial_gauss(self):
         for nt in [4,96]:
             f=self.coast(nt);native=self.run_native(f,'cubic')

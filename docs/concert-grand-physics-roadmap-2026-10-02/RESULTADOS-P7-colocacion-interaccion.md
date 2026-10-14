@@ -681,3 +681,16 @@ algoritmos normales de cuerdas/presión siguen sin cambios.
 237/234 veces el plazo de 0,125 ms, y los máximos a 291/294 veces.
 Continúa el alcance C4 mixto de 6 ms, sin martillo, cuerpo, presión, pedales
 ni polifonía; fábrica y aprobación física global permanecen pendientes.
+
+## Cambio de prioridad: prueba de viabilidad — 2026-10-14
+
+El factor de CPU restante motiva una
+[prueba explícita de resolución modal y reloj](RESULTADOS-P7-viabilidad-tiempo-real.md),
+con 96 ms, dos intensidades de pulso prescrito, sondas mecánicas y
+refinamiento temporal. Se autentican 130 ejecuciones. El modelo de ocho
+modos puede caber para el caso suave, con pérdida de banda; en el fuerte
+hay que subir el orden, y el máximo supera el plazo. Ninguna configuración
+probada pasa conjuntamente los tamices de ambas intensidades y CPU.
+No se cambia la resolución del modelo completo ni se aprueba calidad de
+piano o polifonía. Ver los datos y límites del estudio antes de extrapolar
+las reducciones de costo anteriores hacia un instrumento en tiempo real.

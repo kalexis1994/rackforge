@@ -1,0 +1,53 @@
+{
+  "source_sha256": {
+    "audit-concert-grand-phase-wire-energy.py": "1af89c60a2addb47f1f112bdc2247c39b4f77104a5679d803240a099e18608ac",
+    "concert-grand-batch-cosine.rs": "bc46baffebbd45ad7731f7e8691b77f1707a44febc854baee8707277a8b635da",
+    "concert-grand-collocation.rs": "2cc85ef167a67df950002d37e21cc81540e1fd2e302c884d8cdd28de944ee3ff",
+    "concert-grand-native-strings.rs": "effc2cf332126884186711770580e92057a0c8faea0fa25823841b0ca27a2878",
+    "concert-grand-observation.rs": "f5c4d16217f73bc36656a6a5dfa10204b4fa40a3929f69ce839538d7bcf26bac",
+    "concert-grand-phase-forces.rs": "bc0b26414bf85003642575a64062901779a7f25cb3884cea196e313a1d05be8c",
+    "concert-grand-phase-profile.rs": "97c718ea92dc386be7ad2861dacce259cadfe844218da64142e4d4ec8a54f7f6",
+    "concert-grand-phase-trajectory.rs": "03d6fa983006aa2c2a23bff7d6d07bda3f79bd5f7ebc02d77567e5a3cd8cc4b8",
+    "concert_grand_contact_study.py": "3862631ba909ea5897cc121e3b3517df57ff5d04f9ac4b0fd9699e4c1829aa13",
+    "concert_grand_coupled_contact.py": "32cbb29a17fb529c334d397f9118aeff07e8250c3f9a8d7d8f4d600e99505882",
+    "concert_grand_exponential_contact.py": "6121202537d5ae8918c3cd814964c65f38b38026169d9099cb01b5f184d1dffb",
+    "concert_grand_modal_viability.py": "d87db6d0acfc8e4cde6e0e3718acc05e7b708e65dd476507252b0f8ba63b9870",
+    "concert_grand_native_strings.py": "4c0cae8d1155dab1a97c3ddbfa2afa6f6f08afb1e90167edbdfe7d14f78be450",
+    "concert_grand_phase_forces.py": "02854406da8aa6516c311fac97445be44dcf2d23fcebc3eb8dff82b5c4d902c8",
+    "concert_grand_shared_kernels.py": "1b929862073ef8ac7d4163d839842d6d0847c457a0350733e047b1d6149a7c09",
+    "concert_grand_shared_strings.py": "ed774cd0591ace75d1dd8ccfe71a6391036a3bfe5f7000794560023419cce32c",
+    "measure-concert-grand-axial-elimination.py": "c86a97c385d557e165a214fabd112b9d3bdff8555936445f53e3ea05f52eb765",
+    "measure-concert-grand-axial-waveform.py": "a18c063e45fa1eed0735c64a12a3a4f63ea486cc15ac43cd7c4ee8a715029d60",
+    "measure-concert-grand-collocation-profile.py": "af1a2f8950140a91d2cb321fc9bf16aa7034539c6aa7f454ce7a11d370f26fcd",
+    "measure-concert-grand-collocation.py": "deabea88de94fcfa5ef53ae58356bd1718fa6b10c99513a9a34ab07604e82138",
+    "measure-concert-grand-modal-viability.py": "e2ae768e3e6801187d4db9f4c745d05639ae428e5f16aadff2c0b28ea129511c",
+    "measure-concert-grand-native-strings.py": "cf5da1c3225751639e1fc7985a4892662edf18e4e777b4e175879e2e58b2a5a2",
+    "measure-concert-grand-phase-trajectory.py": "22b26a4b6b57e1baf530c77153ba742e1ef1e27d220cfaf6fad697529d587324",
+    "measure-concert-grand-phase-wire-roots.py": "bd33932a33f428ba9fae756286c8c397cef93bce6f84c24505ffb47a94c977f2",
+    "tests/test_concert_modal_viability.py": "f7a5765abd5c50c538aedc0f5f48e8efe99bd46e1b5c8fbaf3d76c593e20926f",
+    "tests/test_concert_phase_trajectory.py": "c6a2f15d0fd4db5fb1910148f661856c987663d99a26eb0e91f502988241efc8",
+    "measure-concert-grand-modal-orders.py": "67f443a1eaf83f2cecca28c81ccb7529595e168e3628c58c58da6c4f675513e3",
+    "tests/test_concert_modal_signal.py": "eea80dbec4e4cb30a43a5343f855a6f3941a03555f2a5d28a5a5ba7ecfa1cee5",
+    "audit-concert-grand-modal-viability.py": "57d07f7cedab861de17e8799ba1f0b272edf6bc7e87ad87a4fa7ce24407d57c6"
+  },
+  "study_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\modal-viability.json",
+  "study_sha256": "5d234842110449c6fdf126712656068f42993d9d17fb68a8f2de0fe0b270c0f1",
+  "orders_path": "C:\\Users\\kalex\\OneDrive\\Documents\\rackforge\\docs\\concert-grand-physics-roadmap-2026-10-02\\medidas-P7-cuerdas-nativas-2026-10-14\\modal-orders.json",
+  "orders_sha256": "8f0a4200fede6084b092f9aad039f31938ed101118b893d07f31e55e82558170",
+  "native_runs_verified": 130,
+  "reused_native_runs_verified": 72,
+  "candidates_10N": [
+    [
+      8,
+      16000,
+      8
+    ]
+  ],
+  "candidates_50N": [],
+  "candidates_passing_both_intensities": [],
+  "conclusion": "no tested configuration passes both intensity screens and the measured component deadline",
+  "acoustic_pressure": false,
+  "perceptual_quality_approved": false,
+  "polyphony_measured": false,
+  "full_piano_realtime": false
+}

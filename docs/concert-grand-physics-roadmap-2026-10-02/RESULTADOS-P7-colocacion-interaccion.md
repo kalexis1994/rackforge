@@ -253,3 +253,54 @@ cambia el gate de residual 1e−11 ni el de conservación energética 1e−9.
 La mejora mantiene el alcance del sostenido mixto de 6 ms sin contacto, cuerpo,
 presión, pedales o polifonía. Sigue reducir el costo y extender la validación
 temporal antes de seleccionar una ruta para el instrumento tocable.
+
+## Recorrido del residual y alternancia de buffers — 2026-10-14
+
+La [medición del recorrido nodal](medidas-P7-cuerdas-nativas-2026-10-14/collocation-node-updates.json)
+autentica el control **983f634a**, sus fuentes, ejecutable y resultados.
+Se mantienen las referencias finas y los tres ensayos de 6 ms.
+
+El residual se calcula nodo por nodo, recorriendo directamente el vector
+de frecuencias. Desaparece `k % size` por coordenada y se conserva el orden
+original de las sumas y multiplicaciones. Tras una iteración no convergida,
+se intercambian los dos buffers preasignados: el siguiente cálculo sobrescribe
+completamente el buffer de destino desde el portador libre. No se cambia
+ningún nodo, fuerza, peso de cuadratura, tolerancia ni ecuación de evolución.
+El refresco final opcional conserva su semántica anterior.
+
+`--legacy-node-updates` recupera el recorrido lineal con módulo y la copia de
+buffers. Tanto la ruta nueva como ese control reproducen **exactamente q/v,
+ledger, lambda, residual máximo e iteraciones** del snapshot en los tres
+relojes. Los errores frente al maestro siguen en **0,053051 / 0,040580 /
+0,044801 %** a 128/256/512 kHz, pasando también energía por cuerda y ledger.
+
+Benchmarks secuenciales, sin pruebas simultáneas, con ocho buffers de
+**0,125 ms** y **1 ms físico total**. Se incluyen las comprobaciones de energía:
+
+| Ruta | Media por buffer | P99/máximo | Asignaciones |
+|---|---:|---:|---:|
+| Control congelado 983f634a, 512 kHz/8 | 47,954 ms | 48,711 ms | 0 |
+| Ejecutable actual, recorrido anterior | 48,052 ms | 49,290 ms | 0 |
+| Recorrido por bloques, 512 kHz/8 | **45,271 ms** | **46,276 ms** | **0** |
+| Repetición por bloques | **46,488 ms** | **50,486 ms** | **0** |
+| Repetición del control congelado | 50,432 ms | 57,303 ms | 0 |
+| Recorrido por bloques, 256 kHz/16 | 54,304 ms | 57,104 ms | 0 |
+
+La media baja **5,60 %** en la primera comparación y **7,82 %** frente al
+control repetido. Hay variación visible entre ejecuciones: el máximo de la
+repetición nueva supera el máximo del primer control. El ahorro medio es
+pequeño y no establece una mejora estable de la cola. No se agrega memoria:
+tablas/buffers contabilizados permanecen en **1.351.680 bytes** a 512 kHz/8.
+Todos los benchmarks pasan ledger y energía individual.
+
+Pasan **24 pruebas actuales** de fases y trayectoria. La regresión nueva
+compara ambas rutas a tres relojes, con cuatro/96 modos y un orden 10 que usa
+la cola escalar. También fuerza un fallo tras dos iteraciones, verificando
+que el intercambio interno de buffers no publica estado físico parcial.
+Las 26 pruebas del núcleo nativo/presión pasaron en la etapa anterior;
+esos algoritmos no cambian aquí. La suite acumulada contiene **50 pruebas**.
+
+**CPU sigue rechazado**: máximos 46,276/50,486 ms frente a 0,125 ms, unas
+370/404 veces el plazo. El alcance de estado sigue limitado al sostenido
+mixto de 6 ms, sin contacto, cuerpo, presión, pedales o polifonía. Sigue
+reducir el costo de la colocación y extender la validación temporal.

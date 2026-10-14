@@ -236,6 +236,17 @@ CPU sigue rechazado frente a 0,125 ms; el alcance de estado continúa en los
 6 ms sin contacto/cuerpo. Ver la
 [medición autenticada](medidas-P7-cuerdas-nativas-2026-10-14/collocation-batch.json).
 
+El residual nodal se recorre ahora por bloques, evitando el módulo por cada
+coordenada, y los buffers de iteración se alternan en lugar de copiarse.
+Los seis replays de 6 ms conservan exactamente estado, ledger, lambda,
+residual e iteraciones de 983f634a. CPU muestra un ahorro pequeño: medias
+**45,271/46,488 ms** frente a **47,954/50,432 ms** de los controles;
+máximos **46,276/50,486 ms**, cero asignaciones y misma memoria contabilizada.
+Pasan 24 pruebas actuales de fases/trayectoria; suite acumulada 50.
+La variación de las mediciones permanece visible y el plazo de 0,125 ms
+sigue rechazado. Ver [medición](medidas-P7-cuerdas-nativas-2026-10-14/collocation-node-updates.json)
+y [resultados](RESULTADOS-P7-colocacion-interaccion.md).
+
 El ajuste conjunto anterior está en **747f3917**. La
 [proyección variable de dinámica/observador](RESULTADOS-P7-proyeccion-variable.md)
 mantiene 161 modos y regularización fija. Movilidad 4,545 % RMS/14,533 % máximo;

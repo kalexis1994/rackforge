@@ -33,6 +33,7 @@ pub(super) fn integration_matrix(rule: &[(f64, f64)], h: f64) -> Vec<f64> {
 }
 
 pub(super) struct Collocation {
+    legacy_node_updates: bool,
     scalar_forces: bool,
     refresh_converged_forces: bool,
     order: usize,
@@ -74,6 +75,7 @@ impl Collocation {
             }
         }
         Self {
+            legacy_node_updates: false,
             scalar_forces: false,
             refresh_converged_forces: false,
             order,
@@ -123,6 +125,9 @@ impl Collocation {
     pub(super) fn scalar_forces(&mut self) {
         self.scalar_forces = true;
     }
+    pub(super) fn legacy_node_updates(&mut self) {
+        self.legacy_node_updates = true;
+    }
     pub(super) fn refresh_converged_forces(&mut self) {
         self.refresh_converged_forces = true;
     }
@@ -168,15 +173,30 @@ impl Collocation {
                     }
                 }
             }
-            let residual = self
-                .next
-                .iter()
-                .zip(&self.q)
-                .enumerate()
-                .map(|(k, (a, b))| omega2[k % self.size] * (a - b) * (a - b))
-                .sum::<f64>()
-                .sqrt()
-                / scale;
+            let residual2 = if self.legacy_node_updates {
+                self.next
+                    .iter()
+                    .zip(&self.q)
+                    .enumerate()
+                    .map(|(k, (a, b))| omega2[k % self.size] * (a - b) * (a - b))
+                    .sum::<f64>()
+            } else {
+                // Visit nodes and modes in the original summation order.
+                // Each node reuses omega2 directly, without per-mode modulo.
+                let mut sum = 0.;
+                for (next, current) in self
+                    .next
+                    .chunks_exact(self.size)
+                    .zip(self.q.chunks_exact(self.size))
+                {
+                    for ((a, b), w) in next.iter().zip(current).zip(omega2) {
+                        let d = a - b;
+                        sum += w * d * d;
+                    }
+                }
+                sum
+            };
+            let residual = residual2.sqrt() / scale;
             if !residual.is_finite() {
                 return Err("nonfinite collocation residual");
             }
@@ -199,7 +219,13 @@ impl Collocation {
                 }
                 return Ok((iteration, residual));
             }
-            self.q.copy_from_slice(&self.next);
+            if self.legacy_node_updates {
+                self.q.copy_from_slice(&self.next);
+            } else {
+                // next is overwritten from free before every update. Swap
+                // owned workspaces instead of copying the accepted iterate.
+                std::mem::swap(&mut self.q, &mut self.next);
+            }
         }
         Err("collocation did not converge")
     }

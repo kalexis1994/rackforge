@@ -264,6 +264,25 @@ class PhaseTrajectoryTests(unittest.TestCase):
                 self.assertEqual(batch[key],single[key],key)
             self.assertEqual(batch['allocations'],0)
 
+    def test_block_residual_and_swapped_buffers_preserve_nodes_and_failures(self):
+        for nt,rate,order in [(4,128000,10),(96,128000,24),(96,256000,16),(96,512000,8)]:
+            f=fixture(transverse=nt,rate=rate,seed=83,duration=.000125);f['launch_speeds'][:]=0.
+            fast=self.run_native(f,'verify',1,order,'--collocation')
+            legacy=self.run_native(f,'verify',1,order,'--collocation','--legacy-node-updates')
+            self.assertTrue(fast['completed'] and legacy['completed'])
+            for key in ['q','v','work_relative_max','numerical_lambda_abs_max',
+                        'maximum_iterations','midpoint_residual_relative_max']:
+                self.assertEqual(fast[key],legacy[key],key)
+            self.assertEqual(fast['allocations'],0)
+        f=self.coast(12,.000125)
+        for flags in [[],['--legacy-node-updates']]:
+            # Two unsuccessful iterations exercise a workspace swap before
+            # failure. No physical state from either iterate may be published.
+            data=self.run_native(f,'verify',1,8,'--collocation','--iteration-limit=2',*flags)
+            self.assertFalse(data['completed']);self.assertEqual(data['completed_microframes'],0)
+            np.testing.assert_array_equal(data['q'],f['q']);np.testing.assert_array_equal(data['v'],f['v'])
+            self.assertEqual(data['allocations'],0)
+
     def test_coupled_trajectory_refines_against_continuous_ode(self):
         f=self.coast(4,.0005);ns=len(f['q'])-1;core=f['system'].string
         def derivative(_t,y):

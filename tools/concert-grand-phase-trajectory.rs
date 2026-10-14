@@ -729,6 +729,11 @@ fn main() {
         use_collocation,
     );
     model.constrained = !args.iter().any(|x| x == "--unconstrained");
+    if args.iter().any(|x| x == "--legacy-node-updates") {
+        if let Some(collocation) = &mut model.collocation {
+            collocation.legacy_node_updates();
+        }
+    }
     if args.iter().any(|x| x == "--scalar-collocation-forces") {
         if let Some(collocation) = &mut model.collocation {
             collocation.scalar_forces();

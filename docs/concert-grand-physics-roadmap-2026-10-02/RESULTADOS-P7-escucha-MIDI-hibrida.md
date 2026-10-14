@@ -172,3 +172,16 @@ en paralelo. La suma se hace siempre en el mismo orden y una sola tabla
 procesa el resultado. Los tiempos por voz incluyen competencia entre procesos;
 el tiempo por variante mide el render offline completo en esa configuración,
 sin pretender ser un benchmark monofónico de tiempo real.
+
+## Devolución de escucha y selección para continuar
+
+El 2026-10-14 el usuario indica: «los escucho muy similares». Se toma la
+versión de **8 modos no lineales** como base de las próximas escuchas offline,
+por su menor costo en este fragmento: 87 frente a 103 segundos. Esto registra
+la comparación entre las versiones; la valoración del timbre general sigue
+pendiente.
+
+El productor pasa a usar sólo 8 modos por defecto. La comparación continúa
+disponible con `--modes 8 12`. Los audios y mediciones anteriores se conservan
+sin cambios y sus fuentes exactas están en **552dadb0**; cambiar esta opción
+por defecto no requiere volver a renderizarlos.

@@ -27,7 +27,8 @@ def main():
     parser.add_argument('--local',type=Path,required=True);parser.add_argument('--report',type=Path,required=True)
     parser.add_argument('--audio-dir',type=Path,required=True)
     parser.add_argument('--cut',type=float,default=8.);parser.add_argument('--tail',type=float,default=1.)
-    parser.add_argument('--modes',type=int,nargs='+',default=[8,12])
+    parser.add_argument('--modes',type=int,nargs='+',default=[8],
+        help='Nonlinear transverse modes, default: 8. Use --modes 8 12 for comparison.')
     parser.add_argument('--workers',type=int,default=4)
     args=parser.parse_args();root=Path(__file__).resolve().parents[1]
     if args.local.exists() or args.report.exists() or args.audio_dir.exists():raise ValueError('fresh paths required')

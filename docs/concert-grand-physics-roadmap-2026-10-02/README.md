@@ -61,6 +61,10 @@ continua, ganancia común y ataques de fieltro nuevos. La tabla se usa en un
 solo sentido y el drenaje es diagonal aproximado; no se presenta como cierre
 recíproco completo. Pasan 67 pruebas Python y dos controles Rust. Los WAVs
 corregidos están sólo en `C:/SHARED/Piano-hibrido-MIDI-2026-10-14/`.
+El usuario escucha ambas versiones muy similares. Se toma 8 como base de
+las próximas escuchas offline y como opción por defecto del productor;
+`--modes 8 12` conserva la comparación. La valoración del timbre general
+sigue pendiente. Las fuentes de los renders medidos están en **552dadb0**.
 
 El usuario pide avanzar hacia una prueba tocable. El
 [cuerpo con presión estéreo nativa](RESULTADOS-P7-presion-realtime.md)

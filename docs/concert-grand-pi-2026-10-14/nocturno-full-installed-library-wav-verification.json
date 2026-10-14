@@ -1,0 +1,15 @@
+{
+  "wav": "C:\\SHARED\\Piano-Nocturno-Raspberry-realtime-2026-10-14\\Nocturno-Raspberry-modelo-realtime.wav",
+  "wav_sha256": "0f3d2baf18c52cabf356e6a6cd57a56e5dfcbfc7b9b7a790014158b881c2cbf9",
+  "bytes": 82048556,
+  "frames": 10256064,
+  "channels": 2,
+  "rate": 44100,
+  "pcm_bits": 32,
+  "duration_seconds": 232.5638095238095,
+  "transfer_hash_matches": true,
+  "all_pcm_samples_equal_to_neutral_core_conversion_of_accepted_render": true,
+  "source_f32_sha256": "940e6fc7e951004b7dd4097fa9ecfcac362c044169de7e6908be249886985355",
+  "normalized": false,
+  "clipped_samples": 0
+}

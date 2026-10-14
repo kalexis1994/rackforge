@@ -1,0 +1,38 @@
+{
+  "serial": {
+    "command": [
+      "nice",
+      "-n",
+      "19",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/library-probe",
+      "/home/kalex/rackforge/plugin-store/packages/org.rackforge.concert-grand/0.171.36/native/linux-aarch64/librackforge_concert_grand.so",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/Nocturno-events.txt",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/Nocturno-library-serial-64s.f32",
+      "2822400",
+      "serial",
+      "concert"
+    ],
+    "stdout": "{\"mode\":\"serial\",\"frames\":2822400,\"events\":1847,\"wall_seconds\":31.741171108}\n",
+    "expected_sha256": "4837f7d99f6a39678679619d3c28bc3c3daee587cf2289bd75b653890691a2e3",
+    "actual_sha256": "4837f7d99f6a39678679619d3c28bc3c3daee587cf2289bd75b653890691a2e3",
+    "bit_identical": true
+  },
+  "parallel": {
+    "command": [
+      "nice",
+      "-n",
+      "19",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/build/library-probe",
+      "/home/kalex/rackforge/plugin-store/packages/org.rackforge.concert-grand/0.171.36/native/linux-aarch64/librackforge_concert_grand.so",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/Nocturno-events.txt",
+      "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/Nocturno-library-parallel-64s.f32",
+      "2822400",
+      "parallel",
+      "concert"
+    ],
+    "stdout": "{\"mode\":\"parallel\",\"frames\":2822400,\"events\":1847,\"wall_seconds\":25.668647577}\n",
+    "expected_sha256": "4837f7d99f6a39678679619d3c28bc3c3daee587cf2289bd75b653890691a2e3",
+    "actual_sha256": "4837f7d99f6a39678679619d3c28bc3c3daee587cf2289bd75b653890691a2e3",
+    "bit_identical": true
+  }
+}

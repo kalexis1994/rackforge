@@ -1,0 +1,10 @@
+{
+  "file": "/home/kalex/rackforge-deploy/concert-grand-20261014-4ms/Nocturno-referencia-30-54s.wav",
+  "seconds": 24.0,
+  "rate": 44100,
+  "channels": 2,
+  "format": "S32_LE",
+  "source_f32_sha256": "36e6a6f90fe0f889b21bd17c5b08534d4d7a1c30db9b48bc43e96a921a00ce40",
+  "wav_sha256": "8deef0115da78cf6d0684d66b28422370e65092ae0d696f5db96b1476dac7633",
+  "note": "Same excerpt as the accepted render, with the neutral Core output conversion; no EQ or normalization."
+}

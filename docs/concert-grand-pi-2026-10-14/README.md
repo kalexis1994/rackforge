@@ -115,3 +115,67 @@ conserva la misma física que los renders.
 - [Campanella completa en vivo](campanella-live-256.json).
 - [Nocturno completo en vivo](nocturno-live-256.json).
 - [Estado final listo para tocar](ready-proof.json).
+
+## Revisión tras la escucha en equipos distintos
+
+El usuario describe menos cuerpo y detalle y un carácter más metálico, también
+al probar Concert, escuchando PC y Pi con equipos diferentes. La revisión de la
+Pi encuentra Concert 275 seleccionado en ese momento: nueve parámetros cambian
+respecto de Concert. No se cambia su selección ni se atribuye toda la diferencia
+al preset, porque el usuario indica que también la percibió con Concert.
+
+Para cubrir el ajuste de contacto que la prueba anterior de los 16 programas
+no incluía, `tools/concert-grand-native-library-probe.rs` carga **la biblioteca
+instalada**, configura Concert y el parámetro público 192 a 0,004 s y reproduce
+los primeros **64 s del Nocturno**, con el mismo calentamiento y eventos del
+render. Tanto la API serial como la extensión paralela con **cuatro hilos
+persistentes e instancias separadas** coinciden byte por byte con el crudo
+aceptado. Incluye 1.847 eventos y el pasaje señalado alrededor de 49 s.
+El probe no mide la salida analógica ni reemplaza una captura del proceso Core;
+sí verifica el cálculo de la biblioteca instalada y sus fases paralelas con el
+ajuste exacto de los renders. Se ejecuta con prioridad `nice 19` y no modifica
+el servicio, sus parámetros ni el dispositivo de audio.
+
+ALSA confirma dos canales S32LE a 44.100 Hz y búfer 256/768. El checkpoint no
+contiene cadenas de efectos. Se prepara además un WAV fijo del Nocturno de
+30–54 s para comparar equipos: procede del crudo aceptado y usa la misma
+conversión a S32LE del master neutro de Core, sin EQ ni normalización.
+Permanece en el directorio remoto del despliegue y en
+`C:/SHARED/Piano-Raspberry-comparacion-2026-10-14/Nocturno-referencia-30-54s.wav`.
+No se reproduce automáticamente ni se interrumpe el audio del usuario.
+
+- [Igualdad de la biblioteca instalada a 4 ms, serial y cuatro hilos](library-4ms-64s-proof.json).
+- [Procedencia del fragmento de referencia](reference-excerpt.json).
+
+## Nocturno completo renderizado en la Pi para escucha
+
+A pedido del usuario se calcula otra vez la pieza completa en la Raspberry,
+mediante la biblioteca **instalada** y sus cuatro instancias de trabajo en
+hilos persistentes. Al iniciar, el preset activo ya es Concert y los 200
+parámetros coinciden con el perfil aceptado; el master está en unidad y el
+panorama en el centro. No se modifica la sesión durante el render.
+
+Esta ejecución usa la opción `fixed-blocks` del probe: todos los períodos de
+procesamiento son de **256 muestras**, incluidos 35 períodos de preparación
+silenciosa y el último período del tema. Sólo se recorta el archivo final a su
+duración pedida. Conserva los **6.027 eventos**, sus velocidades y pedales,
+44.100 Hz, estéreo, contacto de 4 ms y ocho segundos de cola. El cálculo tarda
+**88,380 s** para **232,564 s** de audio. La preparación silenciosa redondeada
+a períodos completos no cambia ninguna muestra respecto del render previo:
+el SHA256 f32 sigue siendo
+`940e6fc7e951004b7dd4097fa9ecfcac362c044169de7e6908be249886985355`.
+
+El WAV se convierte **en la Pi** a PCM S32LE con el mismo cálculo float32,
+truncamiento a entero y umbral de seguridad del master neutro de Core. No se
+normaliza ni ecualiza. Pico f32 **0,33643636** y cero muestras recortadas.
+Es un render digital del motor instalado; no es una grabación analógica de
+la Scarlett ni una captura del planificador ALSA del proceso en vivo.
+
+Archivo para escuchar:
+`C:/SHARED/Piano-Nocturno-Raspberry-realtime-2026-10-14/Nocturno-Raspberry-modelo-realtime.wav`.
+La copia remota permanece en `nocturno-wav-realtime-model/` dentro del directorio
+de despliegue. Se verifica la integridad de la transferencia y que cada muestra
+PCM corresponde a la conversión de salida del crudo aceptado.
+
+- [Procedencia y comprobaciones del render completo](nocturno-full-installed-library-render.json).
+- [Integridad del WAV y conversión de todas las muestras](nocturno-full-installed-library-wav-verification.json).

@@ -5817,12 +5817,6 @@ pub static UNISON_WIDTH: Knob = Knob::new(0.5);
 /// conservative voicing trial avoids exact unisons without restoring the
 /// former fast treble beats. No extra oscillators or per-sample work.
 const TOP_UNISON_CENTS: f32 = 0.02;
-/// Local voicing trial for C4's excessive projected H1 fall: narrow only
-/// the fundamental's string cluster by 30%, fading out at A3 and D#4.
-/// The existing recipe already gives each partial its own separation.
-/// Narrowing the entire ladder helped H1 but worsened H2, so its upper
-/// partials keep their accepted tuning. Listening acceptance is pending.
-const C4_FUNDAMENTAL_UNISON_NARROWING: f32 = 0.30;
 /// Geometric spread of the per-partial detune jitter (6 = x0.4..x2.4; 1 = one detune per string).
 pub static UNISON_JITTER_SPREAD: Knob = Knob::new(6.0);
 /// Stulov's hereditary felt: the share of the compression history the force
@@ -7471,8 +7465,6 @@ impl StringUnit {
                 * (self.engine.controls.unison / 0.65)
                 * self.engine.controls.lab(13)
                 * unison_precision;
-        let near_c4 = (1.0 - (note as f32 - 60.0).abs() / 3.0).max(0.0);
-        let fundamental_unison_scale = 1.0 - C4_FUNDAMENTAL_UNISON_NARROWING * near_c4;
         // A tuner hears beats, not cents: the same three cents that pass
         // unnoticed on a C2 beat twenty times a second on a C7's second
         // partial, and that is the chirp the user heard on the high notes
@@ -8072,7 +8064,6 @@ impl StringUnit {
                     hash01((note as u32) << 10 | (n as u32) << 2 | 1) - 0.5,
                 );
             let cents = detune_cents * jitter;
-            let cents = if n == 0 { cents * fundamental_unison_scale } else { cents };
             // The strings of the unison, struck together and equal: their
             // subsequent life -- fast coherent decay, dephasing, the long
             // trapped tail, the churn -- is simulated through the bridge
@@ -18343,12 +18334,11 @@ mod bench {
     /// Nothing about the instrument's sound should move by accident, and
     /// until now nothing stopped it -- these two tests printed their hash and
     /// asserted nothing, so they passed whatever the instrument did.
-    // The local C4 narrowing changes both scripts deliberately. Setting only
-    // C4_FUNDAMENTAL_UNISON_NARROWING to zero restores the accepted
-    // e74df30116b39a5a / 9b9bd2cbb32452f0 pair, retaining the treble residual.
-    const RENDER_FINGERPRINT: u64 = 0x24e6_2f09_90d1_8637;
+    // Accepted piano, with the local C4 correction removed. Retain only
+    // the previously accepted treble unison residual.
+    const RENDER_FINGERPRINT: u64 = 0xe74d_f301_16b3_9a5a;
     /// As `RENDER_FINGERPRINT`, for the pedalled scenario.
-    const RENDER_FINGERPRINT_PEDALS: u64 = 0x7e53_7f27_7662_ea34;
+    const RENDER_FINGERPRINT_PEDALS: u64 = 0x9b9b_d2cb_b324_52f0;
 
     /// A fingerprint of rendered audio: what the instrument sounds like,
     /// as one number.

@@ -1,5 +1,12 @@
 # Cuerpo y sostenido sobre la release publicada
 
+**Estado actual:** el usuario pide retirar el ajuste local del fundamental
+en MIDI 58–62 y trabajar en una corrección general del acoplamiento. Se elimina
+por completo esa selección de notas y se restaura la base aceptada con el
+residuo agudo. Los candidatos de cuerpo y sus audios siguientes quedan como
+historial de ensayos, no como el modelo que se continúa. La retirada recupera
+exactamente las huellas `e74df30116b39a5a` y `9b9bd2cbb32452f0`.
+
 2026-10-14. El usuario confirma que quiere continuar desde el piano incluido
 en la release y prioriza **cuerpo y sostenido**. Base: RackForge v0.1.32,
 Concert Grand **0.171.35**, commit `91eb43f88495f0485e7a7ed61718280ddce23a8d`.

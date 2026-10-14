@@ -14071,6 +14071,80 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "offline body diagnosis; CG_BODY_TRACE_DIR must be a fresh directory"]
+    fn export_release_body_trace() {
+        use std::io::Write;
+        let folder = std::path::PathBuf::from(std::env::var("CG_BODY_TRACE_DIR").unwrap());
+        std::fs::create_dir(&folder).unwrap();
+        let grid = std::env::var("CG_BODY_TRACE_GRID")
+            .unwrap_or_else(|_| "48:60,57:60,60:60,63:60,72:60,84:60".into());
+        let tuning = std::env::var("CG_BODY_TRACE_TUNING").ok()
+            .map(|path| std::fs::read_to_string(path).unwrap());
+        const RATE: usize = 44_100;
+        const BLOCK: usize = 256;
+        for case in grid.split(',') {
+            let (note, velocity) = case.split_once(':').unwrap();
+            let note: u8 = note.parse().unwrap();
+            let velocity: u8 = velocity.parse().unwrap();
+            let mut piano = Box::new(ConcertGrand::default());
+            assert!(piano.load_preset("concert"));
+            if let Some(text) = &tuning {
+                let (_, faders, complaints) = apply_tuning(text);
+                assert!(complaints.is_empty(), "{complaints:?}");
+                for (index, value) in faders {
+                    assert!(piano.set_parameter(index.try_into().unwrap(), value as f64));
+                }
+            }
+            assert!(piano.prepare(RATE as f64, BLOCK as u32, 0, 2));
+            let mut audio = vec![0.0f32; 2 * BLOCK];
+            for at in (0..RATE / 5).step_by(BLOCK) {
+                let n = BLOCK.min(RATE / 5 - at);
+                piano.process(&[], &mut audio[..2*n], &[], &[], n as u32, 0, 2);
+            }
+            let create = |name: &str| std::io::BufWriter::new(
+                std::fs::OpenOptions::new().write(true).create_new(true)
+                    .open(folder.join(format!("{note}-{velocity}.{name}"))).unwrap());
+            let mut raw = create("f32");
+            let mut trace = create("csv");
+            writeln!(trace, "frame,onset,drain,coupling,horizontal,s0,c0,s1,c1,s2,c2,sh,ch,sb,cb,rc0,rs0,rc1,rs1,rc2,rs2,rch,rsh").unwrap();
+            let f0 = 440.0 * 2.0f32.powf((note as f32 - 69.0) / 12.0);
+            for at in (0..RATE * 4).step_by(BLOCK) {
+                let n = BLOCK.min(RATE * 4 - at);
+                let mut midi = Vec::new();
+                if at == 0 { midi.push(note_on(note, velocity)); }
+                if at <= 2*RATE && 2*RATE < at+n {
+                    let mut off = note_off(note);
+                    off.frame = (2*RATE - at) as u32;
+                    off.data[2] = 64;
+                    midi.push(off);
+                }
+                piano.process(&[], &mut audio[..2*n], &midi, &[], n as u32, 0, 2);
+                for sample in &audio[..2*n] {
+                    assert!(sample.is_finite());
+                    raw.write_all(&sample.to_le_bytes()).unwrap();
+                }
+                if let Some(voice) = piano.voices().find(|v| v.active && v.note == note) {
+                    if let Some(p) = voice.partials[..voice.partial_count].iter().find(|p| {
+                        let hz = p.rs[0].atan2(p.rc[0]) * RATE as f32 / core::f32::consts::TAU;
+                        (hz / f0 - 1.0).abs() < 0.1
+                    }) {
+                        write!(trace, "{},{},{},{},{}", at+n, voice.onset, p.drain, p.coupling, HORIZONTAL_BRIDGE.get()).unwrap();
+                        for lane in [0, 1, 2, LANE_HORIZONTAL, LANE_BLOOM] {
+                            write!(trace, ",{},{}", p.s[lane], p.c[lane]).unwrap();
+                        }
+                        for lane in [0, 1, 2, LANE_HORIZONTAL] {
+                            write!(trace, ",{},{}", p.rc[lane], p.rs[lane]).unwrap();
+                        }
+                        writeln!(trace).unwrap();
+                    }
+                }
+            }
+            raw.flush().unwrap();
+            trace.flush().unwrap();
+        }
+    }
+
+    #[test]
     fn top_unisons_keep_a_slow_residual_and_the_control_can_remove_it() {
         // Read the actual oscillator rotations, not a duplicate tuning law.
         // Small positive separation is intentional; a fast fundamental

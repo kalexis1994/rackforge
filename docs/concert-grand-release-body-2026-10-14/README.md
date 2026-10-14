@@ -223,3 +223,46 @@ de costo es que no agrega osciladores ni trabajo por muestra y los tiempos
 medidos se solapan; no se afirma un costo total exactamente nulo. La escucha
 no establece una mejora perceptual grande ni valida una tolerancia física
 real. No se publicó ni se instaló un paquete.
+
+## Diagnóstico del cuerpo de C4: pérdida y cancelación
+
+Se añade una exportación nativa `cfg(test)` que observa los estados de H1
+después de cada bloque, sin cambiar el procesamiento. En veinte casos
+(C3/A3/A#3/B3/C4/C#4/D4/D#4/C5/C6, velocidades 60 y 110), y seis controles de
+afinación, el audio coincide bit a bit con el consumidor nativo independiente
+de la base aceptada. Se recuperan también las doce medidas históricas de
+la release en las notas comunes. Los cuadrados de magnitudes internas usan
+unidades arbitrarias del modelo: **no son julios**.
+
+En C4/v60, entre 100–200 y 500–1400 ms, la norma cuadrática conjunta vertical
+y horizontal cae **7,74 dB**, su suma proyectada cae **15,99 dB**, y H1 en el
+audio estéreo final cae **16,09 dB**. La suma de las tres verticales cae
+20,22 dB: 7,95 dB corresponden a su norma conjunta y 12,27 dB al cambio de
+coherencia. La horizontal atenúa parte de esa cancelación en la proyección
+completa. La lectura aislada de una envolvente acústica no podía separar esto.
+
+Se varía únicamente la separación del unísono en procesos independientes:
+
+| Separación respecto de fábrica, C4/v60 | Caída de norma vertical + horizontal | Caída de H1 en salida |
+| --- | ---: | ---: |
+| 70% | −8,72 dB | −13,32 dB |
+| 85% | −8,21 dB | −14,47 dB |
+| 100%, base | −7,74 dB | −16,09 dB |
+| 115% | −7,31 dB | −18,16 dB |
+
+Reducir la separación conserva **más nivel acústico aun con una norma interna
+que cae más**. Eso identifica una contribución de cancelación a esta caída;
+no demuestra que toda cancelación sea un error ni que falte sólo energía.
+El patrón se repite a velocidad 110. La variante al 70% cambia el nivel RMS
+de los primeros 100 ms sólo +0,063 dB y recupera unos 2,76 dB en la caída de H1,
+pero todavía queda lejos de los −5,78 dB de la referencia. No se selecciona
+una reducción global del unísono.
+
+- [Trazas, audio independiente, descomposición y controles](body-state-diagnosis.json).
+- `tools/audit-concert-grand-release-body-states.py`: reproducción y análisis.
+- `tests::export_release_body_trace`: exportador nativo ignorado por defecto.
+
+El siguiente candidato aplica una reducción suave y local de separación
+alrededor de C4, con A3 y D#4 fuera del ajuste. Se conserva la excitación,
+la captación y las leyes de pérdida; se comprobarán ataque, notas vecinas,
+controles fuera de la zona y La Campanella antes de seleccionar por escucha.

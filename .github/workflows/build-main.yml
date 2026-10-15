@@ -244,6 +244,7 @@ jobs:
             --expect-official
           python tools/verify-release-edition.py --edition standard `
             --manifest dist/windows-x86_64/vst3-standard/bundled-plugins.txt `
+            --expect-official
 
       - name: Upload Windows Standard executable
         if: github.event_name != 'pull_request'

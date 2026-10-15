@@ -49,7 +49,7 @@ if (-not (Test-Path -LiteralPath $libclang)) {
 }
 
 $defaultPlugin = ""
-$rf106 = ""
+$officialPlugins = ""
 
 if ($Edition -eq "Standard") {
     $officialPlugins = Join-Path $repository "dist/bundled-plugins/official"
@@ -122,8 +122,9 @@ $bundledPluginNames = @()
 if ($defaultPlugin) {
     $bundledPluginNames += Split-Path -Leaf $defaultPlugin
 }
-if ($rf106) {
-    $bundledPluginNames += Split-Path -Leaf $rf106
+if ($officialPlugins) {
+    $bundledPluginNames += Get-ChildItem -LiteralPath $officialPlugins `
+        -Filter "*.rfplugin" -File | Sort-Object Name | Select-Object -ExpandProperty Name
 }
 [System.IO.File]::WriteAllLines(
     (Join-Path $output "bundled-plugins.txt"),

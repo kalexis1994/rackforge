@@ -653,6 +653,6 @@ there has to go through it.
 their own step; a developer has to ask for them:
 
 ```bash
-cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+python tools/fetch-official-plugins.py --plugin-id org.rackforge.concert-grand --output-directory target/test-packages/official --extract-directory target/test-plugins
 cargo test -p rackforge-core --test parallel_render -- --ignored
 ```

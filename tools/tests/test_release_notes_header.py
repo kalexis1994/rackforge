@@ -52,6 +52,12 @@ def pin(filename: str, version: str, url: str) -> dict:
 
 PINS = (
     pin(
+        "RF-Concert-Grand.rfplugin",
+        "0.171.37",
+        "https://github.com/kalexis1994/rackforge-plugin-concert-grand/"
+        "releases/download/v0.171.37/RF-Concert-Grand.rfplugin",
+    ),
+    pin(
         "RF-106.rfplugin",
         "0.2.19",
         "https://github.com/kalexis1994/rackforge-plugin-rf-106/"
@@ -64,7 +70,7 @@ PINS = (
     ),
 )
 MATCHING = {
-    "RF-Concert-Grand.rfplugin": "0.171.34",
+    "RF-Concert-Grand.rfplugin": "0.171.37",
     "RF-106.rfplugin": "0.2.19",
     "RF-Tines.rfplugin": "0.2.1",
 }
@@ -134,7 +140,7 @@ class PinCheckTests(unittest.TestCase):
         packages = {k: v for k, v in MATCHING.items() if k != "RF-Concert-Grand.rfplugin"}
         with tempfile.TemporaryDirectory() as directory:
             standard_archive(Path(directory), packages)
-            with self.assertRaisesRegex(SystemExit, "no Concert Grand"):
+            with self.assertRaisesRegex(SystemExit, "missing RF-Concert-Grand.rfplugin"):
                 MODULE.check_pins_against_artifact(PINS, directory)
 
     def test_a_missing_archive_is_refused(self):
@@ -155,7 +161,8 @@ class NotesHeaderTests(unittest.TestCase):
             "[RF-106 0.2.19](https://github.com/kalexis1994/rackforge-plugin-rf-106)", header
         )
         self.assertIn("and [RF-Tines 0.2.1](https://github.com/kalexis1994/RF-Tines).", header)
-        self.assertIn("Concert Grand from this repository", header)
+        self.assertIn("[RF-Concert-Grand 0.171.37]", header)
+        self.assertIn("https://github.com/kalexis1994/rackforge-plugin-concert-grand", header)
 
     def test_the_header_carries_the_real_pins(self):
         """Nothing may drop out of the list between the pins and the notes."""

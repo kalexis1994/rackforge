@@ -25,6 +25,26 @@ MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 
 OFFICIAL_PLUGINS = (
     {
+        "filename": "RF-Concert-Grand.rfplugin",
+        "plugin_id": "org.rackforge.concert-grand",
+        "version": "0.171.37",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-concert-grand/"
+            "releases/download/v0.171.37/RF-Concert-Grand.rfplugin"
+        ),
+        "sha256": "f9cf0df2cabc8cd73209175b517052021b06615a126507ba6abbd63f2eaffc8c",
+        # The startup instrument is carried separately by native hosts.
+        # Its source and release lifecycle are owned by the plugin repository.
+        "default": True,
+        "extract_directory": "concert-grand",
+        "required": (
+            "rackforge-plugin.toml", "component.wasm", "LICENSE", "NOTICE.md",
+            "metadata/runtime.json", "metadata/parameters.json", "metadata/presets.json",
+            "branding/icon.png", "branding/banner.png", "branding/splash.png", "web/play.html",
+            "native/linux-aarch64/librackforge_concert_grand.so",
+        ),
+    },
+    {
         "filename": "RF-106.rfplugin",
         "plugin_id": "org.rackforge.rf-106",
         "version": "0.2.20",
@@ -371,7 +391,10 @@ def fetch(output: Path, plugin: dict[str, object]) -> None:
 
 def extract(output: Path, destination_root: Path, plugin: dict[str, object]) -> None:
     archive_path = output / str(plugin["filename"])
-    destination = destination_root / str(plugin["plugin_id"])
+    directory = str(plugin.get("extract_directory", plugin["plugin_id"]))
+    if PurePosixPath(directory).name != directory or directory in ("", ".", "..") or "\\" in directory:
+        raise RuntimeError(f"invalid plugin extraction directory: {directory}")
+    destination = destination_root / directory
     if destination.exists():
         raise RuntimeError(f"official plugin destination already exists: {destination}")
     destination.mkdir(parents=True)
@@ -536,6 +559,8 @@ def main() -> None:
         default=Path("dist/bundled-plugins/official"),
     )
     parser.add_argument("--extract-directory", type=Path)
+    parser.add_argument("--plugin-id", action="append", default=[],
+                        help="fetch only these pinned plugin IDs (repeatable)")
     parser.add_argument(
         "--check-latest",
         action="store_true",
@@ -547,6 +572,9 @@ def main() -> None:
         help="move every pin to the newest published release, verifying it first",
     )
     arguments = parser.parse_args()
+    unknown = set(arguments.plugin_id) - {str(p["plugin_id"]) for p in OFFICIAL_PLUGINS}
+    if unknown:
+        parser.error("unknown pinned plugin IDs: " + ", ".join(sorted(unknown)))
     if arguments.check_latest:
         raise SystemExit(1 if check_latest() else 0)
     if arguments.update:
@@ -555,9 +583,14 @@ def main() -> None:
     output = arguments.output_directory.resolve()
     output.mkdir(parents=True, exist_ok=True)
     for plugin in OFFICIAL_PLUGINS:
-        fetch(output, plugin)
+        if arguments.plugin_id and plugin["plugin_id"] not in arguments.plugin_id:
+            continue
+        # Keep the default package outside the other official packages:
+        # existing hosts embed one default plus this directory exactly once.
+        package_output = output.parent if plugin.get("default") else output
+        fetch(package_output, plugin)
         if arguments.extract_directory is not None:
-            extract(output, arguments.extract_directory.resolve(), plugin)
+            extract(package_output, arguments.extract_directory.resolve(), plugin)
 
 
 if __name__ == "__main__":

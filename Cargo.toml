@@ -34,7 +34,6 @@ members = [
     "apps/rackforge-browser",
     "crates/rackforge-store",
     "hardware/keylab-bridge",
-    "plugins/concert-grand",
     "plugins/demo-synth",
     "plugins/gain",
     "plugins/gain-portable",
@@ -49,7 +48,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.1.32"
+version = "0.1.33"
 edition = "2024"
 license = "GPL-2.0-or-later"
 

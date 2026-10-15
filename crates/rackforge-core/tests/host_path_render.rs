@@ -10,7 +10,7 @@
 //! minor thirds, at velocities 50 and 125); unset, the test is a no-op. Run
 //! with the wasm built:
 //!
-//!     cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
+//!     python tools/fetch-official-plugins.py --plugin-id org.rackforge.concert-grand --extract-directory target/test-plugins
 //!     RF_HOST_RENDER_DIR=... cargo test -p rackforge-core --release --test host_path_render -- --include-ignored
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -27,19 +27,6 @@ const FRAMES: u32 = 512;
 const HOLD_BLOCKS: usize = 94;
 const TAIL_BLOCKS: usize = 188;
 
-fn copy_tree(from: &Path, to: &Path) {
-    fs::create_dir_all(to).unwrap();
-    for entry in fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let target = to.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
-            copy_tree(&entry.path(), &target);
-        } else {
-            fs::copy(entry.path(), target).unwrap();
-        }
-    }
-}
-
 #[test]
 #[ignore]
 fn render_through_the_host() {
@@ -47,11 +34,9 @@ fn render_through_the_host() {
         return;
     };
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let wasm = repo.join("target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm");
-    assert!(wasm.is_file(), "build the wasm first: {}", wasm.display());
-    let root = std::env::temp_dir().join(format!("rackforge-host-render-{}", std::process::id()));
-    copy_tree(&repo.join("plugins/concert-grand/package"), &root);
-    fs::copy(&wasm, root.join("component.wasm")).unwrap();
+    let root = std::env::var_os("RACKFORGE_BENCH_PACKAGE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| repo.join("target/test-plugins/concert-grand"));
     let package = PluginPackage::open(&root).unwrap();
     // SAFETY: portable wasm-v1 packages execute inside the sandbox.
     let loaded = unsafe { LoadedPlugin::load(&package, None, &BTreeMap::new(), None) }.unwrap();

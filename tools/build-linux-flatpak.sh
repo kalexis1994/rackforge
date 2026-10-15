@@ -35,14 +35,8 @@ done
 cd "$repository"
 python3 tools/fetch-official-plugins.py \
   --output-directory dist/bundled-plugins/official
-if [[ ! -f dist/bundled-plugins/RF-Concert-Grand.rfplugin ]]; then
-  rustup target add wasm32-unknown-unknown
-  cargo build --locked --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-  cargo run --locked --release -p rackforge-store -- pack-wasm \
-    plugins/concert-grand/package \
-    target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm \
-    dist/bundled-plugins/RF-Concert-Grand.rfplugin
-fi
+test -f dist/bundled-plugins/RF-Concert-Grand.rfplugin
+
 pnpm --dir web install --frozen-lockfile
 pnpm --dir web build
 

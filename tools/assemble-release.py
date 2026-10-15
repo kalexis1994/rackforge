@@ -94,8 +94,6 @@ def check_pins_against_artifact(pins: tuple, assets: str) -> None:
     if not os.path.isfile(archive):
         raise SystemExit("--notes-header needs the Standard Linux archive to check against")
     packaged = packaged_plugins(archive)
-    if "RF-Concert-Grand.rfplugin" not in packaged:
-        raise SystemExit("the Standard archive carries no Concert Grand")
     for plugin in pins:
         name, pinned = str(plugin["filename"]), str(plugin["version"])
         if name not in packaged:
@@ -105,7 +103,7 @@ def check_pins_against_artifact(pins: tuple, assets: str) -> None:
                 f"{name} is {packaged[name]} in the archive and {pinned} in the pins"
             )
     unexpected = sorted(
-        set(packaged) - {str(p["filename"]) for p in pins} - {"RF-Concert-Grand.rfplugin"}
+        set(packaged) - {str(p["filename"]) for p in pins}
     )
     if unexpected:
         raise SystemExit("the Standard archive carries unpinned packages: " + ", ".join(unexpected))
@@ -135,7 +133,7 @@ def notes_header(pins: tuple, tag: str, commit: str) -> str:
             "The release carries Concert Grand and every officially pinned plugin on"
             " all five platforms — see `docs/RELEASE_EDITIONS.md`.",
             "",
-            "Bundled in Standard: Concert Grand from this repository, "
+            "Bundled in Standard: "
             + ", ".join(bundled[:-1])
             + f" and {bundled[-1]}."
             " Each is pinned by version, URL and SHA-256 and verified inside the generated"

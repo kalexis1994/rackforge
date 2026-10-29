@@ -124,12 +124,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Organ.rfplugin",
         "plugin_id": "org.rackforge.organ",
-        "version": "0.52.0",
+        "version": "0.53.0",
         "url": (
             "https://github.com/kalexis1994/RF-Organ/"
-            "releases/download/v0.52.0/RF-Organ.rfplugin"
+            "releases/download/v0.53.0/RF-Organ.rfplugin"
         ),
-        "sha256": "92aee1cc67f4d908da4998de3fb121ea7c818ad866d4bcec7520620cff67ef62",
+        "sha256": "15e0bbb5c07ae2fe9984bb2ea394199a28f5160252ff9dfbf94263b840f04d91",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -185,12 +185,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Musette.rfplugin",
         "plugin_id": "org.rackforge.musette",
-        "version": "0.13.22",
+        "version": "0.13.24",
         "url": (
             "https://github.com/kalexis1994/RF-Musette/"
-            "releases/download/v0.13.22/RF-Musette.rfplugin"
+            "releases/download/v0.13.24/RF-Musette.rfplugin"
         ),
-        "sha256": "0166bee49f7f78113a25e02e0d8646868477f16d45eb969b83317cd8c65189c0",
+        "sha256": "d066b7444575316b7be6d6e653aa40bd880f754e9b5f4c92c56e682c0ce3f034",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

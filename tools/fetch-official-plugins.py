@@ -154,12 +154,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Tines.rfplugin",
         "plugin_id": "org.rackforge.rftines",
-        "version": "0.2.9",
+        "version": "0.2.10",
         "url": (
             "https://github.com/kalexis1994/RF-Tines/"
-            "releases/download/v0.2.9/RF-Tines.rfplugin"
+            "releases/download/v0.2.10/RF-Tines.rfplugin"
         ),
-        "sha256": "269d4c32841c5ca94353cc770e1a782bf3c317d69f41c4f312bf3b658d4fc40e",
+        "sha256": "dfe10e480b41f8aade1eb508505c093e921bae02cf6cb51e2cc0836acd1fc002",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

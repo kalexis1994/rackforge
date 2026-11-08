@@ -19,6 +19,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: 1.98.0
+  # The pinned release download fallback needs its own API quota.
+  GITHUB_TOKEN: ${{ github.token }}
 
 jobs:
   quality:

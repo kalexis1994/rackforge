@@ -46,6 +46,8 @@ jobs:
 
       - name: Build the host and the instrument it plays
         run: ./tools/build-web-demo.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       # Every capability the host claims in crates/rackforge-host-capabilities
       # is exercised here, so the parity table cannot promise what the host

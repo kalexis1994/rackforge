@@ -27,12 +27,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Concert-Grand.rfplugin",
         "plugin_id": "org.rackforge.concert-grand",
-        "version": "0.171.37",
+        "version": "0.171.38",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-concert-grand/"
-            "releases/download/v0.171.37/RF-Concert-Grand.rfplugin"
+            "releases/download/v0.171.38/RF-Concert-Grand.rfplugin"
         ),
-        "sha256": "f9cf0df2cabc8cd73209175b517052021b06615a126507ba6abbd63f2eaffc8c",
+        "sha256": "1c7dfb9322fa8708d62c937b23ee870a160e166dd91392aa7f80f82c21941dc8",
         # The startup instrument is carried separately by native hosts.
         # Its source and release lifecycle are owned by the plugin repository.
         "default": True,
@@ -154,12 +154,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Tines.rfplugin",
         "plugin_id": "org.rackforge.rftines",
-        "version": "0.2.8",
+        "version": "0.2.9",
         "url": (
             "https://github.com/kalexis1994/RF-Tines/"
-            "releases/download/v0.2.8/RF-Tines.rfplugin"
+            "releases/download/v0.2.9/RF-Tines.rfplugin"
         ),
-        "sha256": "6660d6a276d29357f830b666e6a07526b46c83496740b9a0514b3b81f30eede5",
+        "sha256": "269d4c32841c5ca94353cc770e1a782bf3c317d69f41c4f312bf3b658d4fc40e",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -180,6 +180,31 @@ OFFICIAL_PLUGINS = (
             "web/play-programs.mjs",
             "web/rftines-format.mjs",
             "web/style.css",
+        ),
+    },
+    {
+        "filename": "RF-EPiano.rfplugin",
+        "plugin_id": "org.rackforge.rf-epiano",
+        "version": "0.1.4",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-epiano/"
+            "releases/download/v0.1.4/RF-EPiano.rfplugin"
+        ),
+        "sha256": "a91e134751799a841efeba57835dafb2e17d08a46b0e96ca36af4403c7e13965",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/play.js",
+            "web/play.css",
+            "notices/NOTICE.txt",
+            "notices/OpenWurli-GPL-3.0.txt",
         ),
     },
     {

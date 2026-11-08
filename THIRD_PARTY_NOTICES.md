@@ -10,11 +10,13 @@ separate from RackForge. The pinned versions are listed in
 
 | Package | Project | License |
 | --- | --- | --- |
+| `RF-Concert-Grand.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-concert-grand> | GPL-2.0-or-later |
 | `RF-106.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-106> | GPL-3.0-only |
 | `RF-5.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-5> | GPL-3.0-only |
 | `RF-7.rfplugin` | <https://github.com/kalexis1994/RF-7> | GPL-3.0-only |
 | `RF-Organ.rfplugin` | <https://github.com/kalexis1994/RF-Organ> | GPL-2.0-or-later |
 | `RF-Tines.rfplugin` | <https://github.com/kalexis1994/RF-Tines> | Proprietary, all rights reserved |
+| `RF-EPiano.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-epiano> | GPL-3.0-or-later |
 | `RF-Musette.rfplugin` | <https://github.com/kalexis1994/RF-Musette> | GPL-2.0-or-later |
 | `RF-Limiter.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-limiter> | GPL-3.0-only |
 | `RF-EQ.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-eq> | GPL-3.0-only |
@@ -23,6 +25,10 @@ separate from RackForge. The pinned versions are listed in
 The complete license and notices of each plugin are distributed inside its own
 package. RF-Tines is redistributed by permission of the copyright holder and is
 not covered by RackForge's own license.
+
+The [RF-EPiano release](https://github.com/kalexis1994/rackforge-plugin-rf-epiano/releases/tag/v0.1.4)
+includes the corresponding source archive with the OpenWurli DSP, RackForge
+adapter, and build instructions.
 
 RackForge includes the Chakra Petch typeface for display typography.
 

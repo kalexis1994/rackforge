@@ -164,6 +164,8 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo build --locked --release --target wasm32-unknown-unknown -p rackforge-parallel-demo-synth
+          # The Rust cache can restore the previous pinned instrument.
+          rm -rf -- target/test-plugins/concert-grand
           python3 tools/fetch-official-plugins.py --plugin-id org.rackforge.concert-grand --output-directory target/test-packages/official --extract-directory target/test-plugins
           # The example instrument's native build, held to its component.
           cargo build --locked -p rackforge-parallel-demo-synth

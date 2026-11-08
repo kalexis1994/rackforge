@@ -322,12 +322,15 @@ def sha256(path: Path) -> str:
 
 def download(url: str, destination: Path) -> None:
     last_error: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(4):
         try:
-            request = urllib.request.Request(
-                url,
-                headers={"User-Agent": "RackForge-build/1"},
-            )
+            if attempt == 3:
+                print(f"OFFICIAL_PLUGIN_API_FALLBACK url={url}", flush=True)
+                request = release_asset_request(url)
+            else:
+                request = urllib.request.Request(
+                    url, headers={"User-Agent": "RackForge-build/1"}
+                )
             with urllib.request.urlopen(request, timeout=30) as response:
                 length = response.headers.get("Content-Length")
                 if length is not None and int(length) > MAX_ARCHIVE_BYTES:
@@ -444,19 +447,37 @@ def upstream_repository(url: str) -> tuple[str, str]:
     return match.group(1), match.group(2)
 
 
-def latest_release(owner: str, repository: str) -> dict[str, object]:
-    """What the upstream repository calls its newest release."""
+def github_api_request(url: str, accept: str) -> urllib.request.Request:
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{owner}/{repository}/releases/latest",
-        headers={
-            "User-Agent": "RackForge-build/1",
-            "Accept": "application/vnd.github+json",
-        },
+        url, headers={"User-Agent": "RackForge-build/1", "Accept": accept}
     )
     token = os.environ.get("GITHUB_TOKEN")
     if token:
-        # Anonymous requests are rate limited hard enough to fail a busy day.
-        request.add_header("Authorization", f"Bearer {token}")
+        # The asset endpoint can redirect to a separate CDN origin.
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    return request
+
+
+def release_asset_request(url: str) -> urllib.request.Request:
+    owner, repository = upstream_repository(url)
+    tag = url.split("/releases/download/", 1)[1].split("/", 1)[0]
+    releases = f"https://api.github.com/repos/{owner}/{repository}/releases"
+    request = github_api_request(f"{releases}/tags/{tag}", "application/vnd.github+json")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        release = json.load(response)
+    for asset in release["assets"]:
+        if asset["browser_download_url"] == url:
+            asset_id = int(asset["id"])
+            return github_api_request(f"{releases}/assets/{asset_id}", "application/octet-stream")
+    raise RuntimeError(f"the release does not list {url}")
+
+
+def latest_release(owner: str, repository: str) -> dict[str, object]:
+    """What the upstream repository calls its newest release."""
+    request = github_api_request(
+        f"https://api.github.com/repos/{owner}/{repository}/releases/latest",
+        "application/vnd.github+json",
+    )
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)
 

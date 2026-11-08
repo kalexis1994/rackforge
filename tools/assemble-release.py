@@ -2,7 +2,7 @@
 
     python tools/assemble-release.py <run-id> <tag> <notes.md> [--notes-header] [--publish]
 
-Downloads the run's platform artifacts, renames them to the asset names the
+Downloads every artifact of the run, renames them to the asset names the
 previous releases used, zips the VST3 bundles, writes SHA256SUMS.txt, copies
 THIRD_PARTY_NOTICES.md, and (with --publish) creates the GitHub release.
 
@@ -154,11 +154,7 @@ def main() -> None:
     os.makedirs(downloads)
     os.makedirs(assets)
 
-    subprocess.run(
-        ["gh", "run", "download", run_id, "--pattern", "RackForge-*", "-D", downloads],
-        check=True,
-        cwd=REPO,
-    )
+    subprocess.run(["gh", "run", "download", run_id, "-D", downloads], check=True, cwd=REPO)
 
     notices = os.path.join(REPO, "THIRD_PARTY_NOTICES.md")
     expected = {

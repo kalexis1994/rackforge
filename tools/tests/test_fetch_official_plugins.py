@@ -1,8 +1,11 @@
 import importlib.util
+import io
+import json
 import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+from urllib.error import HTTPError
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "fetch-official-plugins.py"
@@ -31,6 +34,28 @@ PINS = '''OFFICIAL_PLUGINS = (
     },
 )
 '''
+
+
+class DownloadTests(unittest.TestCase):
+    def test_gateway_failure_downloads_the_exact_asset_through_the_api(self) -> None:
+        releases = "https://api.github.com/repos/rackforge/piano/releases"
+        url = "https://github.com/rackforge/piano/releases/download/v1.2.3/Piano.rfplugin"
+        asset = {"id": 42, "browser_download_url": url}
+        metadata = io.BytesIO(json.dumps({"assets": [asset]}).encode())
+        archive = io.BytesIO(b"package bytes")
+        archive.headers = {}
+        errors = [HTTPError(url, 504, "Gateway Time-out", None, None) for _ in range(3)]
+        with tempfile.TemporaryDirectory() as directory, \
+             mock.patch.object(MODULE.time, "sleep"), \
+             mock.patch.object(MODULE.urllib.request, "urlopen", side_effect=[*errors, metadata, archive]) as fetch:
+            destination = Path(directory) / "Piano.rfplugin"
+            MODULE.download(url, destination)
+            self.assertEqual(destination.read_bytes(), b"package bytes")
+            requests = [call.args[0] for call in fetch.call_args_list]
+            self.assertEqual([request.full_url for request in requests], [
+                url, url, url, f"{releases}/tags/v1.2.3", f"{releases}/assets/42",
+            ])
+            self.assertEqual(requests[-1].get_header("Accept"), "application/octet-stream")
 
 
 class RewritePinTests(unittest.TestCase):

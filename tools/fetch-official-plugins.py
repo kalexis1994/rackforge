@@ -27,12 +27,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Concert-Grand.rfplugin",
         "plugin_id": "org.rackforge.concert-grand",
-        "version": "0.171.37",
+        "version": "0.171.38",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-concert-grand/"
-            "releases/download/v0.171.37/RF-Concert-Grand.rfplugin"
+            "releases/download/v0.171.38/RF-Concert-Grand.rfplugin"
         ),
-        "sha256": "f9cf0df2cabc8cd73209175b517052021b06615a126507ba6abbd63f2eaffc8c",
+        "sha256": "1c7dfb9322fa8708d62c937b23ee870a160e166dd91392aa7f80f82c21941dc8",
         # The startup instrument is carried separately by native hosts.
         # Its source and release lifecycle are owned by the plugin repository.
         "default": True,
@@ -154,12 +154,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Tines.rfplugin",
         "plugin_id": "org.rackforge.rftines",
-        "version": "0.2.8",
+        "version": "0.2.10",
         "url": (
             "https://github.com/kalexis1994/RF-Tines/"
-            "releases/download/v0.2.8/RF-Tines.rfplugin"
+            "releases/download/v0.2.10/RF-Tines.rfplugin"
         ),
-        "sha256": "6660d6a276d29357f830b666e6a07526b46c83496740b9a0514b3b81f30eede5",
+        "sha256": "dfe10e480b41f8aade1eb508505c093e921bae02cf6cb51e2cc0836acd1fc002",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -180,6 +180,31 @@ OFFICIAL_PLUGINS = (
             "web/play-programs.mjs",
             "web/rftines-format.mjs",
             "web/style.css",
+        ),
+    },
+    {
+        "filename": "RF-EPiano.rfplugin",
+        "plugin_id": "org.rackforge.rf-epiano",
+        "version": "0.1.4",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-epiano/"
+            "releases/download/v0.1.4/RF-EPiano.rfplugin"
+        ),
+        "sha256": "a91e134751799a841efeba57835dafb2e17d08a46b0e96ca36af4403c7e13965",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/play.js",
+            "web/play.css",
+            "notices/NOTICE.txt",
+            "notices/OpenWurli-GPL-3.0.txt",
         ),
     },
     {
@@ -297,12 +322,15 @@ def sha256(path: Path) -> str:
 
 def download(url: str, destination: Path) -> None:
     last_error: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(4):
         try:
-            request = urllib.request.Request(
-                url,
-                headers={"User-Agent": "RackForge-build/1"},
-            )
+            if attempt == 3:
+                print(f"OFFICIAL_PLUGIN_API_FALLBACK url={url}", flush=True)
+                request = release_asset_request(url)
+            else:
+                request = urllib.request.Request(
+                    url, headers={"User-Agent": "RackForge-build/1"}
+                )
             with urllib.request.urlopen(request, timeout=30) as response:
                 length = response.headers.get("Content-Length")
                 if length is not None and int(length) > MAX_ARCHIVE_BYTES:
@@ -419,19 +447,37 @@ def upstream_repository(url: str) -> tuple[str, str]:
     return match.group(1), match.group(2)
 
 
-def latest_release(owner: str, repository: str) -> dict[str, object]:
-    """What the upstream repository calls its newest release."""
+def github_api_request(url: str, accept: str) -> urllib.request.Request:
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{owner}/{repository}/releases/latest",
-        headers={
-            "User-Agent": "RackForge-build/1",
-            "Accept": "application/vnd.github+json",
-        },
+        url, headers={"User-Agent": "RackForge-build/1", "Accept": accept}
     )
     token = os.environ.get("GITHUB_TOKEN")
     if token:
-        # Anonymous requests are rate limited hard enough to fail a busy day.
-        request.add_header("Authorization", f"Bearer {token}")
+        # The asset endpoint can redirect to a separate CDN origin.
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    return request
+
+
+def release_asset_request(url: str) -> urllib.request.Request:
+    owner, repository = upstream_repository(url)
+    tag = url.split("/releases/download/", 1)[1].split("/", 1)[0]
+    releases = f"https://api.github.com/repos/{owner}/{repository}/releases"
+    request = github_api_request(f"{releases}/tags/{tag}", "application/vnd.github+json")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        release = json.load(response)
+    for asset in release["assets"]:
+        if asset["browser_download_url"] == url:
+            asset_id = int(asset["id"])
+            return github_api_request(f"{releases}/assets/{asset_id}", "application/octet-stream")
+    raise RuntimeError(f"the release does not list {url}")
+
+
+def latest_release(owner: str, repository: str) -> dict[str, object]:
+    """What the upstream repository calls its newest release."""
+    request = github_api_request(
+        f"https://api.github.com/repos/{owner}/{repository}/releases/latest",
+        "application/vnd.github+json",
+    )
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)
 

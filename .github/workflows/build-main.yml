@@ -178,6 +178,8 @@ jobs:
 
   windows:
     name: Windows x86-64
+    needs: windows-plugin-inputs
+    if: ${{ !cancelled() }}
     runs-on: windows-2022
     timeout-minutes: 60
     steps:
@@ -185,6 +187,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Download pinned instrument packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: official-plugin-inputs
+          path: dist/bundled-plugins
 
       - name: Set up Rust
         shell: pwsh
@@ -274,6 +282,31 @@ jobs:
             dist/windows-x86_64/vst3-standard/THIRD_PARTY_NOTICES.md
           if-no-files-found: error
           retention-days: 14
+
+  windows-plugin-inputs:
+    name: Fetch Windows plugin inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out RackForge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The Windows runner can time out downloading the same release assets.
+      # Its build scripts still verify every package against the checked-in pins.
+      - name: Fetch official plugins
+        run: python3 tools/fetch-official-plugins.py
+
+      - name: Upload checked plugin packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: official-plugin-inputs
+          path: dist/bundled-plugins/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
 
   linux-x86-64:
     name: Linux x86-64

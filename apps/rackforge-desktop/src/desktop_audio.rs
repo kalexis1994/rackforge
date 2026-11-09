@@ -9,6 +9,7 @@ use rackforge_core::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
     process_slots_sequential, spawn_telemetry_publisher,
 };
+use rackforge_core::play_output::PlayOutputTrim;
 use rackforge_core::rack_voice::{RackCapture, RackEngine};
 use rackforge_core::{
     CompiledParameterLink, LiveParameterStateStore, LiveParameterTarget, LiveParameterWriter,
@@ -2112,6 +2113,7 @@ fn block_frame(
 
 struct AudioVoice {
     instance_id: String,
+    play_output_trim: PlayOutputTrim,
     parameters: ParameterSchema,
     input_channels: usize,
     output_channels: usize,
@@ -2747,6 +2749,7 @@ impl AudioProcessor {
                 plugin_output[frame * output_channels]
             };
         }
+        voice.play_output_trim.apply(output);
         for frame in output.as_chunks_mut::<PLUGIN_OUTPUT_CHANNELS>().0 {
             let gain = self.master_gain.next();
             let (left, right) = self.master_balance.next();
@@ -3351,6 +3354,7 @@ fn prepare_audio_voice(
     }
     Ok(AudioVoice {
         instance_id: spec.instance_id,
+        play_output_trim: PlayOutputTrim::for_instrument(&spec.plugin.descriptor().id),
         parameters,
         input_channels,
         output_channels,

@@ -8,6 +8,7 @@
 
 use rackforge_audio_api::{OutputMeter, OutputMeterSnapshot};
 use rackforge_core::PluginInstance;
+use rackforge_core::play_output::PlayOutputTrim;
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_session_api::{MasterLevel, MasterPan};
 
@@ -155,17 +156,17 @@ impl AudioEngine {
     /// previous block's contents: a repeated buffer is far more unpleasant
     /// than a gap.
     pub fn render(&mut self, request: RenderRequest, instance: &mut PluginInstance<'_>) -> &[f32] {
-        self.render_through(request, instance, &mut [])
+        self.render_through(request, instance, &mut [], PlayOutputTrim::UNITY)
     }
 
-    /// The instrument, then every effect of the PLAY chain in order, then
-    /// master level and balance. An effect that fails is passed by, not
-    /// silenced: the note keeps playing without it.
+    /// Renders the instrument through its effects, output trim and master controls.
+    /// An effect that fails is bypassed so the note keeps playing.
     pub fn render_through(
         &mut self,
         request: RenderRequest,
         instance: &mut PluginInstance<'_>,
         chain: &mut [&mut PluginInstance<'_>],
+        trim: PlayOutputTrim,
     ) -> &[f32] {
         let frames = request.frames.min(self.maximum_frames);
         let samples = self.block_samples(request);
@@ -209,6 +210,7 @@ impl AudioEngine {
             }
         }
 
+        trim.apply(&mut self.output[..samples]);
         let channels = self.channels as usize;
         for frame in self.output[..samples].chunks_exact_mut(channels) {
             let level = self.level.next();

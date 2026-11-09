@@ -3586,6 +3586,10 @@ fn audio_loop(context: AudioLoopContext<'_>) -> Result<()> {
                             .blend(&mut chain_scratch, &stage.output, period_frames);
                     }
                     mix_output.copy_from_slice(&chain_scratch);
+                    crate::play_output::PlayOutputTrim::for_instrument(
+                        &voice.plugin.descriptor().id,
+                    )
+                    .apply(&mut mix_output);
                 }
             }
             AudioRenderMode::Rack => {

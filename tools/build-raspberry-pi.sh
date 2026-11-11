@@ -187,8 +187,7 @@ This artifact contains the RackForge hosts and Raspberry Pi integration.
 The Standard edition also bundles RackForge Concert Grand and the pinned
 official instrument packages listed in build-info.txt. The Minimal edition
 carries no instruments at all; install the ones you want from Plugin
-Manager. Instruments such as RF-Soundfonts are versioned and distributed
-by their own pipelines.
+Manager. Each bundled plugin has its own version and release pipeline.
 
 Extract it for the user who will run RackForge. The installer derives the
 deployment root from that user's home directory; it can also be overridden

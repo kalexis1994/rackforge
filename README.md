@@ -99,9 +99,13 @@ The release notes list the packages and versions. Install additional
 `.rfplugin` packages through **Plugin Manager**.
 [Latest release](https://github.com/kalexis1994/rackforge/releases/latest)
 
+In the browser demo, install RF-Soundfonts through **Plugin Manager** when
+you want to use the sampled piano or import your own banks.
+[RF-Soundfonts download](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts/releases/latest/download/RF-Soundfonts.rfplugin)
+
 ## Instruments and portable plugins
 
-Standard installations include:
+Standard builds include:
 
 - **Concert Grand**, a physically modelled acoustic piano.
 - **RF-106**, a portable virtual-analog synthesizer with its own PLAY interface
@@ -124,6 +128,8 @@ Standard installations include:
   self-oscillating free reed under one bellows, the treble's 14 registers and
   the Stradella or free bass, the bellows played by the wheel or Expression
   or each key's touch, and its registers on a controller's pads.
+- **RF-Soundfonts**, a sample-based instrument with the YDP Grand Piano
+  factory bank and support for importing your own libraries.
 
 The bundle also includes three effects for PLAY chains. [RF-Comp](https://github.com/kalexis1994/rackforge-plugin-rf-comp),
 [RF-EQ](https://github.com/kalexis1994/rackforge-plugin-rf-eq) and
@@ -139,8 +145,7 @@ Instrument repositories and guides:
 - [RF-Tines source and releases](https://github.com/kalexis1994/RF-Tines)
 - [RF-EPiano source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-epiano)
 - [RF-Musette source and releases](https://github.com/kalexis1994/RF-Musette)
-- [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
-  a SoundFont instrument that includes the sampled YDP Grand Piano
+- [RF-Soundfonts source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts)
 
 ### RF - Concert Grand
 
@@ -349,7 +354,6 @@ Current limitations:
 - The Linux x86-64 archive uses a headless/Web interface; the Flatpak is the
   native desktop window.
 - Raspberry Pi requires a 64-bit Raspberry Pi OS userspace.
-- Optional instruments such as RF-Soundfonts are separate downloads.
 - The optional Desktop HTTP server is disabled by default.
 - Browser latency and MIDI support depend on the browser and device.
 

@@ -1,9 +1,10 @@
 # RackForge Desktop
 
-The Desktop host runs RackForge Core and embeds the existing React Web
-workspace in its native Windows window through Wry and WebView2. Rust remains
-the application host, plugin runtime and local Web/API server; Desktop does
-not maintain a second UI implementation.
+Download and run the Windows x86-64 executable. Choose where to keep your
+plugins, settings and performances, then open **Audio & MIDI** to select your
+output and MIDI inputs. Open **PLAY**, choose a program and play your controller
+or the on-screen Touch Controller.
+[`RackForge-Windows-x86_64.exe`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-Windows-x86_64.exe)
 
 The application menu is native Win32 UI, themed to match RackForge, and stays
 above the embedded workspace. **File → Install Plugin…** opens the Windows
@@ -30,9 +31,8 @@ cross a bounded command queue instead of sharing the realtime instance with
 the UI.
 
 Use **Settings → Settings… → Audio & MIDI** to choose the driver, output device, sample rate,
-buffer size, Desktop output gain and MIDI inputs. Desktop defaults to +6 dB to
-compensate for quiet plugin output, with selectable values up to +12 dB and
-clamping at the final device boundary. Changes are applied by safely reopening the
+buffer size, Desktop output gain and MIDI inputs. The output gain defaults to
+0 dB and can be raised to +12 dB. Changes are applied by reopening the
 stream and are persisted in `config/audio.toml` below the RackForge Root. If a
 new configuration fails, Desktop attempts to restore the previous stream.
 The panel also provides device rescanning and an audio test note. Release builds
@@ -57,8 +57,8 @@ For command-line launches, `--lan` enables the network server and `--port`
 selects its port:
 
 ```text
-rackforge-desktop.exe --port 9000
-rackforge-desktop.exe --lan --port 8787
+RackForge-Windows-x86_64.exe --port 9000
+RackForge-Windows-x86_64.exe --lan --port 8787
 ```
 
 The network server binds to all interfaces. Local Desktop sessions currently
@@ -112,26 +112,11 @@ The equivalent command-line flow is useful for automation and future file
 associations:
 
 ```text
-RackForge.exe --rackforge-root D:\RackForge --install-plugin D:\Downloads\rf-kr106.rfplugin
+RackForge-Windows-x86_64.exe --rackforge-root D:\RackForge --install-plugin D:\Downloads\RF-106.rfplugin
 ```
 
 `--rackforge-root` bypasses first-start selection for that launch.
 `--plugins-root` and `--data-root` remain available for older development
 workflows, but local archive installation requires a RackForge Root.
 
-## Build for Windows x86-64
-
-From the repository root, run:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools/build-windows-desktop.ps1
-```
-
-The script uses the stable MSVC Rust target and Visual Studio Build Tools. Both
-release builds and builds invoked with `-Configuration Debug` write the latest
-desktop executable to the single canonical path
-`dist/windows-x86_64/rackforge.exe`.
-
-The Desktop host is a platform shell around the shared RackForge Web
-application. Windows MIDI/audio backends remain platform layers; controller
-surfaces such as LITTLE continue to be shared with Raspberry Pi hardware.
+[Build RackForge Desktop from source](../../docs/RUNTIME.md#building-from-source)

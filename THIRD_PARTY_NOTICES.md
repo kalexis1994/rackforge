@@ -18,6 +18,7 @@ separate from RackForge. The pinned versions are listed in
 | `RF-Tines.rfplugin` | <https://github.com/kalexis1994/RF-Tines> | Proprietary, all rights reserved |
 | `RF-EPiano.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-epiano> | GPL-3.0-or-later |
 | `RF-Musette.rfplugin` | <https://github.com/kalexis1994/RF-Musette> | GPL-2.0-or-later |
+| `RF-Soundfonts.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts> | GPL-3.0-or-later |
 | `RF-Limiter.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-limiter> | GPL-3.0-only |
 | `RF-EQ.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-eq> | GPL-3.0-only |
 | `RF-Comp.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-comp> | GPL-3.0-only |
@@ -29,6 +30,43 @@ not covered by RackForge's own license.
 The [RF-EPiano release](https://github.com/kalexis1994/rackforge-plugin-rf-epiano/releases/tag/v0.1.5)
 includes the corresponding source archive with the OpenWurli DSP, RackForge
 adapter, and build instructions.
+
+RF-Soundfonts includes the FreePats YDP Grand Piano bank under CC BY 3.0.
+The package carries the SoundFont's attribution and license information.
+[YDP Grand Piano source](https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html)
+
+## RustySynth 1.3.6
+
+RF-Soundfonts uses RustySynth for SoundFont playback.
+[Upstream license](https://github.com/sinshu/rustysynth/blob/v1.3.6/LICENSE.txt)
+
+```text
+MIT License
+
+MeltySynth:
+Copyright (C) 2021 Nobuaki Tanaka
+
+RustySynth:
+Copyright (C) 2022 Nobuaki Tanaka
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 RackForge includes the Chakra Petch typeface for display typography.
 

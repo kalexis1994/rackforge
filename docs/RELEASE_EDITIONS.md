@@ -5,6 +5,10 @@ The host, shared Web interface, Plugin Manager, platform audio and MIDI support,
 performance documents, and bundled controller integration are included too.
 Players can install other portable plugins later.
 
+The Standard bundle includes RF-Soundfonts and its YDP Grand Piano factory
+bank. Install RF-Soundfonts separately in the browser demo, where packaged
+files are downloaded at startup.
+
 ## Build contract
 
 The release workflow builds the Standard edition on every platform. The build

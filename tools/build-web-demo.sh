@@ -27,6 +27,7 @@ mkdir -p "$storage/plugins"
 cp "$root/target/wasm32-wasip1/release/rackforge_browser.wasm" "$public/rackforge-browser.wasm"
 
 "$python" "$root/tools/fetch-official-plugins.py" \
+  --browser-demo \
   --output-directory "$root/dist/bundled-plugins/official" \
   --extract-directory "$storage/plugins"
 

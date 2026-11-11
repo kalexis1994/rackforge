@@ -238,6 +238,42 @@ OFFICIAL_PLUGINS = (
         ),
     },
     {
+        "filename": "RF-Soundfonts.rfplugin",
+        "plugin_id": "org.rackforge.rf-soundfonts",
+        "version": "0.7.0",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts/"
+            "releases/download/v0.7.0/RF-Soundfonts.rfplugin"
+        ),
+        "sha256": "21c6f40c01f18b9a8f5cdda70a37cd15ef128440d5359d7e2c8efe42c9609c5b",
+        # The demo downloads its extracted packages at startup. The factory
+        # SoundFont expands to 118 MB and can be installed separately.
+        "browser_demo": False,
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "THIRD_PARTY_NOTICES.md",
+            "licenses/YDP-Grand-Piano.txt",
+            "licenses/Strait-OFL.txt",
+            "assets/ydp-grand-piano.sf2",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/config.html",
+            "web/app.js",
+            "web/styles.css",
+            "web/Strait-Regular.ttf",
+            "web/bank-presentations.json",
+            "web/banks/ydp-grand-piano/presentation.json",
+            "web/banks/ydp-grand-piano/artwork.png",
+        ),
+    },
+    {
         "filename": "RF-Limiter.rfplugin",
         "plugin_id": "org.rackforge.rf-limiter",
         "version": "0.2.1",
@@ -608,6 +644,11 @@ def main() -> None:
     parser.add_argument("--plugin-id", action="append", default=[],
                         help="fetch only these pinned plugin IDs (repeatable)")
     parser.add_argument(
+        "--browser-demo",
+        action="store_true",
+        help="fetch the packages loaded at browser demo startup",
+    )
+    parser.add_argument(
         "--check-latest",
         action="store_true",
         help="report pins the upstream repositories have moved past; changes nothing",
@@ -630,6 +671,8 @@ def main() -> None:
     output.mkdir(parents=True, exist_ok=True)
     for plugin in OFFICIAL_PLUGINS:
         if arguments.plugin_id and plugin["plugin_id"] not in arguments.plugin_id:
+            continue
+        if arguments.browser_demo and not plugin.get("browser_demo", True):
             continue
         # Keep the default package outside the other official packages:
         # existing hosts embed one default plus this directory exactly once.

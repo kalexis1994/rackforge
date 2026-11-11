@@ -259,7 +259,7 @@ costs speed, never the plugin.
 - [ ] [Freeze `.rfplugin v1` and `.rfcontroller v1` conformance rules](https://github.com/kalexis1994/rackforge/issues/15).
 - [ ] [Export privacy-safe diagnostics with device inventory and real-time counters](https://github.com/kalexis1994/rackforge/issues/16).
 - [ ] [Define release signing, update, rollback, and key-rotation strategy](https://github.com/kalexis1994/rackforge/issues/17).
-- [ ] [Complete the English documentation audit](https://github.com/kalexis1994/rackforge/issues/18).
+- [x] [Complete the English documentation audit](https://github.com/kalexis1994/rackforge/issues/18).
 
 The milestone and its linked issues are the authoritative operational status;
 this document summarizes product direction and delivery order.

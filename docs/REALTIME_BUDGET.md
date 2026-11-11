@@ -120,8 +120,9 @@ are completely different faults.
 
 * **It never raises within a session.** A raise rebuilds banks, and the
   player hears the instrument change under their hands -- reported from the
-  appliance as "se nota como cambia la calidad en vivo": quality came back
-  between pieces, twenty seconds after the passage that had cut it, and the
+  appliance as "se nota como cambia la calidad en vivo" ("you can hear the
+  quality change while playing"). Quality came back between pieces, twenty
+  seconds after the passage that had cut it, and the
   next dense passage cut it again, every piece. So in a session quality only
   goes down, rarely, when the machine proves it must. Cuts still land when
   lateness lasts, because the alternative to a cut is an xrun -- but not on a

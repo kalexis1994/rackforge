@@ -98,7 +98,7 @@ class RewritePinTests(unittest.TestCase):
 class DefaultPackageRoutingTests(unittest.TestCase):
     def test_default_is_carried_once_outside_the_other_packages(self):
         default = {"filename": "Piano.rfplugin", "plugin_id": "piano", "default": True}
-        other = {"filename": "Other.rfplugin", "plugin_id": "other"}
+        other = {"filename": "Other.rfplugin", "plugin_id": "other", "browser_demo": False}
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "official"
             extracted = Path(directory) / "plugins"
@@ -110,6 +110,18 @@ class DefaultPackageRoutingTests(unittest.TestCase):
                 MODULE.main()
             self.assertEqual(fetch.call_args_list, [mock.call(output.parent, default), mock.call(output, other)])
             self.assertEqual(extract.call_args_list, [mock.call(output.parent, extracted, default), mock.call(output, extracted, other)])
+
+    def test_browser_demo_skips_packages_installed_separately(self):
+        default = {"filename": "Piano.rfplugin", "plugin_id": "piano", "default": True}
+        other = {"filename": "Other.rfplugin", "plugin_id": "other"}
+        soundfont = {"filename": "SoundFont.rfplugin", "plugin_id": "soundfont", "browser_demo": False}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "official"
+            with mock.patch.object(MODULE, "OFFICIAL_PLUGINS", (default, other, soundfont)), \
+                 mock.patch.object(MODULE, "fetch") as fetch, \
+                 mock.patch("sys.argv", ["fetch", "--output-directory", str(output), "--browser-demo"]):
+                MODULE.main()
+            self.assertEqual(fetch.call_args_list, [mock.call(output.parent, default), mock.call(output, other)])
 
     def test_a_single_plugin_can_be_fetched_for_host_contract_tests(self):
         selected = {"filename": "Selected.rfplugin", "plugin_id": "selected"}

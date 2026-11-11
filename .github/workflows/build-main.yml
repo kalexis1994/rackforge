@@ -40,12 +40,7 @@ jobs:
 
       - name: Install native test dependencies
         shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev \
-            libudev-dev \
-            pkg-config
+        run: bash .github/scripts/install-ubuntu-deps.sh libasound2-dev libudev-dev pkg-config
 
       - name: Set up Rust
         shell: bash
@@ -82,9 +77,15 @@ jobs:
         shell: bash
         run: pnpm --dir web test
 
-      - name: Test Android qualification harness
+      - name: Check documentation and test repository tools
         shell: bash
-        run: python3 -m unittest discover -s tools/tests -p 'test_*.py'
+        env:
+          DOC_CHECK_ENV: ${{ runner.temp }}/rackforge-doc-check
+        run: |
+          python3 -m venv "$DOC_CHECK_ENV"
+          "$DOC_CHECK_ENV/bin/python" -m pip install langdetect==1.0.9 six==1.17.0
+          "$DOC_CHECK_ENV/bin/python" tools/check-doc-language.py
+          "$DOC_CHECK_ENV/bin/python" -m unittest discover -s tools/tests -p 'test_*.py'
 
       - name: Lint Web workspace
         shell: bash
@@ -289,12 +290,7 @@ jobs:
 
       - name: Install native build dependencies
         shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev \
-            libudev-dev \
-            pkg-config
+        run: bash .github/scripts/install-ubuntu-deps.sh libasound2-dev libudev-dev pkg-config
 
       - name: Set up Rust
         shell: bash
@@ -360,8 +356,7 @@ jobs:
       - name: Install Flatpak tooling
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak dbus
+          bash .github/scripts/install-ubuntu-deps.sh flatpak dbus
           # Ubuntu 24.04 keeps unprivileged user namespaces from processes
           # without an AppArmor profile, and flatpak-builder's bubblewrap
           # needs one for its sandbox.
@@ -540,12 +535,7 @@ jobs:
 
       - name: Install native build dependencies
         shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev \
-            libudev-dev \
-            pkg-config
+        run: bash .github/scripts/install-ubuntu-deps.sh libasound2-dev libudev-dev pkg-config
 
       - name: Set up Rust
         shell: bash

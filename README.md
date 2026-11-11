@@ -44,9 +44,8 @@ To hear your first sound:
    RF-Tines and select a program.
 4. Optionally connect a USB MIDI keyboard and allow MIDI access when asked.
 
-Chrome and Edge provide the most complete Web MIDI support. Firefox asks for
-explicit permission, while Safari currently does not expose Web MIDI. The
-on-screen controller works without MIDI hardware.
+When your browser supports Web MIDI, allow MIDI access to play from a connected
+keyboard. The on-screen controller works without MIDI hardware.
 
 You can install the Web edition from the browser menu and open it like an app.
 It continues to work offline after its files have been cached. Browser audio is
@@ -95,22 +94,24 @@ graph, so changing stage routing does not rewrite the plugin.
 
 ## Native releases
 
-Each native release includes Concert Grand and the officially pinned instruments
-— today RF-106, RF-5, RF-7, RF-Organ, RF-Tines and RF-Musette — so a new installation can
-be played immediately. You can install other `.rfplugin` packages through the
-Plugin Manager.
+Each native release includes the Standard bundle of instruments and effects.
+The release notes list the packages and versions. Install additional
+`.rfplugin` packages through **Plugin Manager**.
+[Latest release](https://github.com/kalexis1994/rackforge/releases/latest)
+
+In the browser demo, install RF-Soundfonts through **Plugin Manager** when
+you want to use the sampled piano or import your own banks.
+[RF-Soundfonts download](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts/releases/latest/download/RF-Soundfonts.rfplugin)
 
 ## Instruments and portable plugins
 
-Standard installations include:
+Standard builds include:
 
-- **RF - Concert Grand**, a physically modelled piano developed in this
-  repository — see below.
+- **Concert Grand**, a physically modelled acoustic piano.
 - **RF-106**, a portable virtual-analog synthesizer with its own PLAY interface
   and RackForge parameter mapping.
 - **RF-5**, a five-voice programmable polyphonic synthesizer.
-- **RF-7**, a six-operator FM instrument with its own panel, voice editor and
-  cartridge reader, built from the instrument's own firmware tables.
+- **RF-7**, a six-operator FM instrument with a voice editor and cartridge reader.
 - **RF-Organ**, a physically modelled tonewheel organ: two drawbar manuals and
   a pedal clavier played from one MIDI bus, percussion, scanner vibrato and an
   integrated rotary speaker.
@@ -121,51 +122,37 @@ Standard installations include:
   holds RF-73 treats RF-Tines as a separate instrument: sessions, presets and
   `.rf73` program files saved under the old identity do not carry over, and
   the old package stays installed until it is removed in Plugin Manager.
+- **RF-EPiano**, a reed electric piano inspired by the Wurlitzer 200A, with
+  tremolo and a modelled speaker cabinet.
 - **RF-Musette**, a physically modelled piano accordion: every reed a
   self-oscillating free reed under one bellows, the treble's 14 registers and
   the Stradella or free bass, the bellows played by the wheel or Expression
   or each key's touch, and its registers on a controller's pads.
+- **RF-Soundfonts**, a sample-based instrument with the YDP Grand Piano
+  factory bank and support for importing your own libraries.
 
-Source and releases for these instruments:
+The bundle also includes three effects for PLAY chains. [RF-Comp](https://github.com/kalexis1994/rackforge-plugin-rf-comp),
+[RF-EQ](https://github.com/kalexis1994/rackforge-plugin-rf-eq) and
+[RF-Limiter](https://github.com/kalexis1994/rackforge-plugin-rf-limiter)
 
+Instrument repositories and guides:
+
+- [Concert Grand source and releases](https://github.com/kalexis1994/rackforge-plugin-concert-grand)
 - [RF-106 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-106)
 - [RF-5 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-5)
 - [RF-7 source and releases](https://github.com/kalexis1994/RF-7)
 - [RF-Organ source and releases](https://github.com/kalexis1994/RF-Organ)
 - [RF-Tines source and releases](https://github.com/kalexis1994/RF-Tines)
+- [RF-EPiano source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-epiano)
 - [RF-Musette source and releases](https://github.com/kalexis1994/RF-Musette)
-- [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
-  a SoundFont instrument that includes the sampled YDP Grand Piano
+- [RF-Soundfonts source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts)
 
 ### RF - Concert Grand
 
-The piano that ships with RackForge is not a sample library. There are no
-recordings in the package: every note is computed as it is played, from a
-string that is stiff and lossy, a hammer with felt that hardens under the blow,
-a soundboard that radiates, and a room with a lid and a pair of microphones in
-it. The whole model is written down, measured against real instruments and the
-published literature, in [docs/PIANO_MODEL.md](docs/PIANO_MODEL.md).
-
-What that buys you is an instrument that changes as a piano changes rather than
-as a preset changes:
-
-- **Sixteen instruments, not sixteen tone settings.** Concert Grand, Mellow,
-  Bright and Intimate, then the scales of real pianos — Concert 308 down through
-  Salon 211, Parlour 185, Baby 150, two uprights, a player upright and a
-  fortepiano. The size is a dimension of the model, so a shorter piano is
-  shorter everywhere: tension, inharmonicity, decay and the bass break all move
-  with it.
-- **A room you can move around in.** Lid position, microphone distance and the
-  pair's spacing are geometry, not reverb: each capsule hears the soundboard and
-  its image in a hinged, finite lid.
-- **The action, audibly.** Hammer speed spans the published range, the felt is
-  measured per note, the dampers land, and the una corda pedal is read.
-- **162 parameters, all of them the model's own** — the sound, the room and its
-  microphones, the action and its noises — plus a Model page that exposes the
-  physical constants themselves and a button that puts them back.
-
-It reads 16-bit velocity where the host can supply it, and the per-keyboard
-velocity reading below applies before it ever sees a note.
+Concert Grand computes each note from the hammer, strings and soundboard.
+Choose a program to play different piano scales, then adjust the lid and
+microphone positions to change the perspective.
+[Concert Grand player guide](https://github.com/kalexis1994/rackforge-plugin-concert-grand#readme)
 
 A portable `.rfplugin` can carry its engine, Web interface, programs, artwork,
 and resources in one package. Install it from **Plugin Manager** and RackForge
@@ -252,7 +239,7 @@ Install a specific release or enable the optional reversible appliance
 optimizations:
 
 ```bash
-RACKFORGE_VERSION=v0.1.7 bash install-rackforge.sh
+RACKFORGE_VERSION=v0.1.36 bash install-rackforge.sh
 RACKFORGE_OPTIMIZE=1 bash install-rackforge.sh
 ```
 
@@ -263,11 +250,12 @@ Advanced installations may set `RACKFORGE_ROOT`.
 
 ### Linux x86-64
 
-1. Download `RackForge-Linux-x86_64.tar.gz` from the latest release.
+1. Download
+   [`RackForge-Linux-x86_64.tar.gz`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-Linux-x86_64.tar.gz).
 2. Extract it and enter the `rackforge` directory.
 3. Run `bash platforms/linux-x86_64/install.sh` as the ordinary user who will
    run RackForge.
-4. Open `http://localhost:8787` and configure **Audio & MIDI**.
+4. Open `http://localhost:8787` and activate an instrument to start audio.
 
 This edition uses the same headless Core and adaptive Web interface as
 Raspberry Pi, built natively for 64-bit Intel and AMD computers. See the
@@ -275,9 +263,10 @@ Raspberry Pi, built natively for 64-bit Intel and AMD computers. See the
 
 ### Linux desktop (Flatpak)
 
-1. Download `RackForge-Linux-x86_64.flatpak` from the latest release.
+1. Download
+   [`RackForge-Linux-x86_64.flatpak`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-Linux-x86_64.flatpak).
 2. Add Flathub once, for the GNOME runtime it runs on:
-   `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`
+   `flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`
 3. Install it for your user: `flatpak install --user RackForge-Linux-x86_64.flatpak`.
 
 It is the same desktop application as on Windows, sharing the sound card
@@ -286,9 +275,10 @@ through the desktop's sound server. See the
 
 ### Windows VST3 preview
 
-The release includes an installable `RackForge.vst3` bundle. Copy that complete
-directory to a VST3 location scanned by the DAW; the loose
-`rackforge-vst3.dll` is a diagnostic module, not the normal installation.
+Download
+[`RackForge-VST3-Windows-x86_64.zip`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-VST3-Windows-x86_64.zip)
+and extract it. Copy the complete `RackForge.vst3` directory to a location
+scanned by your DAW.
 
 The VST edition receives MIDI, timing, and audio from the DAW and stores its
 state in the DAW project. It never opens a second audio device. A physical
@@ -320,9 +310,13 @@ provides:
 The same controller package is used on Windows, Linux x86-64, Android, and
 Raspberry Pi.
 
-The browser lists the same declarative controller catalog for inspection. Its
-Web MIDI control integration currently supports only the KeyLab Essential mk3;
-controller maps are saved by the native hosts, not by the browser demo.
+The browser demo can receive notes from Web MIDI inputs and shows the
+declarative controller catalog. The KeyLab Essential mk3 browser driver also
+supports the LITTLE display with SysEx permission.
+
+To map an enabled MIDI input to a plugin parameter, open the parameter's
+context menu in PLAY and choose **Link MIDI**.
+[MIDI Parameter Links](docs/MIDI_PARAMETER_LINKS.md)
 
 ## Save it, move it, play it
 
@@ -360,7 +354,6 @@ Current limitations:
 - The Linux x86-64 archive uses a headless/Web interface; the Flatpak is the
   native desktop window.
 - Raspberry Pi requires a 64-bit Raspberry Pi OS userspace.
-- Optional instruments such as RF-Soundfonts are separate downloads.
 - The optional Desktop HTTP server is disabled by default.
 - Browser latency and MIDI support depend on the browser and device.
 
@@ -371,6 +364,7 @@ Current limitations:
 - [Android guide](apps/rackforge-android/README.md)
 - [Raspberry Pi guide](platforms/raspberry-pi/README.md)
 - [Linux x86-64 guide](platforms/linux-x86_64/README.md)
+- [Linux Desktop guide](platforms/linux-flatpak/README.md)
 - [Portable preset format](docs/RFPRESET.md)
 - [LIVE performance model](docs/architecture/live-performance.md)
 - [Experience system and performance budgets](docs/architecture/experience-system.md)
@@ -391,52 +385,7 @@ Instrument repositories own their release pipelines and assets such as sample
 libraries or firmware. RackForge validates their packages against the public
 host contracts before activation.
 
-<details>
-<summary><strong>Contributing and repository architecture</strong></summary>
-
-Every Pull Request targeting `main` must pass contracts, Web validation,
-Windows, VST3, Linux x86-64, Android, Raspberry Pi, and browser-demo checks.
-Merging to `main` rebuilds the release artifacts and deploys the Web edition.
-
-```text
-MIDI controller
-  • keys, pads, encoders, buttons
-           │ native MIDI
-           ▼
-Platform MIDI + .rfcontroller package
-  • discovers and reconnects hardware
-  • maps controls to host intents
-  • renders LITTLE, LEDs, and pads
-           │
-           ▼
-RackForge Core
-  • authoritative musical state
-  • portable plugins and programs
-  • Racks, Songs, and Setlists
-  • routing, mixing, and audio
-           │
-           ▼
-Platform audio
-  • ALSA / WASAPI / ASIO / native Android audio
-           │
-           ▼
-Built-in audio / USB interface
-```
-
-| Area | Responsibility |
-| --- | --- |
-| `crates/` | Core, APIs, SDK, and portable plugin runtime |
-| `apps/` | Windows Desktop, Android, VST3, and headless/Web hosts |
-| `platforms/` | Platform adapters, installation, and deployment |
-| `hardware/` | Drivers and packages for supported MIDI controllers |
-| `plugins/` | Bundled instruments and conformance fixtures |
-| `web/` | RackForge's adaptive interface |
-
-The host owns authoritative engine, bank, and performance state. Controllers
-send physical events and render the state they receive. A handshake rebuilds
-the control surface after either side restarts.
-
-</details>
+[Host development and build commands](docs/RUNTIME.md#building-from-source)
 
 ## Licence
 

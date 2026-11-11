@@ -40,12 +40,7 @@ jobs:
 
       - name: Install native test dependencies
         shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev \
-            libudev-dev \
-            pkg-config
+        run: bash .github/scripts/install-ubuntu-deps.sh libasound2-dev libudev-dev pkg-config
 
       - name: Set up Rust
         shell: bash
@@ -295,12 +290,7 @@ jobs:
 
       - name: Install native build dependencies
         shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev \
-            libudev-dev \
-            pkg-config
+        run: bash .github/scripts/install-ubuntu-deps.sh libasound2-dev libudev-dev pkg-config
 
       - name: Set up Rust
         shell: bash
@@ -366,8 +356,7 @@ jobs:
       - name: Install Flatpak tooling
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends flatpak dbus
+          bash .github/scripts/install-ubuntu-deps.sh flatpak dbus
           # Ubuntu 24.04 keeps unprivileged user namespaces from processes
           # without an AppArmor profile, and flatpak-builder's bubblewrap
           # needs one for its sandbox.
@@ -546,12 +535,7 @@ jobs:
 
       - name: Install native build dependencies
         shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libasound2-dev \
-            libudev-dev \
-            pkg-config
+        run: bash .github/scripts/install-ubuntu-deps.sh libasound2-dev libudev-dev pkg-config
 
       - name: Set up Rust
         shell: bash

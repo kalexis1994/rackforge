@@ -27,12 +27,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Concert-Grand.rfplugin",
         "plugin_id": "org.rackforge.concert-grand",
-        "version": "0.171.38",
+        "version": "0.171.39",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-concert-grand/"
-            "releases/download/v0.171.38/RF-Concert-Grand.rfplugin"
+            "releases/download/v0.171.39/RF-Concert-Grand.rfplugin"
         ),
-        "sha256": "1c7dfb9322fa8708d62c937b23ee870a160e166dd91392aa7f80f82c21941dc8",
+        "sha256": "9e8c5b6c9bc35e39d9c951ac02cd92dfb1fcde0c3c02ba82c9ea426014462d84",
         # The startup instrument is carried separately by native hosts.
         # Its source and release lifecycle are owned by the plugin repository.
         "default": True,
@@ -47,12 +47,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-106.rfplugin",
         "plugin_id": "org.rackforge.rf-106",
-        "version": "0.2.20",
+        "version": "0.2.21",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-106/"
-            "releases/download/v0.2.20/RF-106.rfplugin"
+            "releases/download/v0.2.21/RF-106.rfplugin"
         ),
-        "sha256": "97f537b33128da70ab259f2cf9c0fd029309cc8b9fc70bbfa0e7da7fbc4d4295",
+        "sha256": "8f2cd0b97579abeb3941a5eb47f8a9c2926603a6b67fed025752c13552799295",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -70,12 +70,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-5.rfplugin",
         "plugin_id": "org.rackforge.rf-5",
-        "version": "0.1.21",
+        "version": "0.1.22",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-5/"
-            "releases/download/v0.1.21/RF-5.rfplugin"
+            "releases/download/v0.1.22/RF-5.rfplugin"
         ),
-        "sha256": "b071665ce75236caba6af1a987bffa0cc7367dfd57e462db3b28d827453773dc",
+        "sha256": "a0e4d02cb87e91b9f68d04c0d938de8ff7787fa15437ba927924cadbf443a5d3",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -97,12 +97,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-7.rfplugin",
         "plugin_id": "org.rackforge.rf7",
-        "version": "0.5.3",
+        "version": "0.5.4",
         "url": (
             "https://github.com/kalexis1994/RF-7/"
-            "releases/download/v0.5.3/RF-7.rfplugin"
+            "releases/download/v0.5.4/RF-7.rfplugin"
         ),
-        "sha256": "0741243143d34bcb3287fd487142d94b0855794058f7279d9a3058c59eb6359a",
+        "sha256": "42097dafd6b6cd8eee71684c6522fa84a65333304f64f8193300e72fdef3dd18",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -124,12 +124,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Organ.rfplugin",
         "plugin_id": "org.rackforge.organ",
-        "version": "0.53.0",
+        "version": "0.53.1",
         "url": (
             "https://github.com/kalexis1994/RF-Organ/"
-            "releases/download/v0.53.0/RF-Organ.rfplugin"
+            "releases/download/v0.53.1/RF-Organ.rfplugin"
         ),
-        "sha256": "15e0bbb5c07ae2fe9984bb2ea394199a28f5160252ff9dfbf94263b840f04d91",
+        "sha256": "b8a08c563cbf0b161cff1879870f57a2927313776e854d2535f96886cf8e0e42",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -154,12 +154,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Tines.rfplugin",
         "plugin_id": "org.rackforge.rftines",
-        "version": "0.2.10",
+        "version": "0.2.11",
         "url": (
             "https://github.com/kalexis1994/RF-Tines/"
-            "releases/download/v0.2.10/RF-Tines.rfplugin"
+            "releases/download/v0.2.11/RF-Tines.rfplugin"
         ),
-        "sha256": "dfe10e480b41f8aade1eb508505c093e921bae02cf6cb51e2cc0836acd1fc002",
+        "sha256": "d7c51d892b82bd61d3579154f4bd9a25b4bac70a699c35ddb142059fb8211e71",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -185,12 +185,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-EPiano.rfplugin",
         "plugin_id": "org.rackforge.rf-epiano",
-        "version": "0.1.4",
+        "version": "0.1.5",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-epiano/"
-            "releases/download/v0.1.4/RF-EPiano.rfplugin"
+            "releases/download/v0.1.5/RF-EPiano.rfplugin"
         ),
-        "sha256": "a91e134751799a841efeba57835dafb2e17d08a46b0e96ca36af4403c7e13965",
+        "sha256": "30e0fefc76991de8b25c099f1a8577d2473965a1509bd4272397a1f233009333",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -210,12 +210,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Musette.rfplugin",
         "plugin_id": "org.rackforge.musette",
-        "version": "0.13.24",
+        "version": "0.13.26",
         "url": (
             "https://github.com/kalexis1994/RF-Musette/"
-            "releases/download/v0.13.24/RF-Musette.rfplugin"
+            "releases/download/v0.13.26/RF-Musette.rfplugin"
         ),
-        "sha256": "d066b7444575316b7be6d6e653aa40bd880f754e9b5f4c92c56e682c0ce3f034",
+        "sha256": "0e54b3f7fcd4b5cc74f658d2a643b2b7c04659688c28b79babd5866ea2627e76",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -240,12 +240,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Limiter.rfplugin",
         "plugin_id": "org.rackforge.rf-limiter",
-        "version": "0.2.0",
+        "version": "0.2.1",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-limiter/"
-            "releases/download/v0.2.0/RF-Limiter.rfplugin"
+            "releases/download/v0.2.1/RF-Limiter.rfplugin"
         ),
-        "sha256": "fd7bbadf8ef92a2b466ed62128800450efec61fffbc9c1e34922390e36bf82d9",
+        "sha256": "6a897c0b102071358fde3bcfb854c75d1616ed27f80ec4a63c6effa08f3c1b38",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -264,12 +264,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-EQ.rfplugin",
         "plugin_id": "org.rackforge.rf-eq",
-        "version": "0.2.0",
+        "version": "0.2.1",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-eq/"
-            "releases/download/v0.2.0/RF-EQ.rfplugin"
+            "releases/download/v0.2.1/RF-EQ.rfplugin"
         ),
-        "sha256": "1e3993fb2185b89eac0c8bcde0f99b809d1e8f5268089d7eaf55cc6a4d807e43",
+        "sha256": "0e685ff712255f397f60c263fa8d51450a74d370bbe9a1ba5bd6728cc7541231",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -288,12 +288,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Comp.rfplugin",
         "plugin_id": "org.rackforge.rf-comp",
-        "version": "0.2.0",
+        "version": "0.2.1",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-comp/"
-            "releases/download/v0.2.0/RF-Comp.rfplugin"
+            "releases/download/v0.2.1/RF-Comp.rfplugin"
         ),
-        "sha256": "6627519805c85e2e8251ad4759c8cac33b397611e15cfea4ab77785bfd1e3de4",
+        "sha256": "b0cb348660111bdfcc6600feed409da025f789ee25c4e9b5efe925fd5ffbc439",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

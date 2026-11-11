@@ -17,6 +17,7 @@ use rackforge_core::parallel_render::{
     self, ParallelUnits, RenderPool, RenderTelemetry, ScheduledSlot, UnitJob,
     process_slots_sequential, spawn_telemetry_publisher,
 };
+use rackforge_core::play_output::PlayOutputTrim;
 use rackforge_core::rack_voice::{self, RackEngine};
 use rackforge_core::{
     CompiledParameterLink, ControllerMapLinkContext, LiveParameterStateStore, LiveParameterTarget,
@@ -2428,6 +2429,7 @@ impl AndroidEngine {
             );
         }
         self.render_chain(frames, output);
+        PlayOutputTrim::for_instrument(&self.plugin_id).apply(output);
         self.midi.clear();
         self.parameter_events.clear();
         Ok(())

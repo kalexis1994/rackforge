@@ -2987,6 +2987,11 @@ impl BrowserHost {
         };
         let plugin = &mut self.plugins[index];
         // The instrument, then the effects that are on, in order.
+        let trim = if self.store.state().active_mode == SurfaceMode::Play {
+            rackforge_core::play_output::PlayOutputTrim::for_instrument(&plugin.plugin_id)
+        } else {
+            rackforge_core::play_output::PlayOutputTrim::UNITY
+        };
         let mut chain: Vec<&mut PluginInstance<'static>> = self
             .chain
             .iter_mut()
@@ -2994,7 +2999,7 @@ impl BrowserHost {
             .map(|effect| &mut effect.instance)
             .collect();
         self.audio
-            .render_through(request, &mut plugin.instance, &mut chain)
+            .render_through(request, &mut plugin.instance, &mut chain, trim)
     }
 
     fn flush_live_parameters(&mut self, force: bool) {

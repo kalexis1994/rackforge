@@ -39,6 +39,7 @@ pub mod parameter_link;
 /// The parameter a control last moved, for LITTLE's header on every host.
 pub mod parameter_touch;
 pub mod performance;
+pub mod play_output;
 pub mod rack_graph;
 /// A LIVE Rack's Slots and their mix, for every host with a render pool:
 /// the appliance's loop and Android's render worker play a Rack through it.

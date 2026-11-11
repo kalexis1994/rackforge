@@ -29,9 +29,10 @@ RackForge Runtime + stable API
       +-- Android ARM64
 ```
 
-WebAssembly components are the target portable format. The current C ABI and
-native libraries remain a transition path until the portable runtime reaches
-feature and performance parity.
+The portable format in RackForge 0.1.36 is a WebAssembly module using the
+`wasm-v1` ABI. Production instruments and effects already use it across
+Windows, Linux, Android, Raspberry Pi, and the browser. Hybrid packages can
+also carry native builds of the same processor for supported targets.
 
 ## Non-negotiable principles
 
@@ -93,9 +94,10 @@ never see the platform-specific implementation.
 
 ### Portable runtime
 
-The Component Model and WIT are intended for lifecycle, metadata, state,
-catalogs, commands, and capabilities. The real-time ABI remains deliberately
-small:
+The shipped `wasm-v1` ABI uses WebAssembly exports and host-owned buffers for
+lifecycle, metadata, state, programs, and audio processing. The Component Model
+and WIT remain future contract work. The real-time processing lifecycle remains
+deliberately small:
 
 ```text
 activate(sample_rate, max_frames)
@@ -181,10 +183,15 @@ protection, message limits, and reconnect behavior must be stable before
 
 ## SDK and tooling
 
-The Rust plugin SDK will provide safe generated bindings, preallocated DSP
-buffers, manifest builders, state migrations, and a real-time test harness.
-The TypeScript WEB SDK will provide typed commands, subscriptions, navigation,
-themes, accessibility, reconnect handling, and an offline simulator.
+The Rust plugin SDK already provides `Processor` and `ParallelProcessor`
+traits, preallocated processing buffers, and portable and native exports.
+Independent plugin repositories pin the SDK to a RackForge Git revision.
+Standalone SDK publication and simulators remain pending.
+[Rust SDK guide](crates/rackforge-plugin-sdk/README.md)
+
+The current Web plugin kit supports host communication and program controls.
+The TypeScript WEB SDK remains planned to cover typed commands, subscriptions,
+navigation, themes, accessibility, reconnect handling, and an offline simulator.
 
 The CLI will progressively expose:
 
@@ -200,9 +207,9 @@ rackforge dev
 
 ## Portable `.rfplugin` format
 
-A package contains a versioned manifest, portable component or target-specific
-transition artifacts, optional WEB assets, immutable package assets, integrity
-metadata, and migration information. It never contains user state.
+A package contains a versioned manifest, a portable component, optional native
+builds and WEB assets, immutable package assets, integrity metadata, and
+migration information. It never contains user state.
 
 One archive must install safely on every supported host. The portable
 component is always there and runs everywhere; beside it, the same processor
@@ -235,6 +242,12 @@ costs speed, never the plugin.
 - [x] Windows x86-64 standalone and VST3, Linux x86-64, Android ARM64,
   Raspberry Pi ARM64, and browser-demo CI artifacts.
 - [x] MIDI disconnect recovery and held-note release.
+- [x] Host-owned MIDI Learn and persistent parameter links for enabled MIDI
+  inputs, including custom controllers.
+  [MIDI Parameter Links](docs/MIDI_PARAMETER_LINKS.md)
+- [x] Android lifecycle and soak qualification tools with documented hardware
+  and pass/fail thresholds. Retained physical qualification results remain
+  part of issue #12.
 
 ### Current stabilization milestone: [v0.2.0](https://github.com/kalexis1994/rackforge/milestone/1)
 
@@ -253,13 +266,18 @@ this document summarizes product direction and delivery order.
 
 ### Portable ecosystem
 
-- [ ] Stabilize WIT contracts and the `wasm-v1` runtime.
-- [ ] Migrate the reference instrument to the portable runtime.
+- [x] Ship the `wasm-v1` plugin runtime across supported hosts.
+  [Plugin ABI](docs/PLUGIN_ABI.md)
+- [x] Migrate reference instruments and effects to the portable runtime.
+- [x] Provide the Rust plugin SDK used by independent plugin repositories.
+- [ ] Stabilize future Component Model/WIT contracts alongside the shipped ABI.
 - [ ] Publish plugin and WEB SDKs with simulators.
 - [x] Hybrid packages: one `.rfplugin` with the component and native builds of
   the same processor, held to the component bit for bit in the plugin's CI
   (`rackforge-core compare-native`). RF-Musette runs 1.7-2x faster natively.
-- [ ] Native builds for parallel processors (`export_parallel_processor!`).
+- [x] Native builds for parallel processors (`export_parallel_processor!`),
+  with equivalence coverage for the composed and scheduled rendering paths.
+  [Native parallel test](crates/rackforge-plugin-sdk/tests/native_parallel.rs)
 - [ ] Add additional certified controllers.
 
 ### macOS
@@ -280,7 +298,12 @@ ships `macos-aarch64`.
   before distributing to the public. Until then a tester opens the unsigned
   app once with right-click, Open (or `xattr -dr com.apple.quarantine`).
 - [ ] An Intel (`macos-x86_64`) build, if anyone asks for one.
+
+### Distribution
+
 - [ ] Add a signed repository index and controlled update channels.
+  Host and package signing, rollback, and key rotation remain tracked by
+  [issue #17](https://github.com/kalexis1994/rackforge/issues/17).
 
 ## Deliberately deferred decisions
 

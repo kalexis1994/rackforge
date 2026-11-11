@@ -46,8 +46,11 @@ function Invoke-SvgRender {
     try {
         # The size pair has to reach the browser as one argument: unquoted, the
         # comma makes PowerShell split it into two.
+        # A transparent page, so the favicon's rounded corners come out clear
+        # rather than white against a dark tab strip.
         & $browser --headless=new --disable-gpu --hide-scrollbars `
             --force-device-scale-factor=1 "--user-data-dir=$profileDir" `
+            "--default-background-color=00000000" `
             "--screenshot=$Destination" "--window-size=$Size,$Size" $uri | Out-Null
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Destination)) {
             throw "The browser could not render $Source."

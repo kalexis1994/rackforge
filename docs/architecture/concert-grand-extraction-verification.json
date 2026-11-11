@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/kalexis1994/rackforge-plugin-concert-grand",
+  "source_commit": "5f77a84808f7bb256a100aff2bcaafad2780a496",
+  "release": "https://github.com/kalexis1994/rackforge-plugin-concert-grand/releases/tag/v0.171.37",
+  "package_sha256": "f9cf0df2cabc8cd73209175b517052021b06615a126507ba6abbd63f2eaffc8c",
+  "download_validated": true,
+  "cache_validated": true,
+  "extract_directory": "concert-grand",
+  "default_stored_separately": true,
+  "host_tool_tests_passed": 40,
+  "sdk_check": "cargo check --locked -p rackforge-plugin-sdk passed",
+  "plugin_native_tests_passed": 82,
+  "fingerprints": [
+    "e4abcfd02a5757c1",
+    "dfb7f193962235e0"
+  ],
+  "all_16_programs_native_component_and_parallel_match": true,
+  "ci_run": "https://github.com/kalexis1994/rackforge-plugin-concert-grand/actions/runs/38655335094"
+}

@@ -76,17 +76,17 @@ class PinnedOfficialSetTests(unittest.TestCase):
             )
 
     def test_a_standard_artifact_matching_the_pins_passes(self):
-        expected = ["RF-Concert-Grand.rfplugin", *MODULE.pinned_official_filenames()]
+        expected = MODULE.pinned_official_filenames()
         MODULE.verify("standard", list(expected), expected)
 
     def test_a_missing_pinned_package_is_rejected(self):
-        expected = ["RF-Concert-Grand.rfplugin", *MODULE.pinned_official_filenames()]
+        expected = MODULE.pinned_official_filenames()
         with self.assertRaises(ValueError) as raised:
             MODULE.verify("standard", ["RF-Concert-Grand.rfplugin"], expected)
         self.assertIn("missing", str(raised.exception))
 
     def test_an_unpinned_package_that_slipped_in_is_rejected(self):
-        expected = ["RF-Concert-Grand.rfplugin", *MODULE.pinned_official_filenames()]
+        expected = MODULE.pinned_official_filenames()
         with self.assertRaises(ValueError) as raised:
             MODULE.verify("standard", [*expected, "Stowaway.rfplugin"], expected)
         self.assertIn("unexpected", str(raised.exception))

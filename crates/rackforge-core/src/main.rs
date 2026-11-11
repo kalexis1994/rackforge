@@ -46,7 +46,8 @@ fn run() -> Result<()> {
             )
         }
         "stress" => {
-            let (plugin, voices, blocks, frames) = parse_stress_arguments(&arguments[1..])?;
+            let (plugin, voices, blocks, frames, parameters) =
+                parse_stress_arguments(&arguments[1..])?;
             let (package, binary, resources, preset, data_root) = plugin;
             stress(
                 &package,
@@ -57,8 +58,14 @@ fn run() -> Result<()> {
                 voices,
                 blocks,
                 frames,
+                &parameters,
             )
         }
+        "compare-native" if arguments.len() >= 3 => compare_native(
+            Path::new(&arguments[1]),
+            Path::new(&arguments[2]),
+            &arguments[3..],
+        ),
         "live" => run_live(&arguments[1..]),
         "resume" if arguments.len() == 2 => resume(Path::new(&arguments[1])),
         #[cfg(target_os = "linux")]
@@ -81,12 +88,274 @@ fn run() -> Result<()> {
              [--blocks COUNT] [--frames COUNT]\n  \
              rackforge-core live PACKAGE [--library FILE] [--resource ID=PATH]... \
              [--preset ID] [--data-root DIRECTORY]\n  \
+             rackforge-core compare-native PACKAGE LIBRARY [--seconds S] \
+             [--data-root DIRECTORY]\n  \
              rackforge-core resume STARTUP_CONFIG\n  \
              rackforge-core audio-list\n  \
              rackforge-core plugin-init DATA_ROOT PLUGIN_ID\n  \
              rackforge-core program-save DATA_ROOT RELATIVE_PATH DOCUMENT"
         ),
     }
+}
+
+/// Holds a native build to its package's component: every program the
+/// component publishes, played the same phrase through both, must come out
+/// the same bits, and leave the same state. Prints each program's
+/// fingerprint and both forms' cost; fails on the first sample that differs.
+///
+/// This is what lets a package carry native builds at all: a host runs one in
+/// place of the component only because they are the same plugin, and this
+/// is where a plugin's CI proves it for each platform it builds.
+fn compare_native(package_path: &Path, library: &Path, options: &[String]) -> Result<()> {
+    let mut seconds = 4.0_f64;
+    let mut data_root = None;
+    let mut options = options.iter();
+    while let Some(option) = options.next() {
+        match option.as_str() {
+            "--seconds" => {
+                seconds = options
+                    .next()
+                    .context("--seconds needs a value")?
+                    .parse()
+                    .context("--seconds must be a number")?;
+            }
+            "--data-root" => {
+                data_root = Some(PathBuf::from(
+                    options.next().context("--data-root needs a directory")?,
+                ));
+            }
+            other => bail!("compare-native does not take {other:?}"),
+        }
+    }
+    let package = PluginPackage::open(package_path)?;
+    let data_root = data_root.as_deref();
+    // SAFETY: an explicit command to run this library and this component.
+    let component = unsafe {
+        LoadedPlugin::load_portable_form(
+            &package,
+            data_root,
+            rackforge_core::PortableForm::Component,
+        )
+    }?;
+    let native = unsafe {
+        LoadedPlugin::load_portable_form(
+            &package,
+            data_root,
+            rackforge_core::PortableForm::NativeBuild(library),
+        )
+    }
+    .with_context(|| format!("loading native build {}", library.display()))?;
+
+    let (input_channels, output_channels) = match package.manifest().kind {
+        PluginKind::Effect => (2_u32, 2_u32),
+        PluginKind::Instrument => (0, 2),
+        PluginKind::MidiProcessor => bail!("a MIDI processor makes no sound to compare"),
+    };
+    const RATE: f64 = 48_000.0;
+    const FRAMES: u32 = 256;
+    let blocks = ((seconds * RATE) as usize).div_ceil(FRAMES as usize).max(1);
+    let events = comparison_phrase(blocks * FRAMES as usize);
+
+    let programs = component.create_instance()?.preset_catalog()?;
+    let mut program_ids: Vec<Option<String>> = programs
+        .presets
+        .iter()
+        .map(|preset| Some(preset.id.clone()))
+        .collect();
+    if program_ids.is_empty() {
+        program_ids.push(None);
+    }
+    // A processor that renders in units is also scheduled the way a host
+    // schedules it -- the pre-stage on a coordinator, each unit in its own
+    // worker instance, the post-stage back on the coordinator -- here one
+    // unit after another, which is what every thread count reduces to.
+    let staged = native.parallel_layout().is_some();
+    let (mut component_time, mut native_time) = (0.0_f64, 0.0_f64);
+    for program in &program_ids {
+        let render = |plugin: &LoadedPlugin,
+                      in_units: bool,
+                      time: &mut f64|
+         -> Result<(Vec<u32>, Vec<u8>)> {
+            let mut instance = plugin.create_instance()?;
+            instance.activate(RATE, FRAMES, input_channels, output_channels)?;
+            let mut units = if in_units {
+                Some(
+                    rackforge_core::parallel_render::ParallelUnits::create(
+                        plugin,
+                        RATE,
+                        FRAMES,
+                        input_channels,
+                        output_channels,
+                    )?
+                    .context("a parallel processor without units")?,
+                )
+            } else {
+                None
+            };
+            if let Some(program) = program {
+                instance.load_preset(program)?;
+                if let Some(units) = &mut units {
+                    units.mirror(|unit| unit.load_preset(program))?;
+                }
+            }
+            let mut bits = Vec::with_capacity(blocks * (FRAMES * output_channels) as usize);
+            let mut output = vec![0.0_f32; (FRAMES * output_channels) as usize];
+            let mut input = vec![0.0_f32; (FRAMES * input_channels) as usize];
+            let mut next = 0;
+            for block in 0..blocks {
+                let start = block * FRAMES as usize;
+                for (index, sample) in input.iter_mut().enumerate() {
+                    // A fixed, broadband signal for an effect to work on.
+                    let n = (start * input_channels as usize + index) as u32;
+                    *sample = (n.wrapping_mul(2_654_435_761) >> 8) as f32 / (1 << 24) as f32 - 0.5;
+                }
+                let mut midi = Vec::new();
+                while next < events.len() && events[next].0 < start + FRAMES as usize {
+                    let (at, data) = events[next];
+                    midi.push(MidiEventV1 {
+                        frame: (at - start) as u32,
+                        length: 3,
+                        data,
+                    });
+                    next += 1;
+                }
+                let begun = Instant::now();
+                match &mut units {
+                    None => instance.process_interleaved(
+                        &input,
+                        &mut output,
+                        FRAMES,
+                        input_channels,
+                        output_channels,
+                        &midi,
+                        &[],
+                    )?,
+                    Some(units) => {
+                        let wide: Vec<rackforge_core::midi2::Midi2Event> = midi
+                            .iter()
+                            .map(rackforge_core::midi2::Midi2Event::from_midi1)
+                            .collect();
+                        let planned = units.begin(&mut instance, &input, FRAMES, &wide, &[])?;
+                        let (mut pending, mut completed) = (planned, 0_u32);
+                        while pending != 0 {
+                            let bit = pending.isolate_lowest_one();
+                            pending &= !bit;
+                            let job = units.unit_job(
+                                bit.trailing_zeros(),
+                                &input,
+                                FRAMES,
+                                output_channels,
+                            );
+                            // SAFETY: produced for this block, and this thread
+                            // holds the whole Slot.
+                            if unsafe {
+                                rackforge_core::parallel_render::execute_unit_job(
+                                    &job,
+                                    FRAMES,
+                                    output_channels,
+                                )
+                            } {
+                                completed |= bit;
+                            }
+                        }
+                        if completed != planned {
+                            bail!("a unit failed in block {block}");
+                        }
+                        units.finish(
+                            &mut instance,
+                            &mut output,
+                            FRAMES,
+                            output_channels,
+                            completed,
+                        )?;
+                    }
+                }
+                *time += begun.elapsed().as_secs_f64();
+                bits.extend(output.iter().map(|sample| sample.to_bits()));
+            }
+            Ok((bits, instance.save_state()?))
+        };
+        let (expected, expected_state) = render(&component, false, &mut component_time)?;
+        let label = program.as_deref().unwrap_or("(default)");
+        let mut forms = vec![("native", render(&native, false, &mut native_time)?)];
+        if staged {
+            forms.push(("native in units", render(&native, true, &mut 0.0)?));
+        }
+        for (form, (actual, actual_state)) in forms {
+            if let Some(index) = expected.iter().zip(&actual).position(|(a, b)| a != b) {
+                let frame = index / output_channels as usize;
+                bail!(
+                    "program {label:?} differs {form} at frame {frame} (block {}), channel {}: component {} {form} {}",
+                    frame / FRAMES as usize,
+                    index % output_channels as usize,
+                    f32::from_bits(expected[index]),
+                    f32::from_bits(actual[index])
+                );
+            }
+            if expected_state != actual_state {
+                bail!("program {label:?} leaves a different state {form}");
+            }
+        }
+        let fingerprint = expected
+            .iter()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, bits| {
+                (hash ^ u64::from(*bits)).wrapping_mul(0x0100_0000_01b3)
+            });
+        println!("NATIVE_MATCH program={label} fingerprint={fingerprint:016x}");
+    }
+    let per_block = |seconds: f64| seconds * 1e6 / (blocks * program_ids.len()) as f64;
+    println!(
+        "NATIVE_BUILD_MATCHES programs={} units={} blocks={} component_us_per_block={:.0} native_us_per_block={:.0} platform={}",
+        program_ids.len(),
+        staged,
+        blocks * program_ids.len(),
+        per_block(component_time),
+        per_block(native_time),
+        rackforge_plugin_api::host_platform_key()
+    );
+    Ok(())
+}
+
+/// A phrase that reaches most of what an instrument does: notes over the
+/// keyboard on three channels, at changing velocities, the modulation wheel
+/// and pitch bend moving, the sustain pedal down and up, then silence for
+/// the tails. `(frame, message)`, in order.
+fn comparison_phrase(length: usize) -> Vec<(usize, [u8; 3])> {
+    let mut events = Vec::new();
+    let step = 4_800; // a tenth of a second
+    let mut at = 0;
+    let mut beat = 0_usize;
+    while at + step * 4 < length.saturating_sub(48_000) {
+        let melody = 48 + ((beat * 7) % 36) as u8;
+        let velocity = 30 + ((beat * 37) % 97) as u8;
+        events.push((at, [0x90, melody, velocity]));
+        events.push((at + step * 3, [0x80, melody, 0]));
+        if beat.is_multiple_of(2) {
+            let bass = 36 + ((beat * 5) % 12) as u8;
+            events.push((at, [0x91, bass, 100]));
+            events.push((at + step, [0x81, bass, 0]));
+        } else {
+            for chord in [60_u8, 64, 67] {
+                events.push((at, [0x92, chord, 80]));
+                events.push((at + step, [0x82, chord, 0]));
+            }
+        }
+        events.push((at + step / 2, [0xB0, 1, ((beat * 23) % 128) as u8]));
+        let bend = (beat * 1_031) % 16_384;
+        events.push((at + step, [0xE0, (bend & 0x7f) as u8, (bend >> 7) as u8]));
+        if beat % 8 == 4 {
+            events.push((at, [0xB0, 64, 127]));
+        }
+        if beat % 8 == 7 {
+            events.push((at + step * 2, [0xB0, 64, 0]));
+        }
+        at += step * 2;
+        beat += 1;
+    }
+    events.push((at, [0xB0, 64, 0]));
+    events.push((at, [0xB0, 123, 0]));
+    events.sort_by_key(|(frame, data)| (*frame, data[0] & 0xf0 == 0x90));
+    events
 }
 
 fn validate_resource(package_path: &Path, resource_id: &str, path: &Path) -> Result<()> {
@@ -396,15 +665,35 @@ fn parse_plugin_arguments(command: &str, arguments: &[String]) -> Result<PluginA
     Ok((PathBuf::from(package), binary, resources, preset, data_root))
 }
 
-fn parse_stress_arguments(arguments: &[String]) -> Result<(PluginArguments, u8, u32, u32)> {
+/// The plugin, voices, blocks, repeats and the program schedule of a stress run.
+type StressArguments = (PluginArguments, u8, u32, u32, Vec<(u32, f64)>);
+
+fn parse_stress_arguments(arguments: &[String]) -> Result<StressArguments> {
     let mut common = Vec::new();
     let mut voices = 28_u8;
     let mut blocks = 32_u32;
     let mut frames = 256_u32;
+    let mut parameters = Vec::new();
     let mut index = 0;
     while index < arguments.len() {
         let option = arguments[index].as_str();
-        if matches!(option, "--voices" | "--blocks" | "--frames") {
+        if option == "--parameter" {
+            index += 1;
+            let assignment = arguments
+                .get(index)
+                .context("--parameter requires INDEX=VALUE")?;
+            let (parameter, value) = assignment
+                .split_once('=')
+                .context("--parameter requires INDEX=VALUE")?;
+            parameters.push((
+                parameter
+                    .parse()
+                    .context("--parameter index must be an integer")?,
+                value
+                    .parse()
+                    .context("--parameter value must be a number")?,
+            ));
+        } else if matches!(option, "--voices" | "--blocks" | "--frames") {
             index += 1;
             let value = arguments
                 .get(index)
@@ -440,6 +729,7 @@ fn parse_stress_arguments(arguments: &[String]) -> Result<(PluginArguments, u8, 
         voices,
         blocks,
         frames,
+        parameters,
     ))
 }
 
@@ -597,6 +887,7 @@ fn stress(
     voices: u8,
     blocks: u32,
     frames: u32,
+    parameters: &[(u32, f64)],
 ) -> Result<()> {
     let package = PluginPackage::open(package_path)?;
     // SAFETY: stress is an explicit plugin execution command.
@@ -619,6 +910,11 @@ fn stress(
             .context("instrument does not expose a stress-test preset")?,
     };
     instance.load_preset(&preset.id)?;
+    for (index, value) in parameters {
+        instance
+            .set_parameter(*index, *value)
+            .with_context(|| format!("setting parameter {index} to {value}"))?;
+    }
     instance.activate(48_000.0, frames, 0, 2)?;
 
     let note_ons = (0..voices)
@@ -631,6 +927,12 @@ fn stress(
     let mut output = vec![0.0_f32; frames as usize * 2];
     let mut peak = 0.0_f32;
     let mut maximum_fuel = 0_u64;
+    // The last quarter of the run: past the attack, into the part that
+    // repeats. `max_fuel` is the note-on block and says what the cap has to
+    // survive; this says what the instrument costs to hold.
+    let steady_from = blocks - blocks / 4;
+    let mut steady_total = 0_u128;
+    let mut steady_blocks = 0_u32;
     let started = Instant::now();
     for block in 0..blocks {
         output.fill(0.0);
@@ -638,6 +940,10 @@ fn stress(
         let result = instance.process_interleaved(&[], &mut output, frames, 0, 2, events, &[]);
         let fuel = instance.last_realtime_fuel_consumed().unwrap_or(0);
         maximum_fuel = maximum_fuel.max(fuel);
+        if block >= steady_from {
+            steady_total += u128::from(fuel);
+            steady_blocks += 1;
+        }
         result
             .with_context(|| format!("stress block {block} failed after consuming {fuel} fuel"))?;
         peak = output
@@ -649,13 +955,14 @@ fn stress(
     let realtime_ratio = elapsed.as_secs_f64() / rendered_seconds;
     instance.deactivate()?;
     println!(
-        "PLUGIN_STRESS_OK id={} preset={} voices={} blocks={} frames={} max_fuel={} peak={peak:.6} realtime_ratio={realtime_ratio:.3}",
+        "PLUGIN_STRESS_OK id={} preset={} voices={} blocks={} frames={} max_fuel={}          steady_fuel={} peak={peak:.6} realtime_ratio={realtime_ratio:.3}",
         plugin.descriptor().id,
         preset.id,
         voices,
         blocks,
         frames,
         maximum_fuel,
+        steady_total / u128::from(steady_blocks.max(1)),
     );
     Ok(())
 }

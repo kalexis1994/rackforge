@@ -13,6 +13,8 @@ import { Grid3X3, LogOut, Menu, Minus, Piano, Plus, ShieldAlert, X } from "lucid
 import { releaseVirtualMidi, sendVirtualMidi } from "./gateway";
 import { hostHaptic } from "./host";
 import type { SessionSnapshot } from "./types";
+import { padGridLayout } from "./touchControllerLayout";
+import { useMediaQuery } from "./hooks/useMediaQuery";
 
 type ControllerMode = "keyboard" | "pads";
 type KeyboardWidth = "auto" | number;
@@ -49,7 +51,8 @@ const FULL_KEYBOARD_START_NOTE = 21;
 const FULL_KEYBOARD_WHITE_KEYS = 52;
 const FULL_KEYBOARD_MIN_WHITE_KEY_PX = 22;
 const WINDOWED_KEY_MIN_PX = 42;
-const PAD_ASPECT_RATIO = 1;
+/** The portrait branch of the stylesheet's compact-dock query (styles.css). */
+const PORTRAIT_DOCK_QUERY = "(max-width: 760px) and (orientation: portrait)";
 
 function clamp(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
@@ -134,23 +137,34 @@ function noteName(note: number) {
   return `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1}`;
 }
 
-function useControllerSize(ref: RefObject<HTMLElement | null>) {
+/**
+ * The controller's measured size. `paused` holds it still for the length of
+ * a dock resize: the dock's height is the controller's height when docked,
+ * so every frame of the drag would otherwise re-render the whole controller
+ * for a size the gesture is already drawing. It is read again as the drag
+ * ends.
+ */
+function useControllerSize(ref: RefObject<HTMLElement | null>, paused = false) {
   const [size, setSize] = useState(() => ({
     width: window.innerWidth,
     height: window.innerHeight,
   }));
   useEffect(() => {
     const element = ref.current;
-    if (!element) return;
+    if (!element || paused) return;
     const update = () => {
       const bounds = element.getBoundingClientRect();
-      setSize({ width: bounds.width, height: bounds.height });
+      setSize((current) =>
+        current.width === bounds.width && current.height === bounds.height
+          ? current
+          : { width: bounds.width, height: bounds.height },
+      );
     };
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref]);
+  }, [ref, paused]);
   return size;
 }
 
@@ -241,6 +255,9 @@ export function TouchControllerPage({
     pointerId: number;
     startY: number;
     height: number;
+    /** The height the drag has reached, drawn but not yet committed. */
+    latest: number | null;
+    frame: number | null;
   } | null>(null);
   const keyboardViewportGestureRef = useRef<{
     pointerId: number;
@@ -249,7 +266,7 @@ export function TouchControllerPage({
     trackWidth: number;
     viewport: KeyboardViewport;
   } | null>(null);
-  const controllerSize = useControllerSize(controllerRef);
+  const controllerSize = useControllerSize(controllerRef, resizingDock);
   const controllerWidth = controllerSize.width;
   const fullKeyboard = keyboardWidth === "auto"
     && controllerWidth >= FULL_KEYBOARD_WHITE_KEYS * FULL_KEYBOARD_MIN_WHITE_KEY_PX;
@@ -272,9 +289,19 @@ export function TouchControllerPage({
     ? FULL_KEYBOARD_START_NOTE
     : windowBaseNote;
   const playable = connection === "online" && session.active_mode !== "idle";
+  // The portrait dock is the stylesheet's to draw, so it is the stylesheet's
+  // query that decides it. Working it out from the controller's own width
+  // disagreed with the CSS whenever the window was a little wider than 760px
+  // (the rail makes the controller narrower): the navigator was rendered
+  // with none of its rules, and the keys were squeezed to a strip.
   const sizingHeight = docked ? window.innerHeight : controllerSize.height;
-  const portraitDock = docked && controllerWidth <= 760 && sizingHeight > controllerWidth;
-  const portraitKeyboardNavigator = portraitDock && mode === "keyboard" && !fullKeyboard;
+  const portraitViewport = useMediaQuery(PORTRAIT_DOCK_QUERY);
+  const portraitDock = docked && portraitViewport;
+  // The range strip over the keys: in the portrait dock, and on the phone
+  // on its side, where the controller has the whole screen -- the only place
+  // it is not docked. There the keys used to fill the screen with no way to
+  // see or move the range but the menu's octave buttons.
+  const portraitKeyboardNavigator = (portraitDock || !docked) && mode === "keyboard" && !fullKeyboard;
   const minimumKeyboardViewportWidth = Math.min(
     FULL_KEYBOARD_WHITE_KEYS,
     visibleWhiteKeys,
@@ -325,32 +352,20 @@ export function TouchControllerPage({
     Math.max(minimumDockHeight, dockHeights[mode] ?? automaticDockHeight),
   );
   const regularControllerLayout = controllerWidth >= 761 && sizingHeight > 600;
-  const padGap = regularControllerLayout ? 9 : 7;
-  const padAreaWidth = Math.max(
-    1,
-    Math.min(920, controllerSize.width - (regularControllerLayout ? 28 : 14)),
-  );
-  const dockChromeHeight = docked ? regularControllerLayout ? 48 : 42 : 0;
-  const padSizingHeight = docked ? dockHeight - dockChromeHeight : controllerSize.height;
-  const padAreaHeight = Math.max(
-    1,
-    padSizingHeight - (regularControllerLayout ? 28 : 14),
-  );
-  const padCellHeight = Math.max(1, Math.min(
-    (padAreaHeight - padGap * (padMatrix.rows - 1)) / padMatrix.rows,
-    (padAreaWidth - padGap * (padMatrix.columns - 1)) /
-      padMatrix.columns / PAD_ASPECT_RATIO,
-  ));
-  const padCellWidth = padCellHeight * PAD_ASPECT_RATIO;
-  const padGridWidth = padCellWidth * padMatrix.columns + padGap * (padMatrix.columns - 1);
-  const padGridHeight = padCellHeight * padMatrix.rows + padGap * (padMatrix.rows - 1);
-  const padDensityClass = padCellHeight < 54
-    ? " micro"
-    : padCellHeight < 92
-      ? " compact"
-      : padCellHeight < 132
-        ? " condensed"
-        : "";
+  const padInputs = {
+    docked,
+    regular: regularControllerLayout,
+    controllerWidth: controllerSize.width,
+    controllerHeight: controllerSize.height,
+    rows: padMatrix.rows,
+    columns: padMatrix.columns,
+  };
+  const {
+    gap: padGap,
+    gridWidth: padGridWidth,
+    gridHeight: padGridHeight,
+    densityClass: padDensityClass,
+  } = padGridLayout({ ...padInputs, dockHeight });
 
   const activeInstance = session.instances.find(
     (instance) => instance.instance_id === session.active_instance_id,
@@ -611,9 +626,33 @@ export function TouchControllerPage({
       pointerId: event.pointerId,
       startY: event.clientY,
       height: dockHeight,
+      latest: null,
+      frame: null,
     };
     setResizingDock(true);
     hostHaptic("confirm");
+  };
+
+  // A drag draws the dock straight onto the page, once a frame, and tells
+  // React only when it ends. Committing every pointer move re-rendered the
+  // whole controller -- every key or pad -- twice a move, and wrote the
+  // height to storage each time; the FX drawer is light because what it
+  // holds is cheap to re-render, and this is not. The CSS variables written
+  // here are the ones render writes, so the commit at the end lands on the
+  // same values and nothing jumps.
+  const drawDock = () => {
+    const gesture = dockResizeRef.current;
+    const controller = controllerRef.current;
+    if (!gesture || !controller) return;
+    gesture.frame = null;
+    if (gesture.latest === null) return;
+    controller.style.setProperty("--controller-dock-height", `${gesture.latest}px`);
+    const grid = controller.querySelector<HTMLElement>(".touch-pad-grid");
+    if (grid) {
+      const pads = padGridLayout({ ...padInputs, dockHeight: gesture.latest });
+      grid.style.setProperty("--pad-grid-width", `${pads.gridWidth}px`);
+      grid.style.setProperty("--pad-grid-height", `${pads.gridHeight}px`);
+    }
   };
 
   const resizeDock = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -621,18 +660,26 @@ export function TouchControllerPage({
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    setCurrentDockHeight(Math.min(
+    gesture.latest = Math.min(
       maximumDockHeight,
       Math.max(minimumDockHeight, gesture.height + gesture.startY - event.clientY),
-    ));
+    );
+    gesture.frame ??= window.requestAnimationFrame(drawDock);
+  };
+
+  const commitDockResize = () => {
+    const gesture = dockResizeRef.current;
+    dockResizeRef.current = null;
+    if (gesture?.frame != null) window.cancelAnimationFrame(gesture.frame);
+    if (gesture?.latest != null) setCurrentDockHeight(gesture.latest);
+    setResizingDock(false);
   };
 
   const finishDockResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (dockResizeRef.current?.pointerId !== event.pointerId) return;
     event.preventDefault();
     event.stopPropagation();
-    dockResizeRef.current = null;
-    setResizingDock(false);
+    commitDockResize();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -704,10 +751,7 @@ export function TouchControllerPage({
         onPointerMove={resizeDock}
         onPointerUp={finishDockResize}
         onPointerCancel={finishDockResize}
-        onLostPointerCapture={() => {
-          dockResizeRef.current = null;
-          setResizingDock(false);
-        }}
+        onLostPointerCapture={commitDockResize}
         onDoubleClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -719,6 +763,33 @@ export function TouchControllerPage({
       </button>
       {portraitKeyboardNavigator ? (
         <div className="touch-keyboard-navigator" aria-label="Visible keyboard range">
+          {/* On the phone on its side this strip is the only bar there is:
+              Sustain and Panic sit in it, by the menu key, rather than a
+              menu away. The portrait dock has them in its own bar below. */}
+          {!docked ? (
+            <div className="touch-keyboard-navigator-actions">
+              <button
+                type="button"
+                className={sustain ? "active" : ""}
+                onClick={toggleSustain}
+                disabled={!playable}
+                aria-pressed={sustain}
+                aria-label="Sustain"
+                title="Sustain"
+              >
+                SUS
+              </button>
+              <button
+                type="button"
+                className="touch-panic"
+                onClick={panic}
+                aria-label="Panic"
+                title="Panic"
+              >
+                P
+              </button>
+            </div>
+          ) : null}
           <span className="touch-keyboard-navigator-label">A0</span>
           <div className="touch-keyboard-navigator-track">
             <div className="touch-keyboard-navigator-whites" aria-hidden="true" />
@@ -773,12 +844,24 @@ export function TouchControllerPage({
         </div>
       ) : null}
       <div className="touch-controller-dockbar">
+        {/* On a narrow screen the icons alone name these, so the bar keeps
+            room for Sustain, Panic and Settings. */}
         <div className="touch-mode-switch" aria-label="Touch controller layout">
-          <button className={mode === "keyboard" ? "active" : ""} onClick={() => changeMode("keyboard")}>
-            <Piano aria-hidden="true" /> Keyboard
+          <button
+            className={mode === "keyboard" ? "active" : ""}
+            onClick={() => changeMode("keyboard")}
+            aria-label="Keyboard"
+            title="Keyboard"
+          >
+            <Piano aria-hidden="true" /> <span className="touch-mode-label">Keyboard</span>
           </button>
-          <button className={mode === "pads" ? "active" : ""} onClick={() => changeMode("pads")}>
-            <Grid3X3 aria-hidden="true" /> Pads
+          <button
+            className={mode === "pads" ? "active" : ""}
+            onClick={() => changeMode("pads")}
+            aria-label="Pads"
+            title="Pads"
+          >
+            <Grid3X3 aria-hidden="true" /> <span className="touch-mode-label">Pads</span>
           </button>
         </div>
         <span className="touch-controller-range-summary">
@@ -786,8 +869,19 @@ export function TouchControllerPage({
             ? fullKeyboard ? "88 KEYS · A0—C8" : `${visibleWhiteKeys} WHITE KEYS · FROM C${octave}`
             : `${padMatrix.columns} × ${padMatrix.rows} PADS · FROM C${octave}`}
         </span>
-        <button className={sustain ? "active" : ""} onClick={toggleSustain} disabled={!playable}>Sustain</button>
-        <button onClick={panic}>Panic</button>
+        {/* Short, as on the strip over the keys: the bar keeps its room for
+            the keys that name what they do. */}
+        <button
+          className={sustain ? "active" : ""}
+          onClick={toggleSustain}
+          disabled={!playable}
+          aria-pressed={sustain}
+          aria-label="Sustain"
+          title="Sustain"
+        >
+          SUS
+        </button>
+        <button className="touch-panic" onClick={panic} aria-label="Panic" title="Panic">P</button>
         <button onClick={() => setMenuOpen(true)}><Menu aria-hidden="true" /> Settings</button>
       </div>
 

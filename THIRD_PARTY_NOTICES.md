@@ -1,16 +1,34 @@
 # Third-Party Notices
 
-RackForge release builds include RF-106 as a separately packaged portable
-instrument. Its `.rfplugin` archive retains its own license and notice files.
+RackForge Standard builds include the officially pinned plugins as separately
+packaged portable instruments and effects. Each `.rfplugin` archive retains its
+own license and notice files, and each plugin remains a software component
+separate from RackForge. The pinned versions are listed in
+`tools/fetch-official-plugins.py`, which is the one place they are recorded.
 
-## RF-106
+## Officially pinned plugins
 
-- Project: <https://github.com/kalexis1994/rackforge-plugin-rf-106>
-- Bundled release: `v0.2.6`
-- License: GPL-3.0-only
+| Package | Project | License |
+| --- | --- | --- |
+| `RF-Concert-Grand.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-concert-grand> | GPL-2.0-or-later |
+| `RF-106.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-106> | GPL-3.0-only |
+| `RF-5.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-5> | GPL-3.0-only |
+| `RF-7.rfplugin` | <https://github.com/kalexis1994/RF-7> | GPL-3.0-only |
+| `RF-Organ.rfplugin` | <https://github.com/kalexis1994/RF-Organ> | GPL-2.0-or-later |
+| `RF-Tines.rfplugin` | <https://github.com/kalexis1994/RF-Tines> | Proprietary, all rights reserved |
+| `RF-EPiano.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-epiano> | GPL-3.0-or-later |
+| `RF-Musette.rfplugin` | <https://github.com/kalexis1994/RF-Musette> | GPL-2.0-or-later |
+| `RF-Limiter.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-limiter> | GPL-3.0-only |
+| `RF-EQ.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-eq> | GPL-3.0-only |
+| `RF-Comp.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-comp> | GPL-3.0-only |
 
-RF-106 and RackForge remain separate software components. The complete RF-106
-license and notices are distributed inside `RF-106.rfplugin`.
+The complete license and notices of each plugin are distributed inside its own
+package. RF-Tines is redistributed by permission of the copyright holder and is
+not covered by RackForge's own license.
+
+The [RF-EPiano release](https://github.com/kalexis1994/rackforge-plugin-rf-epiano/releases/tag/v0.1.5)
+includes the corresponding source archive with the OpenWurli DSP, RackForge
+adapter, and build instructions.
 
 RackForge includes the Chakra Petch typeface for display typography.
 
@@ -33,6 +51,19 @@ RackForge VST3 uses the `vst3` Rust bindings generated from the VST 3 API.
 - License: MIT OR Apache-2.0
 
 Copyright (c) the vst3-rs contributors.
+
+RackForge for Windows reaches ASIO drivers through a modified copy of
+`asio-sys`, kept at `vendor/asio-sys`.
+
+## asio-sys (modified)
+
+- Project: <https://github.com/RustAudio/cpal/tree/master/asio-sys>
+- Version: 0.2.6, modified by the RackForge project as `0.2.6+rackforge.1`
+- License: Apache-2.0
+
+Copyright (c) Tom Gowan and the cpal contributors. The modification counts
+the ASIO driver's own reports of lost audio. `vendor/asio-sys/FORK.md` says
+what changed, and the full license is at `vendor/asio-sys/LICENSE`.
 
 RackForge's Web resource explorer includes the SVAR React File Manager and its
 SVAR UI support packages.
@@ -62,3 +93,15 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Every native RackForge host, and `rackforge-store` when it packs a component,
+optimises plugin components with Binaryen through the `wasm-opt` bindings.
+
+## Binaryen and wasm-opt-rs
+
+- Project: <https://github.com/WebAssembly/binaryen>, compiled into the host by
+  <https://github.com/brson/wasm-opt-rs>
+- Version: `wasm-opt` 0.116.1 (Binaryen version 116)
+- License: Binaryen Apache-2.0; `wasm-opt-rs` MIT OR Apache-2.0
+
+Copyright (c) the Binaryen contributors and the wasm-opt-rs contributors.

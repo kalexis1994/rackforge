@@ -1,0 +1,157 @@
+# Akai Professional MPK mini Play mk3, on Favorite 1 ("FAV 1"), the favorite
+# it starts on. Every value below is sourced in SOURCES.md; [UG] is the MPK
+# mini Play mk3 User Guide v1.0; [SX] Spectrasonics' Omnisphere setup for it,
+# which relies on FAV 1; [RT] Chris Ahlstrom's list of the messages it sends,
+# taken from the hardware; [SQ] seq66's manual, which lists its port.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.akai-mpk-mini-play-mk3"
+name = "MPK mini Play mk3"
+vendor = "Akai Professional"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "mpk-mini-play-mk3"
+
+# Its USB port: "MPK mini Play mk3 MIDI 1" on Linux [SQ aplaymidi -l]; the
+# model's name, "MPK mini Play mk3", elsewhere. "mk3" keeps the first MPK
+# mini Play out, and "mpk mini 3" is never in its name.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["mpk mini play mk3"]
+
+# Knobs: four 270-degree knobs [UG items 17-20], in two banks [UG item 16].
+# Bank A sends CC 70-73 and bank B CC 74-77, on the keyboard's channel, 1
+# [SX "Knob 1 (CC#70)" to "Knob 8 (CC#77)", bank A then B, in FAV 1; RT
+# "B0 46" to "B0 4D"]. With the internal sounds on, the same knobs also set
+# the internal filter, resonance, reverb, chorus, attack, release and EQ
+# [UG; RT]. The two banks fill the first row.
+[[inputs]]
+id = "knob-1"
+name = "Knob 1 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 70 }
+slot = "control-1.1"
+
+[[inputs]]
+id = "knob-2"
+name = "Knob 2 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 71 }
+slot = "control-1.2"
+
+[[inputs]]
+id = "knob-3"
+name = "Knob 3 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 72 }
+slot = "control-1.3"
+
+[[inputs]]
+id = "knob-4"
+name = "Knob 4 (bank A)"
+kind = "knob"
+group = "Knobs, bank A"
+midi = { channel = 0, cc = 73 }
+slot = "control-1.4"
+
+[[inputs]]
+id = "knob-5"
+name = "Knob 1 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 74 }
+slot = "control-1.5"
+
+[[inputs]]
+id = "knob-6"
+name = "Knob 2 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 75 }
+slot = "control-1.6"
+
+[[inputs]]
+id = "knob-7"
+name = "Knob 3 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 76 }
+slot = "control-1.7"
+
+[[inputs]]
+id = "knob-8"
+name = "Knob 4 (bank B)"
+kind = "knob"
+group = "Knobs, bank B"
+midi = { channel = 0, cc = 77 }
+slot = "control-1.8"
+
+# The pads are not declared: the notes they send follow the drum kit chosen
+# [RT, the Standard Set: 36, 38, 42, 46, 40, 45, 51, 49 on channel 10], and
+# no public source gives FAV 1's pads with the internal sounds off (see
+# SOURCES.md).
+
+# The joystick, on the keyboard's channel: left and right bend the pitch, up
+# and down send CC 1, the modulation wheel [RT "E0", "B0 01"; UG item 3].
+[[inputs]]
+id = "joystick-x"
+name = "Joystick left / right"
+kind = "wheel"
+group = "Joystick"
+midi = { channel = 0, pitch_bend = true }
+
+[[inputs]]
+id = "joystick-y"
+name = "Joystick up / down"
+kind = "wheel"
+group = "Joystick"
+midi = { channel = 0, cc = 1 }
+slot = "mod-wheel"
+
+# The sustain input [UG rear panel item 4], CC 64 on the keyboard's channel
+# [RT "B0 40", 0 or 127].
+[[inputs]]
+id = "sustain"
+name = "Sustain pedal"
+kind = "pedal"
+group = "Pedals"
+midi = { channel = 0, cc = 64 }
+
+# RackForge's default meanings for eight knobs and no faders: tone on bank
+# A, where the internal filter and resonance sit, the amp envelope on bank B.
+[[roles]]
+input = "knob-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "knob-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "knob-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "knob-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "knob-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "knob-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "knob-8"
+role = "synth.envelope.amp.release"

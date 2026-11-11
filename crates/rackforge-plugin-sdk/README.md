@@ -85,9 +85,9 @@ is a complete instrument in freestanding C, about 2 KB compiled.
 
 ## What the SDK gives you
 
-- **`Processor`** — `prepare`, `process`, `reset`, parameters, and optional
-  state, presets and external resources. Anything you do not implement is
-  declined for you.
+- **`Processor`** — `prepare`, `process`, `reset`, parameters, processing
+  latency, and optional state, presets and external resources. The default
+  latency is zero; anything else you do not implement is declined for you.
 - **`export_processor!`** — generates every export the host looks up, with the
   argument checking and buffer bookkeeping.
 - **MIDI at both widths.** `MidiEvent` for MIDI 1.0, and `MidiEvent2` for
@@ -97,6 +97,14 @@ is a complete instrument in freestanding C, about 2 KB compiled.
   while single-core hosts run the identical component sequentially.
 
 `#![no_std]`, no allocator, no dependencies.
+
+## Building
+
+Components are built with SIMD: for `wasm32-unknown-unknown` the SDK does not
+compile without `-C target-feature=+simd128`, which every RackForge host
+executes. The flag, the stack size a voice pool needs, and why LTO makes a
+component slower rather than faster are in "Building a fast component" in
+[docs/PLUGIN_DEVELOPMENT.md](https://github.com/kalexis1994/rackforge/blob/main/docs/PLUGIN_DEVELOPMENT.md).
 
 ## Packaging
 

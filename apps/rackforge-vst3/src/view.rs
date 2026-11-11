@@ -192,6 +192,21 @@ impl IPlugViewTrait for RackForgeView {
                     };
                     diagnostic::write(format!("view.page_load event={event} url={url:?}"));
                 })
+                // Inside a DAW a WebView2 window of its own would float free of
+                // the plug-in. A link that asks for a new window -- About's
+                // links to the project and to RackForge Web -- opens in the
+                // system browser instead, and nothing else opens at all.
+                .with_new_window_req_handler(|url, _features| {
+                    if (url.starts_with("https://github.com/kalexis1994/")
+                        || url.starts_with("https://kalexis1994.github.io/rackforge/"))
+                        && let Err(error) = webbrowser::open(&url)
+                    {
+                        diagnostic::write(format!(
+                            "view could not open {url:?} in the system browser: {error}"
+                        ));
+                    }
+                    wry::NewWindowResponse::Deny
+                })
                 .with_ipc_handler(move |request| {
                     let Ok(message) = serde_json::from_str::<UiMessage>(request.body()) else {
                         return;

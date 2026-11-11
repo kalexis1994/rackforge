@@ -40,7 +40,8 @@ To hear your first sound:
 
 1. Open RackForge Web and click or tap once to enable browser audio.
 2. Open **Touch Controller** and play the on-screen keyboard or pads.
-3. Open **PLAY** to choose Concert Grand or RF-106 and select a program.
+3. Open **PLAY** to choose an included instrument such as Concert Grand or
+   RF-Tines and select a program.
 4. Optionally connect a USB MIDI keyboard and allow MIDI access when asked.
 
 Chrome and Edge provide the most complete Web MIDI support. Firefox asks for
@@ -92,20 +93,12 @@ Use **PLAY** when you want one sound quickly. Use **LIVE** when the arrangement
 itself matters. RackForge keeps instrument state separate from the performance
 graph, so changing stage routing does not rewrite the plugin.
 
-## Standard and Minimal editions
+## Native releases
 
-Native CI builds are published in two editions for every supported platform:
-
-- **Standard** includes Concert Grand and the officially pinned instruments —
-  today RF-106, RF-5 and RF-7 — so a new installation can be played
-  immediately.
-- **Minimal** includes no instrument plugins. It keeps the complete RackForge
-  host, Plugin Manager, controller support, and performance tools so you can
-  install only the instruments you want.
-
-Both editions use the same runtime and can install the same `.rfplugin`
-packages. The edition only controls what is bundled at build time; it does not
-limit features or plugin compatibility.
+Each native release includes Concert Grand and the officially pinned instruments
+— today RF-106, RF-5, RF-7, RF-Organ, RF-Tines and RF-Musette — so a new installation can
+be played immediately. You can install other `.rfplugin` packages through the
+Plugin Manager.
 
 ## Instruments and portable plugins
 
@@ -118,12 +111,29 @@ Standard installations include:
 - **RF-5**, a five-voice programmable polyphonic synthesizer.
 - **RF-7**, a six-operator FM instrument with its own panel, voice editor and
   cartridge reader, built from the instrument's own firmware tables.
+- **RF-Organ**, a physically modelled tonewheel organ: two drawbar manuals and
+  a pedal clavier played from one MIDI bus, percussion, scanner vibrato and an
+  integrated rotary speaker.
+- **RF-Tines**, a physically modelled 73-key electric piano with playable and
+  physical voicing panels, factory programs and portable program files.
+  It was called RF-73 until version 0.2.0. The rename changed its plugin
+  identity to `org.rackforge.rftines`, so a RackForge installation that still
+  holds RF-73 treats RF-Tines as a separate instrument: sessions, presets and
+  `.rf73` program files saved under the old identity do not carry over, and
+  the old package stays installed until it is removed in Plugin Manager.
+- **RF-Musette**, a physically modelled piano accordion: every reed a
+  self-oscillating free reed under one bellows, the treble's 14 registers and
+  the Stradella or free bass, the bellows played by the wheel or Expression
+  or each key's touch, and its registers on a controller's pads.
 
-Other open-source instruments include:
+Source and releases for these instruments:
 
 - [RF-106 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-106)
 - [RF-5 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-5)
 - [RF-7 source and releases](https://github.com/kalexis1994/RF-7)
+- [RF-Organ source and releases](https://github.com/kalexis1994/RF-Organ)
+- [RF-Tines source and releases](https://github.com/kalexis1994/RF-Tines)
+- [RF-Musette source and releases](https://github.com/kalexis1994/RF-Musette)
 - [RF-Soundfonts](https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts),
   a SoundFont instrument that includes the sampled YDP Grand Piano
 
@@ -171,6 +181,7 @@ between the native platforms without creating a platform-specific preset.
 | **Android ARM64** | A compact touchscreen instrument | Low-latency native audio and USB MIDI/audio |
 | **Raspberry Pi OS ARM64** | A dedicated instrument that starts at boot | ALSA, USB MIDI, Web control, and system services |
 | **Linux x86-64** | A PC-based headless or Web-controlled instrument | ALSA, Linux MIDI, Web control, and system services |
+| **Linux desktop (Flatpak)** | The desktop app on a Linux computer that is used for other things too | PipeWire or PulseAudio, ALSA MIDI, and the same window as on Windows |
 | **Windows VST3 x86-64** | Opening RackForge as an instrument inside a DAW | DAW-provided MIDI, timing, state, and stereo audio |
 
 Native packages are available from the
@@ -262,6 +273,17 @@ This edition uses the same headless Core and adaptive Web interface as
 Raspberry Pi, built natively for 64-bit Intel and AMD computers. See the
 [Linux x86-64 guide](platforms/linux-x86_64/README.md).
 
+### Linux desktop (Flatpak)
+
+1. Download `RackForge-Linux-x86_64.flatpak` from the latest release.
+2. Add Flathub once, for the GNOME runtime it runs on:
+   `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`
+3. Install it for your user: `flatpak install --user RackForge-Linux-x86_64.flatpak`.
+
+It is the same desktop application as on Windows, sharing the sound card
+through the desktop's sound server. See the
+[Flatpak guide](platforms/linux-flatpak/README.md).
+
 ### Windows VST3 preview
 
 The release includes an installable `RackForge.vst3` bundle. Copy that complete
@@ -298,6 +320,10 @@ provides:
 The same controller package is used on Windows, Linux x86-64, Android, and
 Raspberry Pi.
 
+The browser lists the same declarative controller catalog for inspection. Its
+Web MIDI control integration currently supports only the KeyLab Essential mk3;
+controller maps are saved by the native hosts, not by the browser demo.
+
 ## Save it, move it, play it
 
 RackForge restores the active mode, instrument, program, master controls, and
@@ -331,8 +357,8 @@ Current limitations:
 
 - Windows packages are not code-signed.
 - Android packages are ARM64 and debug-signed.
-- Linux x86-64 currently uses a headless/Web interface rather than a native
-  desktop window.
+- The Linux x86-64 archive uses a headless/Web interface; the Flatpak is the
+  native desktop window.
 - Raspberry Pi requires a 64-bit Raspberry Pi OS userspace.
 - Optional instruments such as RF-Soundfonts are separate downloads.
 - The optional Desktop HTTP server is disabled by default.

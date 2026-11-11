@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=RackForge
+GenericName=Instrument host
+Comment=Play RackForge's instruments and effects from a MIDI keyboard
+Exec=rackforge
+Icon=io.github.kalexis1994.RackForge
+Terminal=false
+Categories=AudioVideo;Audio;Music;Midi;
+Keywords=synthesizer;piano;organ;accordion;MIDI;instrument;plugin;
+StartupWMClass=io.github.kalexis1994.RackForge
+SingleMainWindow=true

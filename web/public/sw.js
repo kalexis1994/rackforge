@@ -13,9 +13,12 @@
  *   soon as it exists, and fall back to the cached page when offline;
  * * build assets carry a content hash in their name, so once cached they are
  *   answered from the cache and never revalidated;
- * * everything else same-origin — the host component, the packaged plugins,
- *   icons and fonts — is answered from the cache and refreshed in the
- *   background, so a visit is instant and the next one is current.
+ * * packaged plugin Web files and the host's plugin kit go to the network
+ *   first, with an offline cache fallback. Their relative script and style
+ *   URLs have no build hash, so serving yesterday's copy beside today's
+ *   plugin page can leave PLAY waiting for a bridge that never starts;
+ * * other same-origin files are answered from the cache and refreshed in the
+ *   background.
  */
 
 const CACHE = "rackforge-v2";
@@ -53,12 +56,20 @@ const IMMUTABLE = "/assets/";
 const PLUGIN_ASSETS = "/plugin-assets/";
 const PLUGIN_ASSET_CACHE = "rackforge-plugin-assets";
 const PLUGIN_ASSET_PROTOCOL = 1;
+const PACKAGED_PLUGIN_WEB = "/demo/rackforge/plugins/";
+const PLUGIN_KIT = "/rackforge-plugin-kit/";
 
 // A page must distinguish a current RackForge worker from an older controller
 // that happens to exist. Treating any controller as capable let a freshly
 // deployed UI advertise plugin URLs through yesterday's worker, which then
 // forwarded them to GitHub Pages and cached a 404 in the iframe.
 self.addEventListener("message", (event) => {
+  if (event.data?.kind === "rackforge-plugin-assets-claim") {
+    // A cache-bypassing navigation can leave an existing tab uncontrolled.
+    // Registering the same active worker does not run activate again.
+    event.waitUntil(self.clients.claim());
+    return;
+  }
   if (event.data?.kind !== "rackforge-plugin-assets-capabilities") return;
   event.ports[0]?.postMessage({
     kind: "rackforge-plugin-assets-capabilities",
@@ -132,6 +143,16 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(pluginAsset(request).then(isolated));
     return;
   }
+  if (!DEVELOPMENT && (
+    (url.pathname.includes(PACKAGED_PLUGIN_WEB) && url.pathname.includes("/web/")) ||
+    url.pathname.includes(PLUGIN_KIT)
+  )) {
+    // A packaged plugin's iframe is a navigation too. It must not replace
+    // the app shell stored at "./", and its unversioned scripts must not be
+    // paired with a newer HTML page from a deployment.
+    event.respondWith(networkFirstAsset(request).then(isolated));
+    return;
+  }
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request).then(isolated));
     return;
@@ -160,6 +181,19 @@ async function networkFirst(request) {
     return response;
   } catch (error) {
     const cached = (await cache.match(request)) ?? (await cache.match("./"));
+    if (cached) return cached;
+    throw error;
+  }
+}
+
+async function networkFirstAsset(request) {
+  const cache = await caches.open(CACHE);
+  try {
+    const response = await fetch(request);
+    if (response.ok) await cache.put(request, response.clone());
+    return response;
+  } catch (error) {
+    const cached = await cache.match(request);
     if (cached) return cached;
     throw error;
   }

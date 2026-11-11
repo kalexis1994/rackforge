@@ -10,6 +10,16 @@ import type { PluginInstance, PluginWebDescriptor } from "./types";
  */
 export type RackPluginRole = "instrument" | "effect";
 
+const RACK_SLOT_STUB_PREFIX = "rack-slot.";
+
+/**
+ * Whether an instance stands in for a plugin the host is not running: it
+ * carries no programs, and a Rack editor asks the host for them.
+ */
+export function isRackSlotStub(instance: PluginInstance): boolean {
+  return instance.instance_id.startsWith(RACK_SLOT_STUB_PREFIX);
+}
+
 /**
  * Builds the plugin surface available to Rack and Song Part editors.
  *
@@ -43,7 +53,7 @@ export function buildRackPluginInstances(
         !plugin.transitioning,
     )
     .map((plugin) => liveInstances.get(plugin.plugin_id) ?? {
-      instance_id: "rack-slot." + plugin.plugin_id,
+      instance_id: RACK_SLOT_STUB_PREFIX + plugin.plugin_id,
       plugin_id: plugin.plugin_id,
       plugin_name: plugin.plugin_name,
       ui_layouts: plugin.surfaces.map((surface) => surface.kind),

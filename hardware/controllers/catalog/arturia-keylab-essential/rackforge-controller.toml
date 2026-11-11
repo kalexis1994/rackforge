@@ -1,0 +1,417 @@
+# Arturia KeyLab Essential 49, 61 and 88 (the first generation, before the
+# mk3), in the DAW map RackForge puts it in on connect. Every value below is
+# sourced in SOURCES.md; [UM] is the KeyLab Essential User Manual 1.0, [BW]
+# Bitwig's KeyLab Essential extension, [AB] Ableton Live 12's KeyLab_Essential
+# script. [BW] and [AB] are official software: both recall the keyboard's DAW
+# memory with the same message and read the same controls.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.arturia-keylab-essential"
+name = "KeyLab Essential"
+vendor = "Arturia"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "keylab-essential"
+
+# The controls speak on the second port pair, the DAW port: "MIDIIN2 (Arturia
+# KeyLab Essenti" / "MIDIOUT2 (Arturia KeyLab Essent" on Windows, whose names
+# are cut before the size, "Arturia KeyLab Essential NN DAW In" / "... DAW
+# Out" on a Mac, "Arturia KeyLab Essential NNMID #2" on Linux [BW port names].
+# The three sizes have the same controls [UM], so one package reads them
+# all. The keys, wheels and pedal stay on the first port and play as any
+# keyboard does. The KeyLab Essential mk3 names itself "KL Essential".
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["keylab essent"]
+name_contains_any = ["midiin2", "daw in", "#2"]
+
+# Where the mode messages go: the same port, as an output.
+[[devices.endpoints]]
+role = "setup_output"
+name_contains = ["keylab essent"]
+name_contains_any = ["midiout2", "daw out", "#2"]
+
+# On connect, RackForge sends what Bitwig sends when it takes the keyboard [BW
+# init]: the DAW preset in Mackie mode (F0 00 20 6B 7F 42 02 00 40 51 00 F7),
+# the protocol its manual gives the DAW Command Center [UM 2.10], then a recall
+# of memory 2, the DAW preset (F0 00 20 6B 7F 42 05 02 F7). Ableton recalls
+# the same memory with the same message [AB sysex.py, DAW_MEMORY_PRESET_INDEX
+# = 2].
+[permissions]
+midi_input = true
+midi_output = true
+sysex = true
+
+[[on_connect]]
+message = "F0 00 20 6B 7F 42 02 00 40 51 00 F7"
+to = "setup_output"
+
+[[on_connect]]
+message = "F0 00 20 6B 7F 42 05 02 F7"
+to = "setup_output"
+
+# Faders 1-9: pitch bend, one channel each, 1-9; in the DAW map faders 1-8 are
+# channel volumes and fader 9 the master [UM 2.8; BW pitch bend on channels
+# 0-9; AB Fader_n on channel n, Master_Fader on channel 9]. Pitch bend from a
+# fader must never bend an instrument: they never play. Faders 1-8 take the
+# first row; the ninth, the master fader, no slot.
+
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 0, pitch_bend = true }
+slot = "control-1.1"
+plays = false
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 1, pitch_bend = true }
+slot = "control-1.2"
+plays = false
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 2, pitch_bend = true }
+slot = "control-1.3"
+plays = false
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 3, pitch_bend = true }
+slot = "control-1.4"
+plays = false
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { channel = 4, pitch_bend = true }
+slot = "control-1.5"
+plays = false
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { channel = 5, pitch_bend = true }
+slot = "control-1.6"
+plays = false
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { channel = 6, pitch_bend = true }
+slot = "control-1.7"
+plays = false
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { channel = 7, pitch_bend = true }
+slot = "control-1.8"
+plays = false
+
+[[inputs]]
+id = "fader-9"
+name = "Master fader"
+kind = "fader"
+group = "Faders"
+midi = { channel = 8, pitch_bend = true }
+plays = false
+
+# Encoders 1-8: CC 16-23, channel 1, relative, the sign in bit 6 [BW CC 0x10 +
+# index, decodeRelativeCC; AB create_ringed_encoder(index + 16),
+# relative_signed_bit]. They take the second row. The ninth encoder's DAW
+# message is in neither script: it is not declared.
+
+[[inputs]]
+id = "encoder-1"
+name = "Encoder 1"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 16 }
+encoder = "relative_sign_magnitude"
+slot = "control-2.1"
+plays = false
+
+[[inputs]]
+id = "encoder-2"
+name = "Encoder 2"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 17 }
+encoder = "relative_sign_magnitude"
+slot = "control-2.2"
+plays = false
+
+[[inputs]]
+id = "encoder-3"
+name = "Encoder 3"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 18 }
+encoder = "relative_sign_magnitude"
+slot = "control-2.3"
+plays = false
+
+[[inputs]]
+id = "encoder-4"
+name = "Encoder 4"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 19 }
+encoder = "relative_sign_magnitude"
+slot = "control-2.4"
+plays = false
+
+[[inputs]]
+id = "encoder-5"
+name = "Encoder 5"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 20 }
+encoder = "relative_sign_magnitude"
+slot = "control-2.5"
+plays = false
+
+[[inputs]]
+id = "encoder-6"
+name = "Encoder 6"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 21 }
+encoder = "relative_sign_magnitude"
+slot = "control-2.6"
+plays = false
+
+[[inputs]]
+id = "encoder-7"
+name = "Encoder 7"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 22 }
+encoder = "relative_sign_magnitude"
+slot = "control-2.7"
+plays = false
+
+[[inputs]]
+id = "encoder-8"
+name = "Encoder 8"
+kind = "encoder"
+group = "Encoders"
+midi = { channel = 0, cc = 23 }
+encoder = "relative_sign_magnitude"
+slot = "control-2.8"
+plays = false
+
+# The wheel: CC 60, relative as the encoders [BW Wheel 0x3C]. It browses: no slot.
+
+[[inputs]]
+id = "wheel"
+name = "Wheel"
+kind = "encoder"
+group = "Navigation"
+midi = { channel = 0, cc = 60 }
+encoder = "relative_sign_magnitude"
+plays = false
+
+# Buttons: notes on channel 1, the Mackie Control notes, pressed at velocity 64
+# and above [UM 2.10 "Mackie HUI"; BW onDAWPortMidi; AB create_button on
+# channel 1]. A DAW protocol's buttons are never notes to play: they never
+# play. Rewind and fast-forward step the main selector, Prev and Next the
+# second; Save, Metro and Undo take their labelled switches.
+
+[[inputs]]
+id = "play"
+name = "Play/Pause"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 94 }
+plays = false
+
+[[inputs]]
+id = "stop"
+name = "Stop"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 93 }
+plays = false
+
+[[inputs]]
+id = "record"
+name = "Record"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 95 }
+plays = false
+
+[[inputs]]
+id = "loop"
+name = "Loop"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 86 }
+plays = false
+
+[[inputs]]
+id = "rewind"
+name = "Rewind"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 91 }
+slot = "step.down"
+plays = false
+
+[[inputs]]
+id = "forward"
+name = "Fast-forward"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 92 }
+slot = "step.up"
+plays = false
+
+[[inputs]]
+id = "save"
+name = "Save"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 80 }
+slot = "switch-3.1"
+plays = false
+
+[[inputs]]
+id = "metro"
+name = "Metro"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 89 }
+slot = "switch-3.3"
+plays = false
+
+[[inputs]]
+id = "undo"
+name = "Undo"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 81 }
+slot = "switch-3.4"
+plays = false
+
+[[inputs]]
+id = "punch"
+name = "Punch"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 87 }
+plays = false
+
+[[inputs]]
+id = "punch-out"
+name = "Punch out"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 88 }
+plays = false
+
+[[inputs]]
+id = "previous"
+name = "Prev"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 48 }
+slot = "step-2.down"
+plays = false
+
+[[inputs]]
+id = "next"
+name = "Next"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 49 }
+slot = "step-2.up"
+plays = false
+
+[[inputs]]
+id = "bank-previous"
+name = "Prev, with Bank"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 46 }
+plays = false
+
+[[inputs]]
+id = "bank-next"
+name = "Next, with Bank"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 47 }
+plays = false
+
+[[inputs]]
+id = "wheel-previous"
+name = "Wheel Prev"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 98 }
+plays = false
+
+[[inputs]]
+id = "wheel-next"
+name = "Wheel Next"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 99 }
+plays = false
+
+[[inputs]]
+id = "preset"
+name = "Preset"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 100 }
+plays = false
+
+[[inputs]]
+id = "category"
+name = "Cat/Char"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 101 }
+plays = false
+
+[[inputs]]
+id = "wheel-click"
+name = "Wheel click"
+kind = "button"
+group = "Buttons"
+midi = { channel = 0, note = 84 }
+plays = false
+
+# Play and Stop take the transport.
+[[actions]]
+input = "play"
+target = "transport_play"
+
+[[actions]]
+input = "stop"
+target = "transport_stop"

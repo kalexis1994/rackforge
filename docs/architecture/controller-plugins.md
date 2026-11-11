@@ -2,6 +2,8 @@
 
 This document describes the current architecture. Historical implementation
 notes live in [Controller package history](../history/controller-plugins-2026-08.md).
+[Schema 2](controller-packages-v2.md) layers a package around the
+controller's own inputs; the runtime described here is what it lowers to.
 
 ## Runtime matrix
 

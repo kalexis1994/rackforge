@@ -94,6 +94,9 @@ RackForge responds with `kind: "context"`, the requested surface, the plugin's
 own instance state, an optional matching program draft, an optional matching
 audition lease and limited host state. A fresh context is sent whenever the
 session revision changes, and whenever any value inside it changes.
+The optional `isolated` boolean is `true` for a Rack or Song Part's private
+plugin-state editor and `false` for the ordinary PLAY surface. Plugins that do
+not need to distinguish those contexts can ignore it.
 
 ### Host state
 
@@ -150,6 +153,31 @@ Plugin calls are requests with a unique string `request_id`:
 The host validates the method, surface, target and value, derives the plugin
 instance ID itself and returns a response. It never accepts a raw Core command
 from plugin JavaScript.
+
+### Canonical parameter stream
+
+After the initial `plugin.parameters` request supplies the schema and current
+values, RackForge sends a `parameter_changed` event whenever a value changes:
+
+```json
+{
+  "protocol": "rackforge.plugin.web@1",
+  "kind": "parameter_changed",
+  "parameter_index": 8,
+  "value": -3.25
+}
+```
+
+The stream includes writable controls and read-only meters. Values are finite,
+canonical plugin values, and unchanged values are suppressed. A surface should
+patch the matching control or meter from this event instead of repeatedly
+calling `plugin.parameters`. It may ignore an event while the user is holding
+that same control, then accept the next canonical event after the gesture.
+
+The stream is UI telemetry rather than sample-accurate automation. Delivery can
+be coalesced, and a hidden page should not infer elapsed audio time from it.
+Calling `plugin.parameters` remains the way to bootstrap a surface, recover
+after reconnect, or load a changed schema.
 
 ## Current v1 methods
 
@@ -231,6 +259,12 @@ from plugin JavaScript.
 - `plugin.set_program_name`: available to `PLAY` and `CONFIG`; changes the
   active draft's portable program name without exposing plugin document
   internals.
+- `plugin.replace_program_draft`: available only to `CONFIG`; replaces the
+  active draft with a complete program document. The request carries the
+  active `draft_id` and a `document` object, limited to 16 KiB after JSON
+  encoding. RackForge parses the typed program envelope and the plugin validates
+  its payload before the draft changes. This is intended for portable program
+  file import; it does not expose plugin storage paths or bypass atomic saving.
 - `plugin.restore_program_preview`: available to `PLAY` and `CONFIG`; restores
   the last confirmed draft after transient previews.
 - `plugin.save_program`: available to `PLAY` and `CONFIG`; persists the active
@@ -244,6 +278,169 @@ appear. New plugin interfaces should keep musical program selection and editing
 in `PLAY`. `CONFIG` is reserved for infrequent setup such as libraries,
 resources, compatibility options and plugin diagnostics. Program methods remain
 available to `CONFIG` so existing plugin packages keep working while migrating.
+
+## Program selector
+
+RackForge's own instruments choose programs the same way, so a player
+finds them alike on stage: `<rf-program-select>`, placed in the plugin's own
+header. It is optional. A plugin that draws its own selector is not
+misbehaving; RackForge still prescribes no layout or style.
+
+RackForge serves the element and injects it into every plugin frame, so a
+plugin never bundles it and every plugin gets the same fixes. It needs no
+code:
+
+```html
+<header class="my-header">
+  <rf-program-select></rf-program-select>
+</header>
+```
+
+It reads `instance.sounds`, `instance.banks` and
+`instance.selected_sound_id` from the context, shows the program with its
+place in the list and its bank, steps with ◀ ▶ (wrapping round), and opens a
+panel on its name: a search that finds by name, bank, detail or number and
+forgives accents, word order and missing letters; bank filters; the current
+program marked. Keyboard: arrows, Page Up/Down, Enter, Escape, and typing
+searches. On a touch screen the panel does not throw up the keyboard until
+the search is touched, and fills the screen on a phone. A choice goes to the
+host as `plugin.select_sound`; the name shows it at once and returns to the
+old program if the host refuses.
+
+Attributes:
+
+| attribute | effect |
+| --- | --- |
+| `arrows="none"` | no ◀ ▶ |
+| `hide-number` | no "12/128" |
+| `hide-bank` | no bank beside the name |
+| `stay-open` | the panel stays open after a choice, to audition |
+| `placeholder` | the search's placeholder ("Search programs") |
+| `label` | the spoken name of what is chosen ("Program") |
+| `empty-label` | the text with no programs ("No programs") |
+| `all-label`, `no-match-label` | the "All" bank chip and the text for a search that finds nothing ("No program matches") |
+| `disabled` | nothing can be chosen, e.g. while the plugin saves a program; also the `disabled` property |
+| `fit` | a long name is lettered smaller, down to the given share of its size (`fit="0.7"`; 0.62 when empty), before an ellipsis cuts it |
+| `slide` | the name slides in from the side the choice moved towards |
+| `source="manual"` | the element does not talk to the host: set `programs`, `banks` and `value` yourself and act on its events |
+
+Events (bubbling, composed): `rf-program-select` (cancelable; `detail`:
+`{ id, program }`; cancel it to choose by your own path), `rf-program-error`
+(`detail.error`, after the host refused), `rf-program-open`,
+`rf-program-close`.
+
+It is styled as the plugin's own. Custom properties set on the element:
+
+| property | default |
+| --- | --- |
+| `--rf-ps-font` | `inherit` |
+| `--rf-ps-color`, `--rf-ps-muted` | the text colour, and 60 % of it |
+| `--rf-ps-accent` | `#6aa9ff`: focus, the current program, the chosen bank |
+| `--rf-ps-background` | `transparent`: the bar's buttons |
+| `--rf-ps-surface`, `--rf-ps-surface-color` | the panel and its text |
+| `--rf-ps-border`, `--rf-ps-radius`, `--rf-ps-height`, `--rf-ps-gap` | lines, corners, the bar's height, spacing |
+| `--rf-ps-backdrop` | behind the panel |
+
+Every piece is also a part, for anything beyond the properties:
+`bar`, `prev`, `next`, `step`, `name`, `number`, `name-text`, `bank`,
+`dialog`, `header`, `search`, `close`, `banks`, `bank-chip`,
+`bank-chip-selected`, `list`, `item`, `item-selected`, `item-number`,
+`item-name`, `item-detail`, `note`. The arrows are slots (`slot="prev"`,
+`slot="next"`) for a plugin's own icons:
+
+```css
+rf-program-select { --rf-ps-accent: #e0a040; --rf-ps-height: 36px; }
+rf-program-select::part(name) { background: #111; letter-spacing: 0.08em; }
+rf-program-select::part(item-selected) { background: #3a2a10; }
+```
+
+The source is `web/src/plugin-kit/`. The build writes it unhashed to
+`rackforge-plugin-kit/program-select.js`, beside what the kit's elements
+share (`rackforge-plugin-kit/hostLink.js`).
+
+## Program save dialog
+
+`<rf-program-save>` saves what is playing as a program, with the program
+editing methods above. RackForge injects it beside the selector; a plugin
+places the element anywhere (it draws nothing until opened) and opens it
+from its own control, a RECORD key or a menu:
+
+```html
+<rf-program-save id="save"></rf-program-save>
+<script>
+  recordKey.addEventListener("click", () => save.open());
+</script>
+```
+
+It shows a name field, started with the current program's name, and offers
+to save a new program or, when the current program is the plugin's own
+(`editable` in `instance.sounds`), to save over it. Enter does the first of
+those, unless `primary` says otherwise; Escape and a tap outside cancel. A
+save asks `plugin.begin_program_edit` (with `program_id: null` for a new
+program), waits for the draft in the next context, then
+`plugin.set_program_name` and `plugin.save_program`; if a step fails it
+drops the draft with `plugin.cancel_program`, stays open and shows why.
+Names follow RackForge's rule: 1 to 64 characters, no control characters.
+
+Methods and properties: `open({ name?, mode? })`, `close()`,
+`save(mode?)` (`"new"` or `"replace"`), `done()` and `fail(error)` for a
+plugin's own path, `name` (the field), `isOpen`, `busy`, `canReplace`.
+
+Attributes:
+
+| attribute | effect |
+| --- | --- |
+| `primary="new"` / `"replace"` | what Enter does (replacing, when offered, by default) |
+| `source="manual"` | the element does not talk to the host; the plugin saves on `rf-program-save` and calls `done()` or `fail()`; `can-replace` then says whether replacing is offered |
+| `disabled` | nothing can be saved |
+| `hide-cancel`, `hide-title` | no Cancel button, no title row |
+| `heading`, `label`, `placeholder` | the title ("Save program"; not `title`, which browsers show as a tooltip), the field's label ("Name") and placeholder |
+| `save-label`, `replace-label`, `cancel-label` | the buttons ("Save as new", "Replace", "Cancel") |
+| `current-label` | before the current program's name ("Current program:") |
+| `default-name` | the name offered when there is no current program |
+| `busy-label` | the status while saving ("Saving…") |
+| `empty-error`, `long-error`, `control-error`, `error-label` | what a bad name, and a refused save, say |
+
+The element sets `busy` while saving and `can-replace` when the current
+program can be saved over, for styling (`rf-program-save[busy]`).
+
+Events (bubbling, composed): `rf-program-save` (cancelable; `detail`:
+`{ name, mode, programId }`; cancel it to save by your own path and call
+`done()` or `fail()`), `rf-program-saved` (the same `detail`),
+`rf-program-save-error` (`detail.error`), `rf-program-save-open`,
+`rf-program-save-close` (`detail.reason`: `"saved"` or `"cancel"`).
+
+It is styled as the plugin's own. Custom properties:
+
+| property | default |
+| --- | --- |
+| `--rf-save-font`, `--rf-save-color`, `--rf-save-muted` | inherited font, `#e8ebef`, and 60 % of it |
+| `--rf-save-accent`, `--rf-save-danger` | focus and the primary button; the error text |
+| `--rf-save-surface`, `--rf-save-border`, `--rf-save-radius` | the dialog |
+| `--rf-save-backdrop`, `--rf-save-width`, `--rf-save-padding`, `--rf-save-gap` | behind it, its width and spacing |
+| `--rf-save-field-height`, `--rf-save-field-font`, `--rf-save-field-color`, `--rf-save-field-background` | the name field |
+| `--rf-save-button-height`, `--rf-save-button-background`, `--rf-save-primary-background`, `--rf-save-primary-color` | the buttons |
+
+Parts: `dialog`, `form`, `header`, `title`, `body`, `label`, `name`,
+`current`, `error`, `actions`, `action` (every button), `cancel`,
+`replace`, `save`, `primary` (whichever Enter presses), `status`.
+Slots: `title`, `label`, `cancel`, `replace` and `save` replace those
+texts, so a button can hold a plugin's own key; `header-start`,
+`header-end`, `body-start`, `body-end` and `footer` add to the dialog:
+
+```html
+<rf-program-save primary="new" save-label="Record">
+  <span slot="save"><svg class="my-key">…</svg>RECORD</span>
+</rf-program-save>
+```
+
+```css
+rf-program-save { --rf-save-surface: #111; --rf-save-radius: 14px; }
+rf-program-save::part(name) { font-family: "Segment14"; color: #ff342f; }
+rf-program-save::part(action) { background: none; border: 0; }
+```
+
+The build writes it unhashed to `rackforge-plugin-kit/program-save.js`.
 
 ## Host-owned resource explorer
 

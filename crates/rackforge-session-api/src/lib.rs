@@ -7,10 +7,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
 pub use rackforge_controller_api::{
-    ButtonPhase, HostActionBinding, HostActionTarget, HostControlBinding, HostControlTarget,
-    MidiButtonBinding, MidiControlChangeBinding, RackForgeParameterId, RackForgeParameterInput,
-    SemanticControlBinding, SemanticControlInput, SemanticControlMode, SemanticControlProfile,
-    rackforge_parameter_input, semantic_control_input, semantic_control_little_header,
+    ButtonPhase, HeldControl, HostActionBinding, HostActionTarget, HostControlBinding,
+    HostControlTarget, MidiButtonBinding, MidiControlChangeBinding, MidiNoteButtonBinding,
+    RackForgeParameterId, RackForgeParameterInput, SemanticControlBinding, SemanticControlInput,
+    SemanticControlMode, SemanticControlProfile, rackforge_parameter_input, semantic_control_input,
+    semantic_control_little_header,
 };
 pub use rackforge_surface_api::{
     SurfaceActivationReason, SurfaceActivationRequest, SurfaceActivationResponse, SurfaceMode,
@@ -610,12 +611,17 @@ impl SessionState {
                 instance_id,
                 sound_id,
             } => {
+                let is_active_program_preview = self.program_draft.as_ref().is_some_and(|draft| {
+                    draft.instance_id == *instance_id && draft.preview_sound_id == *sound_id
+                });
                 let instance = self
                     .instances
                     .iter_mut()
                     .find(|instance| &instance.instance_id == instance_id)
                     .ok_or_else(|| format!("unknown instance {instance_id}"))?;
-                if !instance.sounds.iter().any(|sound| sound.id == *sound_id) {
+                if !instance.sounds.iter().any(|sound| sound.id == *sound_id)
+                    && !is_active_program_preview
+                {
                     return Err(format!(
                         "unknown sound {sound_id:?} for instance {instance_id}"
                     ));
@@ -851,12 +857,19 @@ pub enum SessionCommand {
         controller_id: String,
         controls: Vec<HostControlBinding>,
         actions: Vec<HostActionBinding>,
+        /// Controls that maps and actions read and no instrument ever hears.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        held: Vec<HeldControl>,
         /// Current backend endpoint selected by the driver. Hosts resolve this
         /// display hint to their own stable MIDI source identity.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         midi_source_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         semantic_profile: Option<SemanticControlProfile>,
+        /// The device's Identity Reply chose the package, not only the
+        /// endpoint's name.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        identified: bool,
     },
     SetMasterLevel {
         level: MasterLevel,
@@ -1299,6 +1312,8 @@ mod tests {
             message: ParameterLinkMessage::ControlChange { controller: 74 },
             transform: ParameterLinkTransform::default(),
             pass_through: ParameterLinkPassThrough::PassThrough,
+            mode: Default::default(),
+            layer: Default::default(),
         }
     }
 
@@ -1643,9 +1658,32 @@ mod tests {
                 },
             ))
             .unwrap();
+        let preview_sound_id = session
+            .program_draft
+            .as_ref()
+            .unwrap()
+            .preview_sound_id
+            .clone();
         session
             .apply(&event(
                 4,
+                SessionEvent::SoundSelected {
+                    instance_id: instance_id.clone(),
+                    sound_id: preview_sound_id.clone(),
+                },
+            ))
+            .unwrap();
+        assert_eq!(
+            session
+                .active_instance()
+                .unwrap()
+                .selected_sound_id
+                .as_deref(),
+            Some(preview_sound_id.as_str())
+        );
+        session
+            .apply(&event(
+                5,
                 SessionEvent::ProgramSaved {
                     draft_id: 17,
                     instance_id: instance_id.clone(),
@@ -1663,7 +1701,7 @@ mod tests {
             .unwrap();
         session
             .apply(&event(
-                5,
+                6,
                 SessionEvent::AuditionEnded {
                     lease_id: 7,
                     instance_id,

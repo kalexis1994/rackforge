@@ -1,0 +1,124 @@
+# Akai Professional MPK mini IV, in the DAW preset RackForge puts it in on
+# connect, read on its DAW port. Every value below is sourced in SOURCES.md;
+# [UG] is the MPK mini IV User Guide v1.2, [ALG] Akai's Ableton Live Setup
+# Guide for it, [BW] Bitwig's MPK mini IV extension, [AB] Ableton Live 12's
+# MPK_mini_IV script. [BW] is the only source for the knobs' messages and
+# the preset message: see SOURCES.md.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.akai-mpk-mini-iv"
+name = "MPK mini IV"
+vendor = "Akai Professional"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "mpk-mini-iv"
+
+# The knobs speak on the DAW port, the second of five [UG p6]: "MPK mini IV
+# DAW Port" on a Mac and Linux (truncated there to "... DAW Por"),
+# "MIDIIN2 (MPK mini IV)" / "MIDIOUT2 (MPK mini IV)" on Windows [BW port
+# names]. The keys, pads, wheels and pedal stay on the MIDI Port and play as
+# any keyboard does. The MPK mini Plus II shares the extension and names
+# itself "MPK mini Plus II"; the older MPK minis name no DAW port.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["mpk mini iv"]
+name_contains_any = ["daw", "midiin2"]
+exclude_contains = ["plus"]
+
+[[devices.endpoints]]
+role = "setup_output"
+name_contains = ["mpk mini iv"]
+name_contains_any = ["daw", "midiout2"]
+exclude_contains = ["plus"]
+
+# On connect, the DAW preset, the one Akai's DAW guides have the player
+# choose with the PLUGIN/DAW button [ALG p3 step 2]: "F0 47 7F 5D 2D 00 00
+# F7" [BW set_preset_daw; 0x5D is the IV's product byte, as its Identity
+# Reply says: BW, and AB identity_response_id_bytes (71, 93, 0, 25)].
+[permissions]
+midi_input = true
+midi_output = true
+sysex = true
+
+[[on_connect]]
+message = "F0 47 7F 5D 2D 00 00 F7"
+to = "setup_output"
+
+# Knobs 1-8: endless encoders [UG item 25] that send how far they turned, in
+# two's complement, as CC 24-31 on channel 1 [BW Encoder(i, 0x18 + i),
+# createRelative2sComplementCCValueMatcher(0, ...)]. No faders: they take
+# the first row. RackForge's default roles are left out: roles do not read
+# relative encoders yet.
+[[inputs]]
+id = "knob-1"
+name = "Knob 1"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 0, cc = 24 }
+encoder = "relative_twos_complement"
+slot = "control-1.1"
+
+[[inputs]]
+id = "knob-2"
+name = "Knob 2"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 0, cc = 25 }
+encoder = "relative_twos_complement"
+slot = "control-1.2"
+
+[[inputs]]
+id = "knob-3"
+name = "Knob 3"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 0, cc = 26 }
+encoder = "relative_twos_complement"
+slot = "control-1.3"
+
+[[inputs]]
+id = "knob-4"
+name = "Knob 4"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 0, cc = 27 }
+encoder = "relative_twos_complement"
+slot = "control-1.4"
+
+[[inputs]]
+id = "knob-5"
+name = "Knob 5"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 0, cc = 28 }
+encoder = "relative_twos_complement"
+slot = "control-1.5"
+
+[[inputs]]
+id = "knob-6"
+name = "Knob 6"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 0, cc = 29 }
+encoder = "relative_twos_complement"
+slot = "control-1.6"
+
+[[inputs]]
+id = "knob-7"
+name = "Knob 7"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 0, cc = 30 }
+encoder = "relative_twos_complement"
+slot = "control-1.7"
+
+[[inputs]]
+id = "knob-8"
+name = "Knob 8"
+kind = "encoder"
+group = "Knobs"
+midi = { channel = 0, cc = 31 }
+encoder = "relative_twos_complement"
+slot = "control-1.8"

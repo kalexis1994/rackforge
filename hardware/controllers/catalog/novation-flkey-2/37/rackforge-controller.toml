@@ -1,0 +1,229 @@
+# Novation FLkey 2 37, standalone use outside FL Studio, with its power-on modes
+# and default Custom Modes. Every value below is sourced in ../SOURCES.md; [UG]
+# is the FLkey 2 37 user guide, [CG] Novation's FLkey 2 Components guide.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-flkey-2-37"
+name = "FLkey 2 37"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "flkey-2-37"
+
+# The MIDI interface only, "FLkey MK2 37 MIDI Out" in Novation's screenshot; the
+# DAW interface is "... DAW Out", named MIDIIN2 on Windows [UG p13]. The first
+# FLkey generation has no "MK2" in its names and never matches.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["flkey mk2 37"]
+exclude_contains = ["daw", "midiin2", "port 2", "midi 2 "]
+
+# Encoders, Custom encoder mode 1, the power-on encoder mode: CC 21-28 on page 1
+# and CC 29-36 on page 2 (Encoder bank buttons), absolute 0-127, on the global
+# (keys) channel, channel 1 by default [CG encoders screenshot; UG settings,
+# Power On Modes].
+[[inputs]]
+id = "encoder-1"
+name = "Encoder 1"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 21 }
+slot = "control-1.1"
+
+[[inputs]]
+id = "encoder-2"
+name = "Encoder 2"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 22 }
+slot = "control-1.2"
+
+[[inputs]]
+id = "encoder-3"
+name = "Encoder 3"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 23 }
+slot = "control-1.3"
+
+[[inputs]]
+id = "encoder-4"
+name = "Encoder 4"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 24 }
+slot = "control-1.4"
+
+[[inputs]]
+id = "encoder-5"
+name = "Encoder 5"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 25 }
+slot = "control-1.5"
+
+[[inputs]]
+id = "encoder-6"
+name = "Encoder 6"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 26 }
+slot = "control-1.6"
+
+[[inputs]]
+id = "encoder-7"
+name = "Encoder 7"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 27 }
+slot = "control-1.7"
+
+[[inputs]]
+id = "encoder-8"
+name = "Encoder 8"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders"
+midi = { channel = 0, cc = 28 }
+slot = "control-1.8"
+
+[[inputs]]
+id = "encoder-9"
+name = "Encoder 9"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 29 }
+slot = "control-2.1"
+
+[[inputs]]
+id = "encoder-10"
+name = "Encoder 10"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 30 }
+slot = "control-2.2"
+
+[[inputs]]
+id = "encoder-11"
+name = "Encoder 11"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 31 }
+slot = "control-2.3"
+
+[[inputs]]
+id = "encoder-12"
+name = "Encoder 12"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 32 }
+slot = "control-2.4"
+
+[[inputs]]
+id = "encoder-13"
+name = "Encoder 13"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 33 }
+slot = "control-2.5"
+
+[[inputs]]
+id = "encoder-14"
+name = "Encoder 14"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 34 }
+slot = "control-2.6"
+
+[[inputs]]
+id = "encoder-15"
+name = "Encoder 15"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 35 }
+slot = "control-2.7"
+
+[[inputs]]
+id = "encoder-16"
+name = "Encoder 16"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, page 2"
+midi = { channel = 0, cc = 36 }
+slot = "control-2.8"
+
+# Wheels on the keys channel: pitch bend, and modulation on CC 1 by default [CG
+# "Mod Wheel/Strip"]; the sustain input sends CC 64 by default [CG "Pedal"]. The
+# pads start in Drum mode, whose notes Novation does not list, and the buttons
+# are described in FL Studio only, so neither is declared.
+[[inputs]]
+id = "pitch-bend"
+name = "Pitch wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, pitch_bend = true }
+
+[[inputs]]
+id = "modulation"
+name = "Modulation wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, cc = 1 }
+slot = "mod-wheel"
+
+[[inputs]]
+id = "sustain"
+name = "Sustain pedal"
+kind = "pedal"
+group = "Pedal"
+midi = { channel = 0, cc = 64 }
+
+# RackForge's default meanings for a keyboard with eight knobs and no faders:
+# the filter, its envelope and the LFO rate, then the amp envelope.
+[[roles]]
+input = "encoder-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "encoder-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "encoder-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "encoder-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "encoder-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "encoder-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "encoder-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "encoder-8"
+role = "synth.envelope.amp.release"

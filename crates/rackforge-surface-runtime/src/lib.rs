@@ -4,7 +4,7 @@
 
 use rackforge_audio_api::{
     AudioDeviceDescriptor, AudioDeviceSelector, AudioFallbackPolicy, AudioOutputProfile,
-    AudioOutputState, AudioSampleFormat,
+    AudioOutputState, AudioSampleFormat, AudioStreamCapabilities,
 };
 use rackforge_controller_api::LITTLE_TEXT_COLUMNS;
 use rackforge_midi_api::velocity_curve::VelocityCurve;
@@ -728,7 +728,7 @@ enum Page {
     Audio,
     AudioOutput,
     AudioRate,
-    AudioLatency,
+    AudioBuffer,
     AudioBusy,
     AudioResult,
     SystemWeb,
@@ -1054,13 +1054,13 @@ const SYSTEM_WEB_ITEMS: [&str; 6] = [
     "STATUS",
 ];
 const SYSTEM_WIFI_ITEMS: [&str; 3] = ["STATUS", "NETWORKS", "RADIO"];
-const AUDIO_ITEMS: [&str; 3] = ["OUTPUT", "SAMPLE RATE", "LATENCY"];
-const AUDIO_LATENCIES: [(&str, u32, u32); 4] = [
-    ("ULTRA 2 MS", 32, 96),
-    ("LOW 4 MS", 64, 192),
-    ("BALANCED 8 MS", 128, 384),
-    ("SAFE 16 MS", 256, 768),
-];
+const AUDIO_ITEMS: [&str; 3] = ["OUTPUT", "SAMPLE RATE", "BUFFER"];
+/// The buffer sizes a player chooses, in samples: the block the engine
+/// renders at a time. Latency follows from the size and the sample rate; it
+/// is shown, never chosen.
+const AUDIO_BUFFER_SIZES: [u32; 3] = [128, 256, 512];
+/// Blocks the device queue holds: 128 samples play from a 384-sample queue.
+const AUDIO_BUFFER_BLOCKS: u32 = 3;
 const WIFI_NETWORK_GROUPS: [&str; 2] = ["KNOWN", "DISCOVERED"];
 const WIFI_KNOWN_ACTIONS: [&str; 2] = ["CONNECT", "FORGET"];
 const WIFI_ACTIVE_ACTIONS: [&str; 2] = ["DISCONNECT", "FORGET"];
@@ -1335,35 +1335,39 @@ impl Menu {
     }
 
     pub fn set_play_plugins(&mut self, plugins: Vec<PlayPlugin>, active_instance_id: Option<&str>) {
+        // What the player is looking at, held by identity, as LIVE holds its
+        // cursor: the host refreshes on every display heartbeat, and a
+        // cursor that followed the plugin on stage each time took a player
+        // who had turned to another back to it a moment before they pressed.
+        // Only what is on stage changing re-anchors the cursor to it.
         let focused = self
             .play_plugins
             .get(self.play_index)
             .map(|plugin| plugin.instance_id.clone());
+        let on_effects_row = self.play_index >= self.play_plugins.len();
+        let stage_changed = self.pending_plugin_instance_id.is_none()
+            && self.active_plugin_instance_id.as_deref() != active_instance_id;
         self.play_plugins = plugins;
-        self.play_index = self
-            .pending_plugin_instance_id
-            .as_deref()
-            .and_then(|id| {
-                self.play_plugins
-                    .iter()
-                    .position(|plugin| plugin.instance_id == id)
-            })
-            .or_else(|| {
-                active_instance_id.and_then(|id| {
-                    self.play_plugins
-                        .iter()
-                        .position(|plugin| plugin.instance_id == id)
-                })
-            })
-            .or_else(|| {
-                focused.as_deref().and_then(|id| {
-                    self.play_plugins
-                        .iter()
-                        .position(|plugin| plugin.instance_id == id)
-                })
-            })
-            .unwrap_or(0)
-            .min(self.play_plugins.len().saturating_sub(1));
+        let position = |plugins: &[PlayPlugin], id: Option<&str>| {
+            id.and_then(|id| plugins.iter().position(|plugin| plugin.instance_id == id))
+        };
+        let pending = position(
+            &self.play_plugins,
+            self.pending_plugin_instance_id.as_deref(),
+        );
+        let active = position(&self.play_plugins, active_instance_id);
+        let browsed = if on_effects_row && !self.play_plugins.is_empty() {
+            Some(self.play_plugins.len())
+        } else {
+            position(&self.play_plugins, focused.as_deref())
+        };
+        self.play_index = if stage_changed {
+            pending.or(active).or(browsed)
+        } else {
+            pending.or(browsed).or(active)
+        }
+        .unwrap_or(0)
+        .min(self.play_plugins.len());
         if self.pending_plugin_instance_id.is_none() {
             self.active_plugin_instance_id = active_instance_id.map(str::to_owned);
         }
@@ -1681,7 +1685,12 @@ impl Menu {
             return;
         }
         self.audio_state = Some(state);
-        self.audio_value_index = 0;
+        // Hosts refresh the state every few seconds: a player choosing a
+        // value keeps the one under the cursor while it is still offered.
+        let count = self.audio_value_count();
+        if self.audio_value_index >= count {
+            self.audio_value_index = 0;
+        }
     }
 
     /// Everything the MIDI screens show: the ports this host can see, and
@@ -2438,7 +2447,7 @@ impl Menu {
             Page::Audio
                 | Page::AudioOutput
                 | Page::AudioRate
-                | Page::AudioLatency
+                | Page::AudioBuffer
                 | Page::AudioBusy
                 | Page::AudioResult
         ) {
@@ -3796,7 +3805,7 @@ impl Menu {
             Page::Audio
                 | Page::AudioOutput
                 | Page::AudioRate
-                | Page::AudioLatency
+                | Page::AudioBuffer
                 | Page::AudioBusy
                 | Page::AudioResult
         ) {
@@ -3957,7 +3966,7 @@ impl Menu {
                     }
                     Page::Plugins => Page::Config,
                     Page::Audio => Page::Config,
-                    Page::AudioOutput | Page::AudioRate | Page::AudioLatency => Page::Audio,
+                    Page::AudioOutput | Page::AudioRate | Page::AudioBuffer => Page::Audio,
                     Page::AudioBusy | Page::AudioResult => Page::Audio,
                     Page::SystemWeb => Page::System,
                     Page::SystemWifi => Page::System,
@@ -4030,6 +4039,7 @@ impl Menu {
                             self.pending_command = Some(MenuCommand::SetActiveMode {
                                 mode: ActiveMode::Play,
                             });
+                            self.anchor_play_cursor_on_stage();
                             Page::Play
                         }
                         _ => Page::Config,
@@ -4331,6 +4341,32 @@ impl Menu {
         }
     }
 
+    /// Shows what is playing: in PLAY the plugin with the program sounding
+    /// under the cursor, in LIVE the Rack, Song part or setlist entry in use.
+    /// Hosts call it once the menu holds the session -- when LITTLE starts --
+    /// so the screen opens on the music rather than on the home page. HOME
+    /// keeps the mode highlighted, for the step back.
+    /// The PLAY list's cursor on the plugin on stage: where a player coming
+    /// into PLAY, or back to what is playing, expects to find it. Refreshes
+    /// leave it where the player turned it.
+    fn anchor_play_cursor_on_stage(&mut self) {
+        if let Some(index) = self.active_plugin_instance_id.as_deref().and_then(|id| {
+            self.play_plugins
+                .iter()
+                .position(|plugin| plugin.instance_id == id)
+        }) {
+            self.play_index = index;
+        }
+    }
+
+    pub fn show_active_mode(&mut self) {
+        self.home_index = match self.active_mode {
+            ActiveMode::Play => 1,
+            ActiveMode::Live | ActiveMode::Idle => 0,
+        };
+        self.complete_return_to_active_mode(self.active_mode, None);
+    }
+
     pub fn complete_return_to_active_mode(
         &mut self,
         mode: ActiveMode,
@@ -4355,6 +4391,7 @@ impl Menu {
             }
             ActiveMode::Play => {
                 self.plugin_play_context = PluginPlayContext::Standalone;
+                self.anchor_play_cursor_on_stage();
                 let focus_sound_id = focus_sound_id.or(self.play_anchor_sound_id.as_deref());
                 if let Some(sound) = focus_sound_id
                     .and_then(|id| self.plugin_sounds.iter().find(|sound| sound.id == id))
@@ -4567,7 +4604,7 @@ impl Menu {
                 )
             }
             Page::Audio => self.render_audio(),
-            Page::AudioOutput | Page::AudioRate | Page::AudioLatency => self.render_audio_value(),
+            Page::AudioOutput | Page::AudioRate | Page::AudioBuffer => self.render_audio_value(),
             Page::AudioBusy => {
                 let [line_1, line_2] = component_lines(&self.audio_spinner, false);
                 Screen::with_header("AUDIO", line_1, line_2)
@@ -5318,10 +5355,9 @@ impl Menu {
             },
             (Some(state), 1) => format!("{} HZ", state.active_profile.sample_rate_hz),
             (Some(state), _) => format!(
-                "{:.1} MS {}/{}",
-                state.active_profile.nominal_buffer_latency_ms(),
+                "{} SAMPLES {:.0} MS",
                 state.active_profile.period_frames,
-                state.active_profile.buffer_frames
+                state.active_profile.nominal_buffer_latency_ms(),
             ),
             (None, _) => "UNAVAILABLE".into(),
         };
@@ -5332,47 +5368,76 @@ impl Menu {
         )
     }
 
+    /// A value to choose, shown as programs are: the one under the cursor,
+    /// marked `|...|` only when it is the one in use, with what applying it
+    /// would mean below.
     fn render_audio_value(&self) -> Screen {
-        let (title, value, count) = match self.page {
-            Page::AudioOutput => {
-                let devices = self.compatible_audio_devices();
-                let value = devices
-                    .get(self.audio_value_index)
-                    .map(|device| device.name.clone())
-                    .unwrap_or_else(|| "NO OUTPUTS".into());
-                ("OUTPUT", value, devices.len())
-            }
-            Page::AudioRate => {
-                let rates = self.audio_rates();
-                let value = rates
-                    .get(self.audio_value_index)
-                    .map(|rate| format!("{rate} HZ"))
-                    .unwrap_or_else(|| "NO RATES".into());
-                ("SAMPLE RATE", value, rates.len())
-            }
-            Page::AudioLatency => {
-                let latencies = self.audio_latencies();
-                let value = latencies
-                    .get(self.audio_value_index)
-                    .map(|(label, _, _)| (*label).to_owned())
-                    .unwrap_or_else(|| "NO PRESETS".into());
-                ("LATENCY", value, latencies.len())
-            }
+        let Some(state) = self.audio_state.as_ref() else {
+            return Screen::with_header("AUDIO", "UNAVAILABLE", "BACK TO RETURN");
+        };
+        let action = |in_use: bool| if in_use { "IN USE" } else { "OK TO APPLY" };
+        // (label, in use, detail) for every value offered.
+        let (title, empty, values): (&str, &str, Vec<(String, bool, String)>) = match self.page {
+            Page::AudioOutput => (
+                "OUTPUT",
+                "NO OUTPUTS",
+                self.compatible_audio_devices()
+                    .into_iter()
+                    .map(|device| {
+                        let in_use = state
+                            .active_device
+                            .as_ref()
+                            .is_some_and(|active| active.id == device.id);
+                        (device.name.clone(), in_use, action(in_use).to_owned())
+                    })
+                    .collect(),
+            ),
+            Page::AudioRate => (
+                "SAMPLE RATE",
+                "NO RATES",
+                self.audio_rates()
+                    .into_iter()
+                    .map(|rate| {
+                        let in_use = rate == state.active_profile.sample_rate_hz;
+                        (format!("{rate} HZ"), in_use, action(in_use).to_owned())
+                    })
+                    .collect(),
+            ),
+            Page::AudioBuffer => (
+                "BUFFER",
+                "NO SIZES",
+                self.audio_buffer_sizes()
+                    .into_iter()
+                    .map(|size| {
+                        let in_use = size == state.active_profile.period_frames;
+                        // What the size means at this rate.
+                        let mut profile = state.active_profile.clone();
+                        profile.period_frames = size;
+                        profile.buffer_frames = size * AUDIO_BUFFER_BLOCKS;
+                        // The bars mark the size in use; below is what a
+                        // size means at this rate.
+                        let detail =
+                            format!("{:.0} MS LATENCY", profile.nominal_buffer_latency_ms());
+                        (format!("{size} SAMPLES"), in_use, detail)
+                    })
+                    .collect(),
+            ),
             _ => unreachable!(),
         };
-        let value = normalized_display_text(&value, "UNAVAILABLE")
-            .chars()
-            .take(DISPLAY_COLUMNS.saturating_sub(2))
-            .collect::<String>();
-        Screen::with_header(
-            indexed_title(
-                title,
-                self.audio_value_index.min(count.saturating_sub(1)),
-                count.max(1),
-            ),
-            format!("[{value}]"),
-            "OK TO APPLY",
-        )
+        if values.is_empty() {
+            return Screen::with_header(title, empty, "BACK TO RETURN");
+        }
+        let selected = self.audio_value_index.min(values.len() - 1);
+        let mut carousel = SimpleCarousel::new(
+            "audio-values",
+            values.iter().map(|(label, in_use, detail)| {
+                CarouselItem::new(carousel_label(label, *in_use), detail)
+            }),
+        );
+        carousel.set_selected(selected);
+        carousel.set_focused(true);
+        let [line_1, line_2] = component_lines(&carousel, false);
+        Screen::with_header(indexed_title(title, selected, values.len()), line_1, line_2)
     }
 
     fn render_audio_result(&self) -> Screen {
@@ -5607,12 +5672,12 @@ impl Menu {
                     self.page = match self.audio_index {
                         0 => Page::AudioOutput,
                         1 => Page::AudioRate,
-                        _ => Page::AudioLatency,
+                        _ => Page::AudioBuffer,
                     };
                 }
                 _ => {}
             },
-            Page::AudioOutput | Page::AudioRate | Page::AudioLatency => match input {
+            Page::AudioOutput | Page::AudioRate | Page::AudioBuffer => match input {
                 Input::Button2 | Input::EncoderLeft => {
                     let len = self.audio_value_count();
                     if len > 0 {
@@ -5666,21 +5731,13 @@ impl Menu {
             .unwrap_or_default()
     }
 
-    fn audio_latencies(&self) -> Vec<(&'static str, u32, u32)> {
-        let Some(playback) = self
-            .audio_state
+    fn audio_buffer_sizes(&self) -> Vec<u32> {
+        self.audio_state
             .as_ref()
             .and_then(|state| state.active_device.as_ref())
             .and_then(|device| device.playback.as_ref())
-        else {
-            return Vec::new();
-        };
-        AUDIO_LATENCIES
-            .into_iter()
-            .filter(|(_, period, buffer)| {
-                playback.period_frames.contains(*period) && playback.buffer_frames.contains(*buffer)
-            })
-            .collect()
+            .map(supported_buffer_sizes)
+            .unwrap_or_default()
     }
 
     fn current_audio_value_index(&self) -> usize {
@@ -5704,12 +5761,9 @@ impl Menu {
                 .position(|rate| *rate == state.active_profile.sample_rate_hz)
                 .unwrap_or(0),
             _ => self
-                .audio_latencies()
+                .audio_buffer_sizes()
                 .iter()
-                .position(|(_, period, buffer)| {
-                    *period == state.active_profile.period_frames
-                        && *buffer == state.active_profile.buffer_frames
-                })
+                .position(|size| *size == state.active_profile.period_frames)
                 .unwrap_or(0),
         }
     }
@@ -5718,7 +5772,7 @@ impl Menu {
         match self.page {
             Page::AudioOutput => self.compatible_audio_devices().len(),
             Page::AudioRate => self.audio_rates().len(),
-            Page::AudioLatency => self.audio_latencies().len(),
+            Page::AudioBuffer => self.audio_buffer_sizes().len(),
             _ => 0,
         }
     }
@@ -5746,22 +5800,25 @@ impl Menu {
                 if !playback.period_frames.contains(profile.period_frames)
                     || !playback.buffer_frames.contains(profile.buffer_frames)
                 {
-                    let (_, period, buffer) =
-                        AUDIO_LATENCIES.into_iter().find(|(_, period, buffer)| {
-                            playback.period_frames.contains(*period)
-                                && playback.buffer_frames.contains(*buffer)
-                        })?;
-                    profile.period_frames = period;
-                    profile.buffer_frames = buffer;
+                    // The new output keeps the size in use when it can take
+                    // it, else the smallest it takes.
+                    let sizes = supported_buffer_sizes(playback);
+                    let size = sizes
+                        .iter()
+                        .copied()
+                        .find(|size| *size == profile.period_frames)
+                        .or_else(|| sizes.first().copied())?;
+                    profile.period_frames = size;
+                    profile.buffer_frames = size * AUDIO_BUFFER_BLOCKS;
                 }
             }
             Page::AudioRate => {
                 profile.sample_rate_hz = *self.audio_rates().get(self.audio_value_index)?;
             }
-            Page::AudioLatency => {
-                let (_, period, buffer) = *self.audio_latencies().get(self.audio_value_index)?;
-                profile.period_frames = period;
-                profile.buffer_frames = buffer;
+            Page::AudioBuffer => {
+                let size = *self.audio_buffer_sizes().get(self.audio_value_index)?;
+                profile.period_frames = size;
+                profile.buffer_frames = size * AUDIO_BUFFER_BLOCKS;
             }
             _ => return None,
         }
@@ -6287,7 +6344,7 @@ impl Menu {
             | Page::SystemWifiResult => return,
             Page::AudioOutput
             | Page::AudioRate
-            | Page::AudioLatency
+            | Page::AudioBuffer
             | Page::AudioBusy
             | Page::AudioResult => return,
         };
@@ -7713,6 +7770,76 @@ fn little_parameter_display(
     }
 }
 
+/// Which way a control must move to reach a parameter it has not picked up.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PickupArrow {
+    Up,
+    Down,
+}
+
+/// LITTLE's header for a parameter a control just moved: its own name and
+/// its value in its own units, in the header's 18 columns -- "ROOM SIZE
+/// 1462 m3". A control still on its way to the parameter shows the value it
+/// stands at, which way to move, and where the parameter is: "4' B  2 ^6",
+/// so the number moves with the fader instead of sitting still.
+/// A touch's header, marked when the control moved the parameter through
+/// its controller's Fn layer: "Fn ROOM SIZE 1462 m3".
+pub fn fn_layer_header(header: String, fn_layer: bool) -> String {
+    if fn_layer {
+        format!("Fn {header}")
+    } else {
+        header
+    }
+}
+
+pub fn parameter_touch_header(
+    parameter: &ParameterDescriptor,
+    value: f64,
+    display_decimals: Option<u8>,
+    pickup: Option<PickupArrow>,
+    control: Option<f64>,
+) -> String {
+    let mut shown = clean_surface_text(
+        &little_parameter_display(parameter, value, display_decimals),
+        "",
+    );
+    if let Some(arrow) = pickup {
+        shown.insert(
+            0,
+            match arrow {
+                PickupArrow::Up => '^',
+                PickupArrow::Down => 'v',
+            },
+        );
+        if let Some(control) = control {
+            let mut at = clean_surface_text(
+                &little_parameter_display(parameter, control, display_decimals),
+                "",
+            );
+            // One unit is enough: "120 ^311 m3", not "120 m3 ^311 m3".
+            if let Some((number, unit)) = at.rsplit_once(' ')
+                && shown.ends_with(&format!(" {unit}"))
+            {
+                at = number.to_owned();
+            }
+            shown = format!("{at} {shown}");
+        }
+    }
+    let shown: String = shown.chars().take(DISPLAY_COLUMNS).collect();
+    let room = DISPLAY_COLUMNS.saturating_sub(shown.chars().count() + 1);
+    let name: String = clean_surface_text(&parameter.name, "PARAMETER")
+        .to_ascii_uppercase()
+        .chars()
+        .take(room)
+        .collect::<String>()
+        .trim_end()
+        .to_owned();
+    let gap = DISPLAY_COLUMNS
+        .saturating_sub(name.chars().count() + shown.chars().count())
+        .max(usize::from(!name.is_empty()));
+    format!("{name}{}{shown}", " ".repeat(gap))
+}
+
 fn parameter_display_decimals(step: f64, display_decimals: Option<u8>) -> usize {
     display_decimals.map_or_else(|| parameter_decimals(step), usize::from)
 }
@@ -7893,10 +8020,18 @@ fn normalized_display_text(value: &str, fallback: &str) -> String {
 }
 
 fn clean_surface_text(value: &str, fallback: &str) -> String {
+    // The units parameters use have ASCII spellings the display can show;
+    // anything else is a '?'. "m³" was "m?".
     let mut normalized = value
         .chars()
         .filter(|character| !character.is_control())
-        .map(|character| if character.is_ascii() { character } else { '?' })
+        .map(|character| match character {
+            _ if character.is_ascii() => character,
+            '²' => '2',
+            '³' => '3',
+            'µ' | 'μ' => 'u',
+            _ => '?',
+        })
         .collect::<String>();
     if normalized.trim().is_empty() {
         normalized = fallback.into();
@@ -7993,6 +8128,18 @@ fn midi_note_name(note: u8) -> String {
     ];
     let octave = i16::from(note / 12) - 1;
     format!("{}{octave}", NAMES[usize::from(note % 12)])
+}
+
+/// The buffer sizes an output can run: the block, and the queue of
+/// [`AUDIO_BUFFER_BLOCKS`] blocks behind it.
+fn supported_buffer_sizes(playback: &AudioStreamCapabilities) -> Vec<u32> {
+    AUDIO_BUFFER_SIZES
+        .into_iter()
+        .filter(|size| {
+            playback.period_frames.contains(*size)
+                && playback.buffer_frames.contains(size * AUDIO_BUFFER_BLOCKS)
+        })
+        .collect()
 }
 
 fn render_home(selected: usize) -> [String; 2] {
@@ -8609,6 +8756,80 @@ pub fn demo_frames() -> Vec<Screen> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_touched_parameter_is_named_in_its_own_units() {
+        use rackforge_plugin_api::{ParameterDescriptor, ParameterKind, ParameterTaper};
+        let room = ParameterDescriptor {
+            index: 23,
+            id: "room_size".into(),
+            name: "Room Size".into(),
+            page: "room".into(),
+            group: None,
+            order: 0,
+            kind: ParameterKind::Float {
+                minimum: 45.0,
+                maximum: 45000.0,
+                default: 311.3,
+                step: 1.0,
+                unit: Some("m³".into()),
+                taper: ParameterTaper::Logarithmic,
+            },
+            flags: Default::default(),
+            suggested_control: Default::default(),
+        };
+        let header = super::parameter_touch_header(&room, 1462.3, None, None, None);
+        assert_eq!(header, "ROOM SIZE  1462 m3");
+        assert_eq!(header.chars().count(), super::DISPLAY_COLUMNS);
+        let waiting =
+            super::parameter_touch_header(&room, 45.0, None, Some(super::PickupArrow::Down), None);
+        assert_eq!(waiting, "ROOM SIZE   v45 m3");
+        // With where the knob has got to, one unit for both.
+        let closing_in = super::parameter_touch_header(
+            &room,
+            45.0,
+            None,
+            Some(super::PickupArrow::Down),
+            Some(120.0),
+        );
+        assert_eq!(closing_in, "ROOM SI 120 v45 m3", "the name gives way");
+        assert_eq!(closing_in.chars().count(), super::DISPLAY_COLUMNS);
+        let long = ParameterDescriptor {
+            name: "Sympathetic Resonance Amount".into(),
+            ..room
+        };
+        let header = super::parameter_touch_header(&long, 45000.0, None, None, None);
+        assert_eq!(header, "SYMPATHET 45000 m3");
+    }
+
+    #[test]
+    fn a_fader_closing_in_on_a_drawbar_shows_both_numbers() {
+        let drawbar = ParameterDescriptor {
+            index: 5,
+            id: "drawbar-4".into(),
+            name: "4' B".into(),
+            page: "organ".into(),
+            group: None,
+            order: 0,
+            kind: ParameterKind::Integer {
+                minimum: 0,
+                maximum: 8,
+                default: 0,
+                step: 1,
+                unit: None,
+            },
+            flags: Default::default(),
+            suggested_control: Default::default(),
+        };
+        let header = super::parameter_touch_header(
+            &drawbar,
+            6.0,
+            None,
+            Some(super::PickupArrow::Up),
+            Some(2.0),
+        );
+        assert_eq!(header, "4' B          2 ^6");
+    }
+
     /// A step can be far finer than a whole number is "close to zero".
     #[test]
     fn a_very_fine_step_still_asks_for_decimals() {
@@ -8930,6 +9151,61 @@ mod tests {
         assert_eq!(projected.chars().count(), 18);
         assert!(projected.starts_with("RF-106"));
         assert_eq!(projected.as_bytes()[0], b'R');
+    }
+
+    #[test]
+    fn a_refresh_leaves_the_play_cursor_on_the_plugin_being_browsed() {
+        // The driver refreshes the catalog on every display heartbeat, a few
+        // seconds apart. The cursor followed the plugin on stage on each
+        // one: a player who had turned to B and pressed a moment after a
+        // heartbeat entered A instead, and nothing was even selected.
+        let plugins = vec![
+            PlayPlugin::new("play.a", "org.example.a", "PLUGIN A"),
+            PlayPlugin::new("play.b", "org.example.b", "PLUGIN B"),
+        ];
+        let mut menu = Menu::default();
+        menu.set_play_plugins(plugins.clone(), Some("play.a"));
+        menu.page = Page::Play;
+        assert_eq!(menu.render().line_1, "PLUGIN A");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "PLUGIN B");
+
+        menu.set_play_plugins(plugins.clone(), Some("play.a"));
+        assert_eq!(menu.render().line_1, "PLUGIN B");
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::SelectPlugin {
+                instance_id: "play.b".into(),
+            })
+        );
+
+        // The EFFECTS row, after the instruments, holds as well.
+        let mut menu = Menu::default();
+        menu.set_play_plugins(plugins.clone(), Some("play.a"));
+        menu.page = Page::Play;
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "EFFECTS");
+        menu.set_play_plugins(plugins.clone(), Some("play.a"));
+        assert_eq!(menu.render().line_1, "EFFECTS");
+
+        // What is on stage changing elsewhere -- the web, a LIVE target --
+        // still brings the cursor to it.
+        menu.set_play_plugins(plugins.clone(), Some("play.b"));
+        assert_eq!(menu.render().line_1, "PLUGIN B");
+
+        // Coming into PLAY finds the plugin on stage, not one left browsed.
+        let mut menu = Menu::default();
+        menu.set_play_plugins(plugins, Some("play.a"));
+        menu.page = Page::Play;
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "PLUGIN B");
+        menu.page = Page::Home;
+        menu.home_index = 1;
+        menu.apply(Action::Select);
+        assert_eq!(menu.page, Page::Play);
+        assert_eq!(menu.render().line_1, "PLUGIN A");
     }
 
     #[test]
@@ -10949,6 +11225,127 @@ mod tests {
         menu.complete_return_to_active_mode(ActiveMode::Play, Some("custom.user.warm-piano"));
         assert_plugin_header(&menu.render(), "RF-DLS", "PROG 1/1");
         assert!(menu.render().line_1.contains("|WARM PIANO|"));
+    }
+
+    #[test]
+    fn little_opens_on_the_program_playing_in_play() {
+        let mut menu = plugin_menu();
+        menu.set_play_sounds(
+            vec![
+                PlaySound::new("dls.piano", "Piano", "dls", "B000 P000"),
+                PlaySound::new("dls.organ", "Organ", "dls", "B000 P001"),
+            ],
+            Some("dls.organ"),
+        );
+        menu.sync_active_mode(ActiveMode::Play);
+
+        menu.show_active_mode();
+
+        assert_plugin_header(&menu.render(), "RF-DLS", "PROG 2/2");
+        assert!(menu.render().line_1.contains("|ORGAN|"));
+    }
+
+    #[test]
+    fn little_opens_on_the_rack_in_use_in_live() {
+        let mut menu = plugin_menu();
+        let organ_id = RackId::new("rack.organ").unwrap();
+        let organ = LiveLocation::Rack {
+            rack_id: organ_id.clone(),
+        };
+        let mut snapshot = snapshot_with_two_racks();
+        snapshot.live.rack = Some(organ.clone());
+        snapshot.live.active = Some(organ);
+        snapshot.live.active_rack_id = Some(organ_id);
+        menu.sync_performance_snapshot(snapshot);
+        menu.sync_active_mode(ActiveMode::Live);
+
+        menu.show_active_mode();
+
+        assert_eq!(menu.render().line_1, "Organ");
+    }
+
+    #[test]
+    fn little_opens_on_the_song_part_in_use_in_live() {
+        let mut menu = plugin_menu();
+        let mut snapshot = test_performance_snapshot();
+        let part = LiveLocation::Song {
+            song_id: SongId::new("song.opener").unwrap(),
+            part_id: SongPartId::new("part.intro").unwrap(),
+        };
+        snapshot.live.mode = LiveBrowseMode::Song;
+        snapshot.live.song = Some(part.clone());
+        snapshot.live.active = Some(part);
+        menu.sync_performance_snapshot(snapshot);
+        menu.sync_active_mode(ActiveMode::Live);
+
+        menu.show_active_mode();
+
+        let screen = menu.render();
+        assert!(
+            screen
+                .header
+                .text(18)
+                .is_some_and(|title| title.contains("Opener"))
+        );
+        assert_eq!(screen.line_1, "Intro");
+        assert_eq!(screen.line_2, "ACTIVE");
+    }
+
+    #[test]
+    fn little_opens_on_home_with_nothing_playing() {
+        let mut menu = plugin_menu();
+        menu.sync_active_mode(ActiveMode::Idle);
+        menu.show_active_mode();
+        assert_eq!(menu.render().header.text(18).as_deref(), Some(HOME_HEADER));
+    }
+
+    #[test]
+    fn the_audio_buffer_is_chosen_in_samples_and_the_latency_follows() {
+        let mut menu = plugin_menu();
+        menu.sync_audio_state(test_audio_state());
+        menu.apply(Action::Previous);
+        menu.apply(Action::Select);
+        for _ in 0..4 {
+            menu.apply(Action::Next);
+        }
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1, "BUFFER");
+        assert_eq!(menu.render().line_2, "128 SAMPLES 8 MS");
+
+        // As programs are: only the size in use is marked.
+        menu.apply(Action::Select);
+        assert_eq!(menu.render().line_1.trim(), "|128 SAMPLES|");
+        assert_eq!(menu.render().line_2.trim(), "8 MS LATENCY");
+        menu.apply(Action::Next);
+        assert_eq!(menu.render().line_1.trim(), "256 SAMPLES");
+        assert_eq!(menu.render().line_2.trim(), "16 MS LATENCY");
+
+        // The host refreshes the state while the player chooses.
+        menu.sync_audio_state(test_audio_state());
+        assert_eq!(menu.render().line_1.trim(), "256 SAMPLES");
+
+        menu.apply(Action::Select);
+        let Some(MenuCommand::ApplyAudioOutput { profile }) = menu.take_command() else {
+            panic!("expected typed audio output command");
+        };
+        assert_eq!((profile.period_frames, profile.buffer_frames), (256, 768));
+    }
+
+    #[test]
+    fn only_buffer_sizes_the_output_can_run_are_offered() {
+        let mut state = test_audio_state();
+        let playback = state
+            .active_device
+            .as_mut()
+            .unwrap()
+            .playback
+            .as_mut()
+            .unwrap();
+        // 512 samples would need a 1536-sample queue.
+        playback.buffer_frames = AudioValueRange::new(16, 1024).unwrap();
+        assert_eq!(supported_buffer_sizes(playback), vec![128, 256]);
     }
 
     #[test]

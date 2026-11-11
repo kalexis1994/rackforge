@@ -83,12 +83,29 @@ export function defaultInstrument(
   );
 }
 
+/**
+ * Whether the host is still starting its own engine.
+ *
+ * Android installs its bundled packages and opens the instrument it starts
+ * with before it will take any other activation, and says so by marking
+ * every plugin in the catalogue `transitioning`. The catalogue is readable
+ * while that happens, and half-filled: packages install in name order, so
+ * RF-106 is there before the Concert Grand. A first run that read it then
+ * picked RF-106, asked the host to open it, and was refused -- a failed step
+ * for an instrument nobody chose. While the host is starting there is
+ * nothing for this screen to open; it waits.
+ */
+export function hostIsStarting(plugins: PluginWebDescriptor[]): boolean {
+  return plugins.some((plugin) => plugin.transitioning === true);
+}
+
 /** The screen's own reading of where the first run has got to. */
 export function firstRunView(inputs: FirstRunInputs): FirstRunView {
   const { catalogStatus, plugins, failure } = inputs;
-  const engineReady = catalogStatus === "ready" || catalogStatus === "error";
+  const engineReady =
+    (catalogStatus === "ready" || catalogStatus === "error") && !hostIsStarting(plugins);
   const instruments = plugins.filter((plugin) => plugin.kind === "instrument");
-  const target = defaultInstrument(plugins);
+  const target = engineReady ? defaultInstrument(plugins) : null;
   const steps: FirstRunStep[] = [
     {
       id: "engine",

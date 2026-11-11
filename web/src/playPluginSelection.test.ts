@@ -1,10 +1,46 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   commitPlayPluginSelection,
+  playSourcePlugins,
   preflightPlayPluginSelection,
   type PlayPluginSelectionOperations,
   type PlayPluginSelectionRequest,
 } from "./playPluginSelection";
+import type { PluginWebDescriptor } from "./types";
+
+describe("what PLAY puts on stage", () => {
+  const plugin = (
+    plugin_id: string,
+    kind: PluginWebDescriptor["kind"],
+    play_source?: boolean,
+  ): PluginWebDescriptor => ({
+    plugin_id,
+    plugin_name: plugin_id,
+    version: "1.0.0",
+    kind,
+    active: true,
+    managed: true,
+    api_version: 1,
+    surfaces: [],
+    resources: [],
+    ...(play_source === undefined ? {} : { play_source }),
+  });
+  const catalog = [
+    plugin("piano", "instrument"),
+    plugin("rig", "effect", true),
+    plugin("comp", "effect"),
+    plugin("arp", "midi_processor"),
+  ];
+
+  it("offers the instruments and the effects played on their own", () => {
+    expect(playSourcePlugins(catalog).map((p) => p.plugin_id)).toEqual(["piano", "rig"]);
+  });
+
+  it("leaves the pedalboard out where nothing can be captured", () => {
+    expect(playSourcePlugins(catalog, { capture: false }).map((p) => p.plugin_id))
+      .toEqual(["piano"]);
+  });
+});
 
 const target = {
   pluginId: "org.rackforge.piano",

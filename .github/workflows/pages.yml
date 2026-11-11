@@ -24,7 +24,7 @@ jobs:
         run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rackforge-browser-demo
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -36,7 +36,7 @@ jobs:
           corepack enable
           corepack prepare pnpm@11.9.0 --activate
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # 22 dies with SIGSEGV inside its own WASI file handling while
           # the check reads the demo's storage; see the step below.
@@ -46,6 +46,8 @@ jobs:
 
       - name: Build the host and the instrument it plays
         run: ./tools/build-web-demo.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       # Every capability the host claims in crates/rackforge-host-capabilities
       # is exercised here, so the parity table cannot promise what the host
@@ -53,9 +55,14 @@ jobs:
       - name: Check the host against what it claims
         run: |
           storage="$(mktemp -d)"
+          probe_source="$(mktemp -d)"
           cp -r web/public/demo/rackforge/. "$storage"
+          cargo build --release --target wasm32-unknown-unknown -p rackforge-demo-synth
+          cp -r plugins/demo-synth/package/. "$probe_source"
+          cp target/wasm32-unknown-unknown/release/rackforge_demo_synth.wasm \
+            "$probe_source/component.wasm"
           python3 tools/make-probe-package.py \
-            web/public/demo/rackforge/plugins/concert-grand "$RUNNER_TEMP/probe.rfplugin"
+            "$probe_source" "$RUNNER_TEMP/probe.rfplugin"
           # CHECK_TRACE_CALLS=1 names every plugin and WASI call, for when
           # this dies somewhere that leaves no other trace.
           node tools/check-browser-host.mjs \
@@ -102,4 +109,4 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - id: deploy
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

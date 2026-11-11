@@ -116,6 +116,12 @@ fn resolve_options(cli: CliOptions) -> Result<Startup> {
         paths::DesktopPaths::initialize(&default_root)?
     } else if let Some(choice) = paths::load_choice(&default_root, &executable_directory)? {
         paths::DesktopPaths::initialize(choice.root)?
+    } else if cfg!(target_os = "linux") {
+        // Linux keeps RackForge's data in the user's data directory and asks
+        // nothing: the choice the first start offers on Windows -- installed
+        // or portable beside the program -- does not exist where the program
+        // lives in a read-only directory, as it does in a Flatpak.
+        paths::DesktopPaths::initialize(&default_root)?
     } else {
         let mut web_preferences = web::WebServerPreferences::default();
         if let Some(port) = cli.port {

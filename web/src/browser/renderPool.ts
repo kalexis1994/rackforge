@@ -65,8 +65,20 @@ export function automaticWorkerCount(
  */
 export function deviceIsMobile(): boolean {
   const data = (navigator as { userAgentData?: { mobile?: boolean } }).userAgentData;
-  if (typeof data?.mobile === "boolean") return data.mobile;
+  // Chromium reports false for Android tablets: that hint means "phone", not
+  // "mobile audio scheduler". The Android UA still needs the safe fallback.
+  if (data?.mobile === true) return true;
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+/**
+ * A missed parallel unit contributes silence for its whole block. On mobile,
+ * worker scheduling can exceed the 128-frame deadline even when the classic
+ * single-threaded path still produces audible output. Keep that dependable
+ * path on phones until the pool can fall back without dropping held notes.
+ */
+export function parallelPoolAllowed(isolated: boolean, mobile: boolean): boolean {
+  return isolated && !mobile;
 }
 
 /** Which worker owns a unit. Stable for the life of a pool epoch. */

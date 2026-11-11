@@ -1,18 +1,20 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 mod desktop_audio;
-#[cfg(windows)]
+#[cfg(desktop_host)]
 mod desktop_webview;
-#[cfg(windows)]
+#[cfg(desktop_host)]
+mod message_dialog;
+#[cfg(desktop_host)]
 #[rustfmt::skip]
 mod paths;
 mod setup;
 mod shutdown;
-#[cfg(windows)]
+#[cfg(desktop_host)]
 mod single_instance;
 mod startup;
-#[cfg(windows)]
+#[cfg(desktop_host)]
 use rackforge_ump as ump_input;
 mod web;
 
@@ -22,23 +24,25 @@ use eframe::egui::{
     StrokeKind, Vec2,
 };
 use rackforge_control_api::{
-    ClientId, ControlErrorCode, ControlRequest, ControlResponse, MidiInputSetting,
-    MidiLearnCandidate, MidiSourceStatus, ParameterLinkMessage, VirtualMidiMessage,
+    ClientId, ControlErrorCode, ControlRequest, ControlResponse, ControlTakeover, ControllerMap,
+    MidiInputSetting, MidiLearnCandidate, MidiSourceStatus, ParameterLinkMessage,
+    ParameterTouchPickup, ParameterTouchReport, RegisteredController, VirtualMidiMessage,
 };
-#[cfg(windows)]
+#[cfg(desktop_host)]
 use rackforge_controller_api::{
     ButtonPhase, DeclarativeControllerInput, HostActionTarget, HostControlTarget,
     rackforge_parameter_input, semantic_control_input,
 };
 use rackforge_controller_api::{HostActionBinding, HostControlBinding};
+use rackforge_core::controller_map_store::{ControllerMapStore, export_rfmap};
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
 use rackforge_core::{
-    CompiledParameterLink, IsolatedPluginStateEditor, LoadedPlugin, PluginInstance, PluginPackage,
-    PluginStateStore, PluginStorage, SemanticParameterLinkContext,
-    compile_semantic_parameter_links, validate_state_reference,
+    CompiledParameterLink, ControllerMapLinkContext, IsolatedPluginStateEditor, LoadedPlugin,
+    PluginInstance, PluginPackage, PluginStateStore, PluginStorage, SemanticParameterLinkContext,
+    compile_controller_map_links, compile_semantic_parameter_links, validate_state_reference,
 };
-#[cfg(windows)]
+#[cfg(desktop_host)]
 use rackforge_midi_api::{
     MidiChannel, MidiPacket as RoutedMidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
 };
@@ -50,15 +54,15 @@ use rackforge_plugin_api::{
 use rackforge_repository::{
     InstalledPackage, LocalPackageInspection, MAX_PACKAGE_BYTES, PluginUserDataRemovalOptions,
     cleanup_uninstall_tombstones, inspect_local_archive, install_local_archive,
-    install_local_archive_replacing, plugin_is_enabled, remove_plugin_user_data,
-    set_plugin_enabled, uninstall_plugin,
+    install_official_archive, plugin_is_enabled, remove_plugin_user_data, set_plugin_enabled,
+    uninstall_plugin,
 };
 use rackforge_session_api::{
     AuditionEndReason, BankSummary, CommandRef, DEFAULT_LIVE_SESSION_ID, EventEnvelope, InstanceId,
     MasterLevel, MasterPan, ParameterLink, PlayChainEffect, PlayChainState, PluginInstanceState,
     ProgramDraftState, RackForgeParameterMapper, RackForgeParameterValue, Revision,
     SESSION_SCHEMA_VERSION, SemanticControlProfile, SessionCommand, SessionEvent, SessionId,
-    SessionState, SoundSummary, semantic_control_little_header,
+    SessionState, SoundSummary,
 };
 use rackforge_surface_api::{SurfaceActivationRequest, SurfaceMode};
 use rackforge_surface_runtime::{
@@ -68,6 +72,7 @@ use rackforge_surface_runtime::{
 use semver::Version;
 use shutdown::DesktopShutdown;
 use startup::{Options, Startup, options_from_layout, parse_startup};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::Read;
@@ -133,7 +138,7 @@ enum AppMode {
 struct RackForgeApp {
     mode: AppMode,
     shutdown: Option<DesktopShutdown>,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     webview: desktop_webview::DesktopWebView,
 }
 
@@ -148,9 +153,19 @@ struct DesktopPlugin {
     sound_summaries: Vec<SoundSummary>,
     sounds: Vec<PlaySound>,
     selected_sound_id: Option<String>,
+    /// Whether the live state saved for this plugin -- its last panel and
+    /// the adjustments made since its program was chosen -- belongs to the
+    /// program selected: true once the session's program was restored, or
+    /// once a fresh start has dropped the old state. False for a program
+    /// chosen by default, the first, as after the plugin was removed and
+    /// installed again: the old state would sound under its name. The audio
+    /// start that drops it sets it, through a shared reference.
+    live_state_matches: Cell<bool>,
     instance: PluginInstance<'static>,
     resources: BTreeMap<String, PathBuf>,
     resource_data_paths: BTreeMap<String, PathBuf>,
+    /// Where the installed package lives: its control layout is read there.
+    package_root: PathBuf,
 }
 
 #[derive(Clone)]
@@ -160,15 +175,30 @@ struct RegisteredSemanticProfile {
     runtime_source_name: Option<String>,
     host_controls: Vec<HostControlBinding>,
     host_actions: Vec<HostActionBinding>,
+    /// Controls that maps read and no instrument hears.
+    held: Vec<rackforge_session_api::HeldControl>,
+    /// Attached by the desktop from a declarative package, not registered by
+    /// a driver: attached again whenever an input or a package changes.
+    declarative: bool,
+    /// The device's Identity Reply chose the package.
+    identified: bool,
+    /// What the package sends when its controller connects, once allowed.
+    on_connect: Vec<Vec<u8>>,
+    /// What it sends to the device's setup output -- a DAW port -- and how
+    /// to find that output.
+    setup_output: Option<rackforge_controller_package::EndpointMatcher>,
+    setup_messages: Vec<Vec<u8>>,
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 fn compile_desktop_parameter_links(
     links: &[ParameterLink],
     plugins: &[DesktopPlugin],
     performance: &PerformanceRepository,
     semantic_profiles: &BTreeMap<String, RegisteredSemanticProfile>,
-) -> Result<Vec<CompiledParameterLink>> {
+    controller_maps: &BTreeMap<String, ControllerMap>,
+    takeover: ControlTakeover,
+) -> Result<rackforge_core::parameter_link::ParameterLinkTable> {
     let mut compiled = links
         .iter()
         .map(|link| {
@@ -206,29 +236,73 @@ fn compile_desktop_parameter_links(
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let mut modifiers = Vec::new();
+    let mut host_buttons = Vec::new();
+    let mut held = Vec::new();
     for (controller_id, registered) in semantic_profiles {
         let Some(runtime_source_id) = &registered.runtime_source_id else {
             continue;
         };
-        let Some(profile) = &registered.profile else {
-            continue;
-        };
         let source_id = MidiSourceId::new(runtime_source_id.clone())?;
         let source_key = desktop_audio::stable_midi_source_key_from_id(&source_id);
+        // Its transport and lane buttons are the host's: the audio loop
+        // keeps their messages from the instruments.
+        host_buttons.extend(
+            registered
+                .host_actions
+                .iter()
+                .map(|binding| (source_key, *binding)),
+        );
+        // Its controls that never play: the links read them, and the audio
+        // loop keeps them from the instruments.
+        held.extend(registered.held.iter().map(|control| (source_key, *control)));
+        // The player's Fn button for this controller, on its port.
+        if let Some(modifier) = controller_maps.get(controller_id).and_then(|map| {
+            rackforge_core::parameter_link::CompiledModifier::from_map(map, source_key)
+        }) {
+            modifiers.push(modifier);
+        }
+        let controller_name = registered
+            .runtime_source_name
+            .as_deref()
+            .unwrap_or(controller_id);
         for plugin in plugins {
+            // The player's map for this controller and plugin sits between
+            // the session's own links and the package's defaults.
+            let mut explicit_links = links.to_vec();
+            if let Some(map) = controller_maps.get(controller_id) {
+                let mapped = compile_controller_map_links(ControllerMapLinkContext {
+                    map,
+                    plugin_id: &plugin.plugin_id,
+                    runtime_source_id: &source_id,
+                    source_name: controller_name,
+                    source_key,
+                    instance_id: &plugin.instance_id,
+                    schema: plugin.runtime.parameters(),
+                    explicit_links: links,
+                });
+                for (mapping, reason) in &mapped.pending {
+                    eprintln!(
+                        "CONTROLLER_MAPPING_PENDING controller={controller_id} plugin={} mapping={mapping} reason={reason:?}",
+                        plugin.plugin_id
+                    );
+                }
+                explicit_links.extend(mapped.links.iter().map(|link| link.link.clone()));
+                compiled.extend(mapped.links);
+            }
+            let Some(profile) = &registered.profile else {
+                continue;
+            };
             compiled.extend(
                 compile_semantic_parameter_links(SemanticParameterLinkContext {
                     controller_id,
-                    controller_name: registered
-                        .runtime_source_name
-                        .as_deref()
-                        .unwrap_or(controller_id),
+                    controller_name,
                     profile,
                     runtime_source_id: &source_id,
                     source_key,
                     instance_id: &plugin.instance_id,
                     schema: plugin.runtime.parameters(),
-                    explicit_links: links,
+                    explicit_links: &explicit_links,
                 })
                 .with_context(|| {
                     format!(
@@ -239,10 +313,18 @@ fn compile_desktop_parameter_links(
             );
         }
     }
-    Ok(compiled)
+    for link in &mut compiled {
+        link.set_takeover(takeover);
+    }
+    Ok(rackforge_core::parameter_link::ParameterLinkTable {
+        links: compiled,
+        modifiers,
+        host_buttons,
+        held,
+    })
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 fn virtual_midi_source_descriptor(client_id: &ClientId) -> MidiSourceDescriptor {
     let name = client_id.as_str().to_owned();
     MidiSourceDescriptor {
@@ -256,7 +338,7 @@ fn virtual_midi_source_descriptor(client_id: &ClientId) -> MidiSourceDescriptor 
     }
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 fn approved_midi_source(
     preferences: Option<&desktop_audio::AudioPreferences>,
     source_name: &str,
@@ -274,7 +356,7 @@ fn approved_midi_source(
     desktop_audio::midi_source_descriptor(source_name).map_err(|error| error.to_string())
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 fn approved_midi_source_statuses(
     preferences: Option<&desktop_audio::AudioPreferences>,
     present: &BTreeSet<String>,
@@ -303,7 +385,7 @@ struct VirtualMidiClientState {
     midi_source: Option<MidiSourceDescriptor>,
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 struct DesktopMidiLearn {
     id: u64,
     started_at: Instant,
@@ -442,17 +524,20 @@ struct DesktopApp {
     session_checkpoint: SessionCheckpointStore,
     button_down: [Option<Instant>; 4],
     keyboard_down: [Option<Instant>; 4],
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     controller_button_down: [Option<Instant>; 4],
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     controller_button_long_fired: [bool; 4],
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     controller_home_chord_emitted: bool,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     controller_encoder_down: Option<Instant>,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     controller_header_restore_at: Option<Instant>,
-    #[cfg(windows)]
+    /// The last parameter touch the header showed.
+    #[cfg(desktop_host)]
+    parameter_touch_seen: u64,
+    #[cfg(desktop_host)]
     controller_parameter_mapper: RackForgeParameterMapper,
     web_url: String,
     web_servers: web::DesktopWebServers,
@@ -468,54 +553,91 @@ struct DesktopApp {
     /// every connected client learns about an edit made by any of them.
     performance_revision_shared: Arc<RwLock<String>>,
     state_store: PluginStateStore,
-    /// What PLAY was sounding before LIVE borrowed the voice.
-    ///
-    /// The Desktop renders one voice, so putting a Rack on stage overwrites
-    /// the instrument and the sound the player had set up in PLAY. Leaving
-    /// LIVE has to give it back: PLAY and LIVE are two modes, and a mode that
-    /// forgets what you left in it is not a mode.
-    play_voice: Option<(InstanceId, Vec<u8>)>,
     /// Runtime controller defaults. They are deliberately not persisted as
     /// user MIDI links; the signed controller package registers them again.
     controller_semantic_profiles: BTreeMap<String, RegisteredSemanticProfile>,
+    /// A controller's TAP button: the host owns the timestamps.
+    controller_taps: rackforge_core::sequencer::TapTempoFold,
+    controller_tap_clock: Instant,
+    /// The player's controller maps, by controller id, and where they live.
+    controller_maps: BTreeMap<String, ControllerMap>,
+    controller_map_store: ControllerMapStore,
+    /// How knobs and faders take a parameter over, as stored.
+    controller_takeover: ControlTakeover,
+    /// What came in lately, for the Controllers editor.
+    midi_activity: rackforge_core::midi_activity::MidiActivityLog,
+    /// What each connected input's device answered to the Identity Request.
+    midi_identities: BTreeMap<String, rackforge_controller_package::IdentityReply>,
+    /// Inputs asked which model they are, and when their answer stops being
+    /// waited for.
+    pending_controller_connects: BTreeMap<String, Instant>,
+    /// The (input, package) pairs whose connect messages went out while the
+    /// input stayed connected.
+    controller_output_sent: BTreeSet<(String, String)>,
     virtual_midi: BTreeMap<ClientId, VirtualMidiClientState>,
     next_program_draft_id: u64,
     next_audition_lease_id: u64,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     audio: Option<desktop_audio::DesktopAudio>,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     audio_preferences: Option<desktop_audio::AudioPreferences>,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     audio_config_path: PathBuf,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     audio_recovery_at: Option<Instant>,
     /// Whether a reading is being heard that has not been applied.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     velocity_audition: bool,
     /// The interface's own pulse while it is listening to one.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     velocity_preview_heartbeat: Arc<std::sync::atomic::AtomicU64>,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     audio_recovery_attempts: u32,
     /// Stall watchdog: the last callback count seen and when it last moved.
     /// A frozen counter is the only witness to an ASIO driver that stopped
     /// calling back (another client grabbed the hardware) -- that death
     /// reports no stream error at all.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     audio_watchdog: Option<(u64, Instant)>,
     /// When the last stall fired, so a device that dies over and over gets
     /// exponential patience instead of a tight reopen loop.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     audio_last_stall: Option<Instant>,
     /// Device inventory cache: enumerating instantiates every ASIO driver,
     /// and instantiating the driver that is currently streaming is asking a
     /// single-client driver for trouble. Settings reads within the TTL see
     /// the cached scan.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     audio_inventory_cache: Option<(Instant, desktop_audio::AudioInventory)>,
-    #[cfg(windows)]
+    /// The last enumeration that actually reached the live backend's rows.
+    ///
+    /// Kept apart from `audio_inventory_cache` because that one holds spliced
+    /// results: while ASIO streams it is rebuilt from a scan that skips ASIO
+    /// plus whatever the previous cache held, so a cache that ever lacked the
+    /// ASIO rows can never regain them. Starting the app with ASIO already
+    /// streaming produced exactly that -- an ASIO section with nothing
+    /// selectable in it, for the rest of the session. This holds the rows of
+    /// record and is only ever written by a scan that really enumerated them.
+    audio_live_backend_rows: Option<desktop_audio::AudioInventory>,
+    /// The previous health reading, so the next one can be reported as the
+    /// interval between them instead of as a lifetime mean.
+    audio_health_previous: Option<desktop_audio::AudioRuntimeStatus>,
+    /// Set when the interface asks for the ASIO driver's window and taken on
+    /// the next frame, after the request has been answered: the window can
+    /// be modal, and it has to open on this thread, the one that loaded the
+    /// driver.
+    audio_driver_panel_pending: bool,
+    /// The forwarded-MIDI route last published to the web servers, so it is
+    /// written only when it changes.
+    #[cfg(desktop_host)]
+    forwarded_midi_route: web::ForwardedMidiRoute,
+    /// The driver's reset-request count when the running stream was
+    /// published, and when that was. `None` until the first poll after a
+    /// stream is published takes it.
+    audio_reset_baseline: Option<(u64, Instant)>,
+    #[cfg(desktop_host)]
     midi_learn: Option<DesktopMidiLearn>,
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     next_midi_learn_id: u64,
     /// Raised on exit so the controller supervisor reaps its drivers.
     controller_shutdown: Option<Arc<std::sync::atomic::AtomicBool>>,
@@ -582,7 +704,10 @@ impl DesktopApp {
                     continue;
                 }
                 match plugin.instance.load_preset(&sound_id) {
-                    Ok(()) => plugin.selected_sound_id = Some(sound_id),
+                    Ok(()) => {
+                        plugin.selected_sound_id = Some(sound_id);
+                        plugin.live_state_matches.set(true);
+                    }
                     Err(error) => warnings.push(format!(
                         "Could not restore {} program {sound_id:?} ({error:#}); using its first available program",
                         plugin.name
@@ -635,16 +760,48 @@ impl DesktopApp {
                 });
         let performance_repository = PerformanceRepository::load_or_empty(Some(&options.data_root))
             .context("loading Desktop performance library")?;
+        // Where LIVE was, kept across a restart. The saved session was
+        // written back over with an empty LIVE, so every start forgot the
+        // lists' positions and what was on stage. What was playing is loaded
+        // again once the app exists, through the same path as LOAD; until
+        // then nothing is claimed to be playing.
+        let mut restored_live_target = None;
+        let restored_live = match session_checkpoint.live_state(&session_id) {
+            Ok(Some(mut live)) if live.validate(performance_repository.library()).is_ok() => {
+                restored_live_target = live.active.take();
+                live.deactivate();
+                Some(live)
+            }
+            Ok(Some(_)) => {
+                warnings.push("The saved LIVE position no longer matches the library".into());
+                None
+            }
+            Ok(None) => None,
+            Err(error) => {
+                warnings.push(format!("Could not restore the LIVE position: {error:#}"));
+                None
+            }
+        };
         *performance_revision_shared
             .write()
             .expect("performance revision lock poisoned") =
             performance_repository.revision().as_str().to_owned();
         let state_store = PluginStateStore::new(Some(&options.data_root))
             .context("loading Desktop plugin-state store")?;
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let audio_config_path = options.rackforge_root.join("config/audio.toml");
-        #[cfg(windows)]
-        let (audio_preferences, audio) = match desktop_audio::AudioInventory::scan() {
+        // The one scan that may touch every device freely: nothing is
+        // streaming yet. It is kept, as the cache the settings page reads and
+        // as the rows of record, instead of being thrown away and redone by
+        // the interface a second later with the stream already open --
+        // measured at 636 ms of opening every WASAPI endpoint, the playing
+        // interface's included, just after startup.
+        #[cfg(desktop_host)]
+        let startup_inventory = desktop_audio::AudioInventory::scan();
+        #[cfg(desktop_host)]
+        let startup_rows = startup_inventory.as_ref().ok().cloned();
+        #[cfg(desktop_host)]
+        let (audio_preferences, audio) = match startup_inventory {
             Ok(inventory) => match inventory.default_preferences() {
                 Ok(defaults) => {
                     let preferences = match desktop_audio::AudioPreferences::load(
@@ -731,11 +888,18 @@ impl DesktopApp {
             state.instances = plugins.iter().map(plugin_session_state).collect();
             state.parameter_links = restored_parameter_links.clone();
             state.play_chains = prune_play_chains(restored_play_chains, &state.instances, &plugins);
+            if let Some(live) = restored_live {
+                state.live = live;
+            }
             menu.sync_active_mode(active_mode_from_surface(state.active_mode));
         }
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let controller_semantic_profiles = match audio_preferences.as_ref().map(|preferences| {
-            declarative_semantic_profiles(&options.rackforge_root, &preferences.midi_inputs)
+            declarative_semantic_profiles(
+                &options.rackforge_root,
+                &preferences.midi_inputs,
+                &BTreeMap::new(),
+            )
         }) {
             Some(Ok(profiles)) => profiles,
             Some(Err(error)) => {
@@ -746,9 +910,22 @@ impl DesktopApp {
             }
             None => BTreeMap::new(),
         };
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let controller_semantic_profiles = BTreeMap::new();
-        #[cfg(windows)]
+        let controller_map_store = ControllerMapStore::new(Some(&options.data_root));
+        if let Err(error) =
+            offer_factory_controller_maps(&controller_map_store, &plugins, &options.rackforge_root)
+        {
+            warnings.push(format!(
+                "Factory controller maps were not offered: {error:#}"
+            ));
+        }
+        let controller_maps = controller_map_store.load_all().unwrap_or_else(|error| {
+            warnings.push(format!("Controller maps were not loaded: {error:#}"));
+            BTreeMap::new()
+        });
+        let controller_takeover = controller_map_store.takeover();
+        #[cfg(desktop_host)]
         if let Some(audio) = &audio {
             sync_desktop_audio(audio, &session, &menu)?;
             audio.replace_parameter_links(compile_desktop_parameter_links(
@@ -756,6 +933,8 @@ impl DesktopApp {
                 &plugins,
                 &performance_repository,
                 &controller_semantic_profiles,
+                &controller_maps,
+                controller_takeover,
             )?)?;
             let active = session
                 .read()
@@ -791,7 +970,7 @@ impl DesktopApp {
         };
 
         let web_url = web_servers.local_url().to_owned();
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let velocity_preview_heartbeat = web_servers.velocity_preview_heartbeat();
         // Point surface notes at the engine that just started, and hand over
         // the cell it writes each strike into. Both, and in the same breath:
@@ -801,7 +980,7 @@ impl DesktopApp {
         // it would follow the keyboard.
         web_servers.set_injected_midi(audio.as_ref().map(|audio| audio.injected_midi_sender()));
         web_servers.set_last_strike(audio.as_ref().map(|audio| audio.last_strike_cell()));
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let audio_recovery_at =
             if audio.is_none() && audio_preferences.is_some() && !plugins.is_empty() {
                 Some(Instant::now() + Duration::from_secs(1))
@@ -814,17 +993,20 @@ impl DesktopApp {
             session_checkpoint,
             button_down: [None; 4],
             keyboard_down: [None; 4],
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             controller_button_down: [None; 4],
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             controller_button_long_fired: [false; 4],
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             controller_home_chord_emitted: false,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             controller_encoder_down: None,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             controller_header_restore_at: None,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
+            parameter_touch_seen: rackforge_core::parameter_touch::PARAMETER_TOUCHES
+                .current_sequence(),
+            #[cfg(desktop_host)]
             controller_parameter_mapper: RackForgeParameterMapper::default(),
             web_url,
             web_servers,
@@ -838,41 +1020,75 @@ impl DesktopApp {
             performance_repository,
             performance_revision_shared,
             state_store,
-            play_voice: None,
             live_state_dirty: None,
             controller_semantic_profiles,
+            controller_taps: rackforge_core::sequencer::TapTempoFold::new(),
+            controller_tap_clock: Instant::now(),
+            controller_maps,
+            controller_map_store,
+            controller_takeover,
+            midi_activity: Default::default(),
+            midi_identities: BTreeMap::new(),
+            pending_controller_connects: BTreeMap::new(),
+            controller_output_sent: BTreeSet::new(),
             virtual_midi: BTreeMap::new(),
             next_program_draft_id: 1,
             next_audition_lease_id: 1,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             audio,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             audio_preferences,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             audio_config_path,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             audio_recovery_at,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             velocity_audition: false,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             velocity_preview_heartbeat,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             audio_recovery_attempts: 0,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             audio_watchdog: None,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             audio_last_stall: None,
-            #[cfg(windows)]
-            audio_inventory_cache: None,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
+            audio_inventory_cache: startup_rows
+                .clone()
+                .map(|inventory| (Instant::now(), inventory)),
+            audio_live_backend_rows: startup_rows,
+            audio_health_previous: None,
+            audio_driver_panel_pending: false,
+            #[cfg(desktop_host)]
+            forwarded_midi_route: web::ForwardedMidiRoute::default(),
+            audio_reset_baseline: None,
+            #[cfg(desktop_host)]
             midi_learn: None,
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             next_midi_learn_id: 1,
             controller_shutdown: None,
             controller_supervisor: None,
         };
         app.sync_little_plugin_parameters();
         app.sync_little_play_chain();
+        let starts_live = app
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .active_mode
+            == SurfaceMode::Live;
+        if starts_live
+            && let Some(location) = restored_live_target
+            && let Err(error) = app.activate_live_target(location, None)
+        {
+            eprintln!("LIVE_RESTORE_FAILED reason={error}");
+            app.status = format!("The LIVE target could not be loaded again: {error}");
+        }
+        // LITTLE opens on what is playing: the LIVE lists need the library
+        // and the LIVE position before the screen can go there.
+        let performance = app.performance_snapshot();
+        app.menu.sync_performance_snapshot(performance);
+        app.menu.show_active_mode();
         Ok(app)
     }
 
@@ -904,7 +1120,10 @@ impl DesktopApp {
             };
             if plugin.sounds.iter().any(|sound| sound.id == *sound_id) {
                 match plugin.instance.load_preset(sound_id) {
-                    Ok(()) => plugin.selected_sound_id = Some(sound_id.clone()),
+                    Ok(()) => {
+                        plugin.selected_sound_id = Some(sound_id.clone());
+                        plugin.live_state_matches.set(true);
+                    }
                     Err(error) => warnings.push(format!(
                         "Could not retain {} program {sound_id:?} after reload: {error:#}",
                         plugin.name
@@ -921,13 +1140,13 @@ impl DesktopApp {
                 })
             })
             .map(|plugin| plugin.instance_id.as_str());
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let mut replacement_audio = None;
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         {
             // Same reason as the audio-settings path: the rebuilt instances
             // restore their live state, so it has to be current first.
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             self.flush_live_state();
             // Catalog reloads replace every DSP instance. Retire the old
             // generation through the single audio hand-off path so Web MIDI
@@ -985,8 +1204,12 @@ impl DesktopApp {
             state.revision = Revision::new(state.revision.get().saturating_add(1));
         }
         self.menu = menu;
+        // The rebuilt menu opens on what is playing, not on its home page.
+        let performance = self.performance_snapshot();
+        self.menu.sync_performance_snapshot(performance);
+        self.menu.show_active_mode();
         self.plugins = plugins;
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if let Some(audio) = replacement_audio {
             match sync_desktop_audio(&audio, &self.session, &self.menu) {
                 Ok(()) => {
@@ -1001,13 +1224,40 @@ impl DesktopApp {
                 }
             }
         }
+        // A plugin installed or removed changes what each keyboard is
+        // offered: the maps take it in, and the links follow them.
+        if let Err(error) = offer_factory_controller_maps(
+            &self.controller_map_store,
+            &self.plugins,
+            &self.options.rackforge_root,
+        ) {
+            warnings.push(format!(
+                "Factory controller maps were not offered: {error:#}"
+            ));
+        }
+        match self.controller_map_store.load_all() {
+            Ok(maps) => self.controller_maps = maps,
+            Err(error) => warnings.push(format!("Controller maps were not loaded: {error:#}")),
+        }
+        #[cfg(desktop_host)]
+        if self.audio.is_some() {
+            let links = self
+                .session
+                .read()
+                .expect("session lock poisoned")
+                .parameter_links
+                .clone();
+            if let Err(error) = self.replace_parameter_links(links) {
+                warnings.push(error);
+            }
+        }
         self.sync_little_play_chain();
         self.sync_little_plugin_parameters();
         self.persist_session_checkpoint();
         Ok(warnings)
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     /// Retires the current engine generation and makes every producer stop
     /// targeting it before its MIDI/audio receivers are dropped.
     fn stop_audio_runtime(&mut self) {
@@ -1016,7 +1266,7 @@ impl DesktopApp {
         self.audio_watchdog = None;
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     /// Publishes a fully started engine as one generation. Hardware MIDI is
     /// already connected by `DesktopAudio::start`; publishing its surface
     /// sender last makes Touch Controller switch to the same generation.
@@ -1025,12 +1275,136 @@ impl DesktopApp {
         let last_strike = audio.last_strike_cell();
         self.audio = Some(audio);
         self.audio_watchdog = None;
+        self.audio_reset_baseline = None;
         self.web_servers.set_injected_midi(Some(injected_midi));
         self.web_servers.set_last_strike(Some(last_strike));
+        // A new engine starts with PLAY's voices only; the Rack LIVE had on
+        // stage is built into it again.
+        self.reload_live_rack("audio-restart");
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
+    /// Stops the engine and schedules it to start again, with the patience
+    /// a device that keeps failing has earned: one that stays up half a
+    /// minute gets a quarter of a second, one that fails again sooner gets
+    /// twice the wait of the time before, up to eight seconds.
+    fn schedule_audio_restart(&mut self, status: &str) {
+        self.stop_audio_runtime();
+        let repeated = self
+            .audio_last_stall
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(30));
+        if repeated {
+            self.audio_recovery_attempts = self.audio_recovery_attempts.saturating_add(1);
+        } else {
+            self.audio_recovery_attempts = 0;
+        }
+        self.audio_last_stall = Some(Instant::now());
+        let exponent = self.audio_recovery_attempts.min(5);
+        let delay = Duration::from_millis(250_u64.saturating_mul(1 << exponent));
+        self.audio_recovery_at = Some(Instant::now() + delay);
+        self.status = status.into();
+    }
+
+    #[cfg(desktop_host)]
+    fn asio_streaming(&self) -> bool {
+        self.audio.is_some()
+            && self
+                .audio_preferences
+                .as_ref()
+                .is_some_and(|preferences| preferences.driver == "ASIO")
+    }
+
+    #[cfg(desktop_host)]
+    /// Reopens the stream when the ASIO driver asks to be reset.
+    ///
+    /// A driver asks when something it owns changed under us -- a buffer
+    /// size or sample rate chosen in its own window, its clock source, the
+    /// device itself -- and until the host closes and reopens it the driver
+    /// may keep calling back with the old buffers, or stop. cpal registers
+    /// nothing for the message, so it used to go unheard and the stall
+    /// watchdog found out two seconds later, if the driver stopped at all.
+    ///
+    /// Requests in the first second after a stream is published are taken
+    /// as the driver settling into the configuration this host just gave
+    /// it, not as a change: some drivers ask once as buffers are created,
+    /// and reopening for that would ask again, forever. A driver that keeps
+    /// asking after that goes through the same backoff as a stalled one.
+    fn poll_audio_driver_reset(&mut self) {
+        if !self.asio_streaming() {
+            self.audio_reset_baseline = None;
+            return;
+        }
+        let requests = desktop_audio::asio_driver_reset_requests();
+        let (baseline, restart) =
+            driver_reset_decision(self.audio_reset_baseline, requests, Instant::now());
+        self.audio_reset_baseline = Some(baseline);
+        if let Some(asked) = restart {
+            println!("DESKTOP_AUDIO_DRIVER_RESET_REQUESTED requests={asked}");
+            self.schedule_audio_restart(
+                "The audio driver asked to be reset (its settings changed) · reopening audio…",
+            );
+        }
+    }
+
+    #[cfg(desktop_host)]
+    /// The driver settings window the interface may offer, and whether it
+    /// can open now.
+    fn audio_driver_panel(
+        &self,
+    ) -> Option<(
+        rackforge_control_api::AudioDriverPanel,
+        Result<(), &'static str>,
+    )> {
+        use rackforge_control_api::AudioDriverPanel;
+        match self.audio_preferences.as_ref()?.driver.as_str() {
+            "ASIO" => Some((
+                AudioDriverPanel::Asio,
+                if self.audio.is_some() {
+                    Ok(())
+                } else {
+                    Err(
+                        "Start the ASIO stream to open its driver's settings: ASIO loads one driver at a time, and only the one playing can show its window.",
+                    )
+                },
+            )),
+            "WASAPI" => Some((AudioDriverPanel::SystemSound, Ok(()))),
+            _ => None,
+        }
+    }
+
+    #[cfg(desktop_host)]
+    /// Opens the ASIO driver's window if one was asked for.
+    fn poll_audio_driver_panel(&mut self) {
+        if !std::mem::take(&mut self.audio_driver_panel_pending) {
+            return;
+        }
+        // The request was answered a frame ago and the stream may have gone
+        // since; loading a driver just to show its window would stop it.
+        if !self.asio_streaming() {
+            self.status = "The ASIO stream stopped before its driver's settings could open".into();
+            return;
+        }
+        // A modal window holds this thread until it closes, and with it the
+        // stall watchdog's clock. It is re-armed on both sides, so the time
+        // spent choosing a buffer size is not mistaken for a driver that
+        // stopped calling back. A driver that really did stop is still
+        // caught, two seconds after the window closes.
+        self.audio_watchdog = None;
+        let opened = Instant::now();
+        let result = desktop_audio::open_asio_control_panel();
+        self.audio_watchdog = None;
+        println!(
+            "DESKTOP_AUDIO_DRIVER_PANEL result={result:?} open_ms={}",
+            opened.elapsed().as_millis()
+        );
+        if let Err(error) = result {
+            self.status = format!("The ASIO driver could not open its settings: {error}");
+        }
+    }
+
+    #[cfg(desktop_host)]
     fn poll_audio_error(&mut self) {
+        self.poll_audio_driver_reset();
         // The stall watchdog. An ASIO driver whose hardware another client
         // grabbed (the Focusrite when a WASAPI session opens the same
         // interface, a control-panel reset, a sample-rate change) stops
@@ -1046,26 +1420,9 @@ impl DesktopApp {
             match self.audio_watchdog {
                 Some((last, since)) if blocks == last => {
                     if since.elapsed() >= Duration::from_secs(2) {
-                        self.stop_audio_runtime();
-                        // A device that keeps dying earns exponential
-                        // patience; one that stays up half a minute earns a
-                        // fresh start.
-                        let repeated = self
-                            .audio_last_stall
-                            .is_some_and(|at| at.elapsed() < Duration::from_secs(30));
-                        if repeated {
-                            self.audio_recovery_attempts =
-                                self.audio_recovery_attempts.saturating_add(1);
-                        } else {
-                            self.audio_recovery_attempts = 0;
-                        }
-                        self.audio_last_stall = Some(Instant::now());
-                        let exponent = self.audio_recovery_attempts.min(5);
-                        let delay = Duration::from_millis(250_u64.saturating_mul(1 << exponent));
-                        self.audio_recovery_at = Some(Instant::now() + delay);
-                        self.status =
-                            "Audio stream stalled (the driver stopped calling back) · reconnecting audio…"
-                                .into();
+                        self.schedule_audio_restart(
+                            "Audio stream stalled (the driver stopped calling back) · reconnecting audio…",
+                        );
                         eprintln!("DESKTOP_AUDIO_STALL_DETECTED blocks={blocks}");
                     }
                 }
@@ -1146,7 +1503,7 @@ impl DesktopApp {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn audio_summary(&self) -> String {
         self.audio.as_ref().map_or_else(
             || "Audio/MIDI unavailable".into(),
@@ -1154,7 +1511,62 @@ impl DesktopApp {
         )
     }
 
-    #[cfg(windows)]
+    /// What this host captures, for the Rack editor. Read from the saved
+    /// preferences and the running stream, and the interface's input count
+    /// from the last inventory scan -- never a new scan, which would ask a
+    /// streaming ASIO driver to enumerate itself. Desktop plays one Slot of
+    /// a Rack, so a cable's own inputs and trim are not honoured here.
+    #[cfg(desktop_host)]
+    fn audio_input_status(&self) -> rackforge_control_api::AudioInputStatus {
+        use rackforge_control_api::{AudioInputAvailability, AudioInputStatus};
+        let Some(preferences) = self
+            .audio_preferences
+            .as_ref()
+            .filter(|preferences| preferences.input_device.is_some())
+        else {
+            return AudioInputStatus::default();
+        };
+        let device_channels = self
+            .audio_inventory_cache
+            .as_ref()
+            .and_then(|(_, inventory)| inventory.input(preferences))
+            .map_or(0, |input| input.channels);
+        let captured = preferences.input_channels.clone();
+        let capturing = self
+            .audio
+            .as_ref()
+            .is_some_and(desktop_audio::DesktopAudio::capturing);
+        AudioInputStatus {
+            availability: if capturing {
+                AudioInputAvailability::Open
+            } else {
+                AudioInputAvailability::Absent
+            },
+            device_name: preferences.input_device.clone(),
+            device_channels,
+            peaks: if capturing {
+                self.audio
+                    .as_ref()
+                    .map_or_else(Vec::new, |audio| audio.take_input_peaks(captured.len()))
+            } else {
+                Vec::new()
+            },
+            captured,
+            gain_db: preferences.input_gain_db,
+            cable_routing: false,
+            reason: (!capturing).then(|| "The input could not be opened.".to_owned()),
+        }
+    }
+
+    #[cfg(not(desktop_host))]
+    fn audio_input_status(&self) -> rackforge_control_api::AudioInputStatus {
+        rackforge_control_api::AudioInputStatus {
+            availability: rackforge_control_api::AudioInputAvailability::Unsupported,
+            ..Default::default()
+        }
+    }
+
+    #[cfg(desktop_host)]
     /// The device inventory, without ever re-instantiating the ASIO driver
     /// that is streaming right now: enumerating instantiates every ASIO
     /// driver, and doing that to the live one stops the stream dead
@@ -1162,12 +1574,29 @@ impl DesktopApp {
     /// ran). While ASIO is active, other backends are scanned fresh and the
     /// live driver's rows come from the cache; a short TTL keeps repeated
     /// settings reads from hammering the drivers either way.
-    fn scan_inventory(&mut self) -> Result<desktop_audio::AudioInventory> {
+    ///
+    /// While a stream is running, audio hardware is scanned only when the
+    /// player asks for it (`refresh`). A scan opens every endpoint of every
+    /// backend and asks it for its formats -- the audio interface that is
+    /// playing included, through its WASAPI side -- and the settings page
+    /// used to trigger one on arrival and then every ten seconds while it
+    /// stayed open, because its live readings poll this document. Notes
+    /// played meanwhile were heard late and releases held over: switching
+    /// from PLAY to SETTINGS while playing was enough. The MIDI list is
+    /// still refreshed, from the same enumeration the MIDI supervisor
+    /// already runs every second, so a keyboard plugged in shows up.
+    fn scan_inventory(&mut self, refresh: bool) -> Result<desktop_audio::AudioInventory> {
         const INVENTORY_TTL: Duration = Duration::from_secs(10);
-        if let Some((at, cached)) = &self.audio_inventory_cache
-            && at.elapsed() < INVENTORY_TTL
-        {
-            return Ok(cached.clone());
+        if !refresh && let Some((at, cached)) = &self.audio_inventory_cache {
+            if at.elapsed() < INVENTORY_TTL {
+                return Ok(cached.clone());
+            }
+            if self.audio.is_some() {
+                let mut inventory = cached.clone();
+                inventory.midi_inputs = desktop_audio::discover_all_midi_inputs()?;
+                self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
+                return Ok(inventory);
+            }
         }
         let streaming_driver = if self.audio.is_some() {
             self.audio_preferences
@@ -1180,23 +1609,45 @@ impl DesktopApp {
         let inventory = match streaming_driver.as_deref() {
             Some(live) => {
                 let mut fresh = desktop_audio::AudioInventory::scan_skipping(Some(live))?;
-                match &self.audio_inventory_cache {
-                    Some((_, cached)) => {
-                        fresh
-                            .drivers
-                            .extend(cached.drivers.iter().filter(|d| d.name == live).cloned());
-                        fresh
-                            .outputs
-                            .extend(cached.outputs.iter().filter(|o| o.driver == live).cloned());
-                        fresh
-                            .inputs
-                            .extend(cached.inputs.iter().filter(|i| i.driver == live).cloned());
+                match &self.audio_live_backend_rows {
+                    Some(cached) => desktop_audio::splice_live_backend(
+                        &mut fresh,
+                        live,
+                        cached.drivers.iter().filter(|d| d.name == live).cloned(),
+                        cached.outputs.iter().filter(|o| o.driver == live).cloned(),
+                        cached.inputs.iter().filter(|i| i.driver == live).cloned(),
+                    ),
+                    // Nothing recorded yet: the app was started with this
+                    // backend already streaming, so no scan has ever reached
+                    // its devices and none can be run now without stopping
+                    // the stream. Listing the driver alone left the section
+                    // empty and unselectable for the rest of the session.
+                    // The device in use is known from the preferences that
+                    // opened it, so it is published as itself -- one true row
+                    // instead of none -- until a scan that includes this
+                    // backend records the rest.
+                    None => {
+                        let driver = desktop_audio::AudioDriverInfo {
+                            name: live.to_owned(),
+                            available: true,
+                            detail: "In use by the current stream".into(),
+                        };
+                        desktop_audio::splice_live_backend(&mut fresh, live, [driver], [], []);
+                        if let Some(preferences) = self.audio_preferences.as_ref() {
+                            fresh.outputs.push(desktop_audio::AudioOutputInfo {
+                                driver: live.to_owned(),
+                                name: preferences.output_device.clone(),
+                                is_default: false,
+                                // Stereo unless the running stream says
+                                // otherwise; the preferences do not record a
+                                // channel count for the output.
+                                channels: 2,
+                                default_sample_rate: preferences.sample_rate_hz,
+                                sample_rates: vec![preferences.sample_rate_hz],
+                                buffer_frames: preferences.buffer_frames.into_iter().collect(),
+                            });
+                        }
                     }
-                    None => fresh.drivers.push(desktop_audio::AudioDriverInfo {
-                        name: live.to_owned(),
-                        available: true,
-                        detail: "In use by the current stream".into(),
-                    }),
                 }
                 fresh.outputs.sort_by(|left, right| {
                     left.driver
@@ -1212,15 +1663,21 @@ impl DesktopApp {
                 });
                 fresh
             }
-            None => desktop_audio::AudioInventory::scan()?,
+            None => {
+                let full = desktop_audio::AudioInventory::scan()?;
+                // Nothing was skipped, so these rows are the record every
+                // later spliced scan borrows the live backend's rows from.
+                self.audio_live_backend_rows = Some(full.clone());
+                full
+            }
         };
         self.audio_inventory_cache = Some((Instant::now(), inventory.clone()));
         Ok(inventory)
     }
 
-    #[cfg(windows)]
-    fn audio_settings_json(&mut self) -> Result<serde_json::Value> {
-        let inventory = self.scan_inventory()?;
+    #[cfg(desktop_host)]
+    fn audio_settings_json(&mut self, refresh: bool) -> Result<serde_json::Value> {
+        let inventory = self.scan_inventory(refresh)?;
         let preferences = self
             .audio_preferences
             .clone()
@@ -1245,10 +1702,17 @@ impl DesktopApp {
             "preferences": preferences,
             "midi_source_keys": midi_source_keys,
             "runtime_status": self.audio_summary(),
+            "driver_panel": self.audio_driver_panel().map(|(kind, ready)| {
+                serde_json::json!({
+                    "kind": kind,
+                    "available": ready.is_ok(),
+                    "detail": ready.err(),
+                })
+            }),
         }))
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn apply_web_preferences(&mut self, preferences: web::WebServerPreferences) -> Result<String> {
         let previous = self.web_preferences.clone();
         self.web_servers.apply(preferences.clone())?;
@@ -1274,13 +1738,13 @@ impl DesktopApp {
         })
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     /// Hear a velocity reading without writing it down.
     ///
     /// Only the readings are taken from the body -- everything else about the
     /// audio settings is the applied document's business, and a screen that is
     /// auditioning a curve has no business changing a driver.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn audition_velocity(
         &mut self,
         readings: serde_json::Value,
@@ -1306,7 +1770,7 @@ impl DesktopApp {
     }
 
     /// Put back the reading that is applied.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn restore_velocity(&mut self) -> Result<serde_json::Value, String> {
         if !self.velocity_audition {
             return Ok(serde_json::json!({"status": "ok"}));
@@ -1343,7 +1807,7 @@ impl DesktopApp {
     /// A settings screen closed mid-edit -- a browser tab shut, a laptop lid
     /// -- must not leave a curve nobody chose in the signal path, so the
     /// engine listens for the screen rather than trusting it to say goodbye.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn poll_velocity_audition(&mut self) {
         if !self.velocity_audition {
             return;
@@ -1365,7 +1829,7 @@ impl DesktopApp {
     /// A port a player chose stays in the list while it is unplugged: the
     /// choice outlives the cable, and a list that quietly dropped it would
     /// make an unplugged keyboard look like a forgotten one.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn midi_settings_response(&mut self) -> ControlResponse {
         let present = match desktop_audio::midi_input_names() {
             Ok(names) => names,
@@ -1419,7 +1883,7 @@ impl DesktopApp {
     ///
     /// This goes through the ordinary apply, which recognises a change that
     /// touches nothing but the keyboard and leaves the audio stream alone.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn set_midi_input_enabled(&mut self, name: &str, enabled: bool) -> ControlResponse {
         let Some(mut preferences) = self.audio_preferences.clone() else {
             return ControlResponse::Error {
@@ -1444,7 +1908,7 @@ impl DesktopApp {
     }
 
     /// The reading for one keybed, or for every keybed without one of its own.
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn set_velocity_curve(
         &mut self,
         device: Option<String>,
@@ -1544,7 +2008,7 @@ impl DesktopApp {
         // the old program back — the program a player picked seconds
         // before touching the audio settings would silently revert,
         // because the periodic flush had not come round yet.
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         self.flush_live_state();
         // The stream comes down BEFORE the scan: enumerating instantiates
         // every ASIO driver, and instantiating the live one kills its
@@ -1625,7 +2089,7 @@ impl DesktopApp {
         Ok(format!("Settings applied · {summary}"))
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn restore_audio(
         &mut self,
         preferences: Option<&desktop_audio::AudioPreferences>,
@@ -1667,7 +2131,7 @@ impl DesktopApp {
         Ok(())
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn test_audio_note(&mut self) -> Result<()> {
         let audio = self
             .audio
@@ -1678,7 +2142,7 @@ impl DesktopApp {
         Ok(())
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn choose_plugin_archive() -> Option<PathBuf> {
         rfd::FileDialog::new()
             .set_title("Install RackForge plugin")
@@ -1686,7 +2150,7 @@ impl DesktopApp {
             .pick_file()
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(desktop_host))]
     fn choose_plugin_archive() -> Option<PathBuf> {
         None
     }
@@ -1885,31 +2349,27 @@ impl DesktopApp {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn show_install_error(message: &str) {
-        rfd::MessageDialog::new()
-            .set_title("RackForge could not install the plugin")
-            .set_description(message)
-            .set_level(rfd::MessageLevel::Error)
-            .show();
+        message_dialog::show(
+            message_dialog::Level::Error,
+            "RackForge could not install the plugin",
+            message,
+        );
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(desktop_host))]
     fn show_install_error(_message: &str) {}
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn show_install_info(title: &str, message: &str) {
-        rfd::MessageDialog::new()
-            .set_title(title)
-            .set_description(message)
-            .set_level(rfd::MessageLevel::Info)
-            .show();
+        message_dialog::show(message_dialog::Level::Info, title, message);
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(desktop_host))]
     fn show_install_info(_title: &str, _message: &str) {}
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn confirm_plugin_install(archive: &Path, inspection: &LocalPackageInspection) -> bool {
         let trust = if inspection.portable {
             "Portable WASM package (the same package can run on supported RackForge platforms)."
@@ -1928,16 +2388,14 @@ impl DesktopApp {
             archive.display(),
             trust
         );
-        rfd::MessageDialog::new()
-            .set_title("Install RackForge plugin")
-            .set_description(description)
-            .set_level(rfd::MessageLevel::Warning)
-            .set_buttons(rfd::MessageButtons::YesNo)
-            .show()
-            == rfd::MessageDialogResult::Yes
+        message_dialog::ask(
+            message_dialog::Level::Warning,
+            "Install RackForge plugin",
+            &description,
+        )
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(desktop_host))]
     fn confirm_plugin_install(_archive: &Path, _inspection: &LocalPackageInspection) -> bool {
         false
     }
@@ -1953,18 +2411,18 @@ impl DesktopApp {
         if self.menu.parameter_target_instance_id().map(str::to_owned) != target_before {
             self.sync_little_plugin_parameters();
         }
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         self.render_controller_screen();
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn render_controller_screen(&self) {
         if let Some(audio) = &self.audio {
             audio.render_little(self.menu.render());
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn poll_controller(&mut self) {
         loop {
             let event = self
@@ -1974,6 +2432,7 @@ impl DesktopApp {
             let Some(event) = event else { break };
             self.handle_controller_event(event);
         }
+        self.poll_controller_connects();
         if !self.controller_home_chord_emitted
             && let (Some(ok), Some(back)) = (
                 self.controller_button_down[0],
@@ -2007,6 +2466,15 @@ impl DesktopApp {
             self.menu.set_button_pressed(short_input(index), false);
             self.apply_input(long_input(index));
         }
+        // What a control just did to a parameter, named in the header: any
+        // link -- the player's map, a learnt link, the controller's defaults
+        // -- in PLAY or in a Rack's Slot.
+        if let Some(touch) = rackforge_core::parameter_touch::PARAMETER_TOUCHES
+            .latest(&mut self.parameter_touch_seen)
+            && let Some(header) = self.parameter_touch_header(&touch)
+        {
+            self.show_controller_host_value(header);
+        }
         if self
             .controller_header_restore_at
             .is_some_and(|deadline| Instant::now() >= deadline)
@@ -2028,7 +2496,7 @@ impl DesktopApp {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn observe_midi_learn(
         &mut self,
         source: MidiSourceKey,
@@ -2058,7 +2526,7 @@ impl DesktopApp {
         self.observe_midi_learn_from_source(descriptor, length, data, observed_at);
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn observe_midi_learn_from_source(
         &mut self,
         descriptor: MidiSourceDescriptor,
@@ -2066,6 +2534,10 @@ impl DesktopApp {
         data: [u8; 3],
         observed_at: Instant,
     ) {
+        // Every message is activity for the Controllers editor, Learn or no
+        // Learn.
+        self.midi_activity
+            .record(&descriptor, &data[..usize::from(length).min(3)]);
         if self
             .midi_learn
             .as_ref()
@@ -2106,7 +2578,38 @@ impl DesktopApp {
         }
     }
 
-    #[cfg(windows)]
+    /// A controller's transport, tap or lane button, pressed: the same press
+    /// the appliance's engine resolves, through the same translation.
+    #[cfg(desktop_host)]
+    fn apply_controller_host_action(&mut self, target: HostActionTarget) {
+        let Some(audio) = self.audio.as_ref() else {
+            return;
+        };
+        let command = if target == HostActionTarget::TapTempo {
+            self.controller_taps
+                .tap(self.controller_tap_clock.elapsed().as_secs_f64())
+                .map(|bpm| rackforge_control_api::SequencerCommand::SetTempo { bpm })
+        } else {
+            audio
+                .sequencer_status()
+                .ok()
+                .and_then(|status| rackforge_core::sequencer::host_action_command(target, &status))
+        };
+        let Some(command) = command else {
+            return;
+        };
+        match audio.sequencer_command(command) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                eprintln!("CONTROLLER_HOST_ACTION_REFUSED target={target:?} error={error}")
+            }
+            Err(error) => {
+                eprintln!("CONTROLLER_HOST_ACTION_FAILED target={target:?} error={error:#}")
+            }
+        }
+    }
+
+    #[cfg(desktop_host)]
     fn handle_controller_event(&mut self, event: desktop_audio::DesktopControllerEvent) {
         use desktop_audio::DesktopControllerEvent;
         use keylab_essential_mk3::protocol::InputPhase;
@@ -2149,7 +2652,7 @@ impl DesktopApp {
                             registered.host_actions.iter().find_map(|binding| {
                                 Some(DeclarativeControllerInput::HostAction {
                                     target: binding.target,
-                                    phase: binding.midi_cc.phase(message)?,
+                                    phase: binding.phase(message)?,
                                 })
                             })
                         });
@@ -2171,6 +2674,10 @@ impl DesktopApp {
                             target: HostActionTarget::KeyboardParts,
                             phase: ButtonPhase::Press,
                         }) => self.apply_input(Input::KeyboardParts),
+                        Some(DeclarativeControllerInput::HostAction {
+                            target,
+                            phase: ButtonPhase::Press,
+                        }) => self.apply_controller_host_action(target),
                         Some(DeclarativeControllerInput::HostAction { .. }) => {}
                         Some(DeclarativeControllerInput::Semantic(_)) => unreachable!(),
                         None => {}
@@ -2191,6 +2698,11 @@ impl DesktopApp {
             DesktopControllerEvent::Connected => {
                 self.status = "Arturia KeyLab connected · LITTLE active".into();
                 self.render_controller_screen();
+            }
+            DesktopControllerEvent::MidiInputConnected { name } => self.midi_input_connected(name),
+            DesktopControllerEvent::MidiInputLost { name } => self.midi_input_lost(&name),
+            DesktopControllerEvent::IdentityReply { source, reply } => {
+                self.midi_identity_reply(source, &reply)
             }
             DesktopControllerEvent::Disconnected => {
                 for index in 0..4 {
@@ -2224,9 +2736,10 @@ impl DesktopApp {
                 }
                 self.show_controller_host_value(parameter.little_header());
             }
-            DesktopControllerEvent::SemanticControl(input) => {
-                self.show_controller_host_value(semantic_control_little_header(&input));
-            }
+            // The header names the parameter the control actually moved,
+            // once its link has run; the role's fixed label and the raw CC
+            // said nothing of the plugin, and flashed before the real name.
+            DesktopControllerEvent::SemanticControl(_) => {}
             DesktopControllerEvent::Surface { input, phase } => match input {
                 Input::Button1 | Input::Button2 | Input::Button3 | Input::Button4 => {
                     let index = match input {
@@ -2289,7 +2802,101 @@ impl DesktopApp {
         }
     }
 
-    #[cfg(windows)]
+    /// What a touch did, named: the parameter and its value, when the touch
+    /// names a PLAY instance or a Slot of a saved Rack. LITTLE's header and
+    /// the web's window are both made from it.
+    fn parameter_touch_report(
+        &self,
+        touch: &rackforge_core::parameter_touch::ParameterTouch,
+    ) -> Option<ParameterTouchReport> {
+        use rackforge_core::parameter_touch::{TouchPickup, touch_names};
+        let (instance_id, plugin) = self
+            .plugins
+            .iter()
+            .find(|plugin| touch_names(touch, &plugin.instance_id))
+            .map(|plugin| (plugin.instance_id.clone(), plugin))
+            .or_else(|| {
+                // Slot ids are only unique within a Rack: the one playing is
+                // asked first.
+                let active_rack = self.session.read().ok()?.live.active_rack_id.clone();
+                let racks = &self.performance_repository.library().racks;
+                let slot = racks
+                    .iter()
+                    .filter(|rack| Some(&rack.id) == active_rack.as_ref())
+                    .chain(
+                        racks
+                            .iter()
+                            .filter(|rack| Some(&rack.id) != active_rack.as_ref()),
+                    )
+                    .flat_map(|rack| rack.slots.iter())
+                    .find(|slot| touch_names(touch, slot.id.as_str()))?;
+                let plugin = self
+                    .plugins
+                    .iter()
+                    .find(|plugin| plugin.plugin_id == slot.plugin_id)?;
+                Some((slot.id.as_str().to_owned(), plugin))
+            })?;
+        let schema = plugin.runtime.parameters();
+        let parameter = schema
+            .parameters
+            .iter()
+            .find(|parameter| parameter.index == touch.parameter_index)?
+            .clone();
+        Some(ParameterTouchReport {
+            instance_id,
+            parameter,
+            value: touch.value,
+            display_decimals: schema.display_decimals,
+            pickup: match touch.pickup {
+                TouchPickup::Engaged => ParameterTouchPickup::Engaged,
+                TouchPickup::MoveUp => ParameterTouchPickup::MoveUp,
+                TouchPickup::MoveDown => ParameterTouchPickup::MoveDown,
+            },
+            control: (touch.pickup != TouchPickup::Engaged).then_some(touch.control),
+            fn_layer: touch.fn_layer,
+        })
+    }
+
+    /// The web's window asks what a control last did, as the Pi's engine
+    /// answers it.
+    fn parameter_touch_response(&self, after: u64) -> ControlResponse {
+        let mut sequence = after;
+        let touch = rackforge_core::parameter_touch::PARAMETER_TOUCHES
+            .latest(&mut sequence)
+            .filter(|_| after != 0)
+            .and_then(|touch| self.parameter_touch_report(&touch))
+            .map(Box::new);
+        if after == 0 {
+            sequence = rackforge_core::parameter_touch::PARAMETER_TOUCHES.current_sequence();
+        }
+        ControlResponse::ParameterTouched { sequence, touch }
+    }
+
+    /// LITTLE's header for a touch: the parameter's own name and value.
+    #[cfg(desktop_host)]
+    fn parameter_touch_header(
+        &self,
+        touch: &rackforge_core::parameter_touch::ParameterTouch,
+    ) -> Option<String> {
+        let report = self.parameter_touch_report(touch)?;
+        let arrow = match report.pickup {
+            ParameterTouchPickup::Engaged => None,
+            ParameterTouchPickup::MoveUp => Some(rackforge_surface_runtime::PickupArrow::Up),
+            ParameterTouchPickup::MoveDown => Some(rackforge_surface_runtime::PickupArrow::Down),
+        };
+        Some(rackforge_surface_runtime::fn_layer_header(
+            rackforge_surface_runtime::parameter_touch_header(
+                &report.parameter,
+                report.value,
+                report.display_decimals,
+                arrow,
+                report.control,
+            ),
+            report.fn_layer,
+        ))
+    }
+
+    #[cfg(desktop_host)]
     fn show_controller_host_value(&mut self, header: String) {
         let mut screen = self.menu.render();
         screen.header = Header::Visible(header);
@@ -2364,13 +2971,23 @@ impl DesktopApp {
                         delete_plugin_data,
                     ));
                 }
-                web::DesktopControlCall::AudioSettings { response } => {
-                    #[cfg(windows)]
+                web::DesktopControlCall::ForwardedMidi {
+                    client_id,
+                    source_name,
+                    message,
+                } => {
+                    #[cfg(desktop_host)]
+                    self.record_forwarded_midi(client_id, &source_name, message);
+                    #[cfg(not(desktop_host))]
+                    let _ = (client_id, source_name, message);
+                }
+                web::DesktopControlCall::AudioSettings { refresh, response } => {
+                    #[cfg(desktop_host)]
                     let _ = response.send(
-                        self.audio_settings_json()
+                        self.audio_settings_json(refresh)
                             .map_err(|error| format!("{error:#}")),
                     );
-                    #[cfg(not(windows))]
+                    #[cfg(not(desktop_host))]
                     let _ = response.send(Err(
                         "This host does not publish Desktop audio settings.".into(),
                     ));
@@ -2379,19 +2996,19 @@ impl DesktopApp {
                     preferences,
                     response,
                 } => {
-                    #[cfg(windows)]
+                    #[cfg(desktop_host)]
                     let result =
                         serde_json::from_value::<desktop_audio::AudioPreferences>(preferences)
                             .map_err(|error| format!("Invalid Desktop audio settings: {error}"))
                             .and_then(|preferences| {
                                 self.apply_audio_preferences(preferences)
                                     .map_err(|error| format!("{error:#}"))?;
-                                self.audio_settings_json()
+                                self.audio_settings_json(false)
                                     .map_err(|error| format!("{error:#}"))
                             });
-                    #[cfg(windows)]
+                    #[cfg(desktop_host)]
                     let _ = response.send(result);
-                    #[cfg(not(windows))]
+                    #[cfg(not(desktop_host))]
                     let _ = {
                         let _ = preferences;
                         response.send(Err(
@@ -2400,10 +3017,10 @@ impl DesktopApp {
                     };
                 }
                 web::DesktopControlCall::TestAudio { response } => {
-                    #[cfg(windows)]
+                    #[cfg(desktop_host)]
                     let _ =
                         response.send(self.test_audio_note().map_err(|error| format!("{error:#}")));
-                    #[cfg(not(windows))]
+                    #[cfg(not(desktop_host))]
                     let _ = response.send(Err(
                         "This host does not publish an audio test control.".into()
                     ));
@@ -2427,6 +3044,14 @@ impl DesktopApp {
                         .map_err(|error| format!("{error:#}"));
                     let _ = response.send(result);
                 }
+                web::DesktopControlCall::ControllerOutputChanged => {
+                    // A package allowed now sends to a controller already
+                    // connected, and one stopped is sent to no more.
+                    #[cfg(desktop_host)]
+                    if let Err(message) = self.reload_declarative_controllers() {
+                        eprintln!("DECLARATIVE_CONTROLLER_NOT_ATTACHED error={message}");
+                    }
+                }
             }
         }
     }
@@ -2440,7 +3065,7 @@ impl DesktopApp {
     /// player left, not the factory floor.
     fn flush_live_state(&mut self) {
         self.live_state_dirty = None;
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         {
             let Some(audio) = self.audio.as_ref() else {
                 return;
@@ -2494,11 +3119,18 @@ impl DesktopApp {
                 self.reload_plugins()
                     .map_err(|error| format!("Could not load the installed plugin: {error:#}"))?;
             }
-            let (instance_id, kind) = self
+            let (instance_id, kind, play_source) = self
                 .plugins
                 .iter()
                 .find(|plugin| plugin.plugin_id == plugin_id)
-                .map(|plugin| (plugin.instance_id.clone(), plugin.runtime.manifest().kind))
+                .map(|plugin| {
+                    let manifest = plugin.runtime.manifest();
+                    (
+                        plugin.instance_id.clone(),
+                        manifest.kind,
+                        manifest.play_source,
+                    )
+                })
                 .ok_or_else(|| {
                     format!("Installed plugin {plugin_id:?} is not compatible with Desktop")
                 })?;
@@ -2506,8 +3138,10 @@ impl DesktopApp {
             // place on the stage of its own. Selecting it there put the
             // instrument's chain effects "not on stage" and left the test
             // note with nothing to play through, measured 2026-09-08 when
-            // RF-EQ was activated over the piano.
-            if kind == PluginKind::Effect {
+            // RF-EQ was activated over the piano. An effect played on its
+            // own from the audio input (a pedalboard) is the exception: it
+            // takes the stage as an instrument does.
+            if kind == PluginKind::Effect && !play_source {
                 return Ok(());
             }
             let instance_id = InstanceId::new(instance_id)
@@ -2625,7 +3259,7 @@ impl DesktopApp {
         // Native libraries are process-lifetime by design, so Windows may
         // leave the tombstone for cleanup after exit, but it disappears from
         // discovery immediately and cannot be selected again.
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         {
             self.stop_audio_runtime();
         }
@@ -2796,14 +3430,19 @@ impl DesktopApp {
                 if let Some(preset_id) = selected_sound_id.as_deref() {
                     instance.load_preset(preset_id)?;
                 }
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 if let Some(audio) = &self.audio {
                     audio.replace_voice(desktop_audio::VoiceSpec {
                         instance_id: plugin.instance_id.clone(),
                         plugin: plugin.runtime,
                         preset_id: selected_sound_id.clone(),
                         resources: resources.clone(),
-                        initial_state: read_live_state(&live_state_dir, &plugin.plugin_id),
+                        // The saved state is the selected program's: kept
+                        // only while that program stays selected.
+                        initial_state: (selected_sound_id == plugin.selected_sound_id)
+                            .then(|| read_live_state(&live_state_dir, &plugin.plugin_id))
+                            .flatten(),
+                        restore_live_parameters: selected_sound_id == plugin.selected_sound_id,
                     })?;
                 }
                 Ok((instance, catalog, selected_sound_id))
@@ -2916,14 +3555,19 @@ impl DesktopApp {
                 if let Some(preset_id) = selected_sound_id.as_deref() {
                     instance.load_preset(preset_id)?;
                 }
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 if let Some(audio) = &self.audio {
                     audio.replace_voice(desktop_audio::VoiceSpec {
                         instance_id: plugin.instance_id.clone(),
                         plugin: plugin.runtime,
                         preset_id: selected_sound_id.clone(),
                         resources: plugin.resources.clone(),
-                        initial_state: read_live_state(&live_state_dir, &plugin.plugin_id),
+                        // The saved state is the selected program's: kept
+                        // only while that program stays selected.
+                        initial_state: (selected_sound_id == plugin.selected_sound_id)
+                            .then(|| read_live_state(&live_state_dir, &plugin.plugin_id))
+                            .flatten(),
+                        restore_live_parameters: selected_sound_id == plugin.selected_sound_id,
                     })?;
                 }
                 Ok((instance, catalog, selected_sound_id))
@@ -2959,14 +3603,302 @@ impl DesktopApp {
         }
     }
 
+    /// The controllers attached to enabled inputs, and every stored map.
+    fn controller_maps_response(&self) -> ControlResponse {
+        let controllers = self
+            .controller_semantic_profiles
+            .iter()
+            .map(|(controller_id, registered)| RegisteredController {
+                controller_id: controller_id.clone(),
+                source: registered
+                    .runtime_source_id
+                    .as_ref()
+                    .and_then(|id| rackforge_midi_api::MidiSourceId::new(id.clone()).ok())
+                    .map(|id| rackforge_midi_api::MidiSourceDescriptor {
+                        id,
+                        name: registered
+                            .runtime_source_name
+                            .clone()
+                            .unwrap_or_else(|| controller_id.clone()),
+                        primary: false,
+                    }),
+                // Only inputs the player enabled are registered here, and a
+                // registration is dropped with its input.
+                connected: registered.runtime_source_id.is_some(),
+                identified: registered.identified,
+            })
+            .collect();
+        ControlResponse::ControllerMaps {
+            controllers,
+            maps: self.controller_maps.values().cloned().collect(),
+            takeover: self.controller_takeover,
+            factory_untouched: self.controller_map_store.untouched_factory_maps(),
+            fn_open: self
+                .controller_semantic_profiles
+                .iter()
+                .filter(|(_, registered)| {
+                    registered
+                        .runtime_source_id
+                        .as_ref()
+                        .and_then(|id| rackforge_midi_api::MidiSourceId::new(id.clone()).ok())
+                        .is_some_and(|id| {
+                            rackforge_core::parameter_link::fn_layer_open(
+                                desktop_audio::stable_midi_source_key_from_id(&id),
+                            )
+                        })
+                })
+                .map(|(controller_id, _)| controller_id.clone())
+                .collect(),
+        }
+    }
+
+    /// Stores how knobs and faders take a parameter over, and compiles the
+    /// links again so every control follows it at once.
+    fn set_controller_takeover(&mut self, takeover: ControlTakeover) -> ControlResponse {
+        if let Err(error) = self.controller_map_store.set_takeover(takeover) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Internal,
+                message: format!("Could not store the controller takeover: {error:#}"),
+                current_revision: None,
+            };
+        }
+        self.controller_takeover = takeover;
+        let links = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .parameter_links
+            .clone();
+        if let Err(message) = self.replace_parameter_links(links) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message,
+                current_revision: None,
+            };
+        }
+        // A Rack on stage has links of its own: they follow too.
+        self.reload_live_rack("controller_takeover");
+        ControlResponse::ControllerTakeoverSet { takeover }
+    }
+
+    /// Attaches the declarative controller packages to the enabled inputs
+    /// again -- after a package was made here -- and recompiles the links.
+    /// Registrations a driver made are kept.
+    #[cfg(desktop_host)]
+    fn reload_declarative_controllers(&mut self) -> Result<(), String> {
+        let approved = self
+            .audio_preferences
+            .as_ref()
+            .map(|preferences| preferences.midi_inputs.clone())
+            .unwrap_or_default();
+        let profiles = declarative_semantic_profiles(
+            &self.options.rackforge_root,
+            &approved,
+            &self.midi_identities,
+        )
+        .map_err(|error| format!("{error:#}"))?;
+        // What an answer or a new package changed replaces what was attached
+        // before; what a driver registered stays.
+        self.controller_semantic_profiles
+            .retain(|_, registered| !registered.declarative);
+        self.controller_semantic_profiles.extend(profiles);
+        let links = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .parameter_links
+            .clone();
+        let result = self.replace_parameter_links(links);
+        self.send_controller_connect_messages();
+        result
+    }
+
+    /// An enabled input connected: its device is asked which model it is,
+    /// and its package attached once it answered or the wait ran out.
+    #[cfg(desktop_host)]
+    fn midi_input_connected(&mut self, name: String) {
+        let approved = self
+            .audio_preferences
+            .as_ref()
+            .is_some_and(|preferences| preferences.midi_inputs.contains(&name));
+        if !approved {
+            return;
+        }
+        desktop_audio::send_to_midi_device(
+            &name,
+            vec![rackforge_controller_package::IDENTITY_REQUEST.to_vec()],
+        );
+        self.pending_controller_connects.insert(
+            name,
+            Instant::now()
+                + Duration::from_millis(rackforge_controller_package::IDENTITY_REPLY_WINDOW_MS),
+        );
+    }
+
+    #[cfg(desktop_host)]
+    fn midi_input_lost(&mut self, name: &str) {
+        self.midi_identities.remove(name);
+        self.pending_controller_connects.remove(name);
+        self.controller_output_sent
+            .retain(|(endpoint, _)| endpoint != name);
+    }
+
+    #[cfg(desktop_host)]
+    fn midi_identity_reply(&mut self, source: MidiSourceKey, reply: &[u8]) {
+        let Some(identity) = rackforge_controller_package::IdentityReply::parse(reply) else {
+            return;
+        };
+        let Some(name) = self.audio_preferences.as_ref().and_then(|preferences| {
+            preferences
+                .midi_inputs
+                .iter()
+                .find(|name| desktop_audio::stable_midi_source_key(name) == source)
+                .cloned()
+        }) else {
+            return;
+        };
+        println!(
+            "DESKTOP_MIDI_IDENTITY name={name:?} manufacturer={:02X?} family={:#06x} model={:#06x}",
+            identity.manufacturer, identity.family, identity.model
+        );
+        let known = self.midi_identities.insert(name.clone(), identity.clone());
+        // A device that answered after the wait is attached again now.
+        if !self.pending_controller_connects.contains_key(&name)
+            && known != Some(identity)
+            && let Err(message) = self.reload_declarative_controllers()
+        {
+            eprintln!("DECLARATIVE_CONTROLLER_NOT_ATTACHED error={message}");
+        }
+    }
+
+    /// Attaches the packages of the inputs whose Identity Reply was waited
+    /// for long enough.
+    #[cfg(desktop_host)]
+    fn poll_controller_connects(&mut self) {
+        let now = Instant::now();
+        let due = self
+            .pending_controller_connects
+            .iter()
+            .filter(|(_, deadline)| **deadline <= now)
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        if due.is_empty() {
+            return;
+        }
+        for name in &due {
+            self.pending_controller_connects.remove(name);
+        }
+        if let Err(message) = self.reload_declarative_controllers() {
+            eprintln!("DECLARATIVE_CONTROLLER_NOT_ATTACHED error={message}");
+        }
+    }
+
+    /// Sends each attached package's connect messages to its controller,
+    /// once per connection, and only after the device had its chance to say
+    /// which model it is.
+    #[cfg(desktop_host)]
+    fn send_controller_connect_messages(&mut self) {
+        let mut sends = Vec::new();
+        let mut setups = Vec::new();
+        for (controller_id, registered) in &self.controller_semantic_profiles {
+            let Some(name) = registered.runtime_source_name.as_ref() else {
+                continue;
+            };
+            if self.pending_controller_connects.contains_key(name) {
+                continue;
+            }
+            if let Some(matcher) = &registered.setup_output
+                && !registered.setup_messages.is_empty()
+                && self
+                    .controller_output_sent
+                    .insert((name.clone(), format!("{controller_id}#setup")))
+            {
+                setups.push((
+                    name.clone(),
+                    controller_id.clone(),
+                    matcher.clone(),
+                    registered.setup_messages.clone(),
+                ));
+            }
+            if registered.on_connect.is_empty() {
+                continue;
+            }
+            if self
+                .controller_output_sent
+                .insert((name.clone(), controller_id.clone()))
+            {
+                sends.push((
+                    name.clone(),
+                    controller_id.clone(),
+                    registered.on_connect.clone(),
+                ));
+            }
+        }
+        for (name, controller_id, matcher, messages) in setups {
+            println!(
+                "DESKTOP_CONTROLLER_SETUP controller={controller_id} name={name:?} messages={}",
+                messages.len()
+            );
+            desktop_audio::send_to_setup_output(&name, matcher, messages);
+        }
+        for (name, controller_id, messages) in sends {
+            println!(
+                "DESKTOP_CONTROLLER_ON_CONNECT controller={controller_id} name={name:?} messages={}",
+                messages.len()
+            );
+            desktop_audio::send_to_midi_device(&name, messages);
+        }
+    }
+
+    /// Stores a controller's whole map and applies it at once, as a learnt
+    /// link is.
+    fn save_controller_map(&mut self, map: ControllerMap) -> ControlResponse {
+        if let Err(error) = map.validate() {
+            return ControlResponse::Error {
+                code: ControlErrorCode::InvalidRequest,
+                message: error.to_string(),
+                current_revision: None,
+            };
+        }
+        if let Err(error) = self.controller_map_store.save(&map) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Internal,
+                message: format!("Could not store the controller map: {error:#}"),
+                current_revision: None,
+            };
+        }
+        if map.is_empty() {
+            self.controller_maps.remove(&map.controller_id);
+        } else {
+            self.controller_maps
+                .insert(map.controller_id.clone(), map.clone());
+        }
+        let links = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .parameter_links
+            .clone();
+        if let Err(message) = self.replace_parameter_links(links) {
+            return ControlResponse::Error {
+                code: ControlErrorCode::Unavailable,
+                message,
+                current_revision: None,
+            };
+        }
+        ControlResponse::ControllerMapSaved { map: Box::new(map) }
+    }
+
     fn replace_parameter_links(&mut self, links: Vec<ParameterLink>) -> Result<(), String> {
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         {
             let compiled = compile_desktop_parameter_links(
                 &links,
                 &self.plugins,
                 &self.performance_repository,
                 &self.controller_semantic_profiles,
+                &self.controller_maps,
+                self.controller_takeover,
             )
             .map_err(|error| format!("Could not compile MIDI parameter links: {error:#}"))?;
             self.audio
@@ -2975,7 +3907,7 @@ impl DesktopApp {
                 .replace_parameter_links(compiled)
                 .map_err(|error| format!("Could not apply MIDI parameter links: {error:#}"))
         }
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         {
             let _ = links;
             Err("Desktop audio is unavailable".into())
@@ -3242,8 +4174,10 @@ impl DesktopApp {
                 controller_id,
                 controls,
                 actions,
+                held,
                 midi_source_name,
                 semantic_profile,
+                identified,
             } => {
                 // A controller driver reserving its host-control CCs. On this
                 // host the driver owns its surface endpoint exclusively (the
@@ -3253,9 +4187,8 @@ impl DesktopApp {
                 if controls
                     .iter()
                     .any(|binding| binding.midi_cc.validate().is_err())
-                    || actions
-                        .iter()
-                        .any(|binding| binding.midi_cc.validate().is_err())
+                    || actions.iter().any(|binding| binding.validate().is_err())
+                    || held.iter().any(|control| control.validate().is_err())
                 {
                     Err("invalid reserved host binding registration".into())
                 } else {
@@ -3267,15 +4200,18 @@ impl DesktopApp {
                             .controller_semantic_profiles
                             .get(&controller_id)
                             .cloned();
-                        if semantic_profile.is_some() || !controls.is_empty() || !actions.is_empty()
+                        if semantic_profile.is_some()
+                            || !controls.is_empty()
+                            || !actions.is_empty()
+                            || !held.is_empty()
                         {
-                            #[cfg(windows)]
+                            #[cfg(desktop_host)]
                             let resolved_source = midi_source_name.as_deref().and_then(|name| {
                                 self.approved_midi_source(name)
                                     .ok()
                                     .map(|source| (source.id.as_str().to_owned(), source.name))
                             });
-                            #[cfg(not(windows))]
+                            #[cfg(not(desktop_host))]
                             let resolved_source: Option<(
                                 String,
                                 String,
@@ -3302,6 +4238,12 @@ impl DesktopApp {
                                     runtime_source_name,
                                     host_controls: controls.clone(),
                                     host_actions: actions.clone(),
+                                    held: held.clone(),
+                                    declarative: false,
+                                    identified,
+                                    on_connect: Vec::new(),
+                                    setup_output: None,
+                                    setup_messages: Vec::new(),
                                 },
                             );
                         } else {
@@ -3341,10 +4283,9 @@ impl DesktopApp {
                     })()
                 }
             }
-            SessionCommand::SetLiveBrowseMode { mode } => self.apply_program_events(
-                vec![SessionEvent::LiveBrowseModeChanged { mode }],
-                Some(command_ref),
-            ),
+            SessionCommand::SetLiveBrowseMode { mode } => {
+                self.set_live_browse_mode(mode, Some(command_ref))
+            }
             SessionCommand::SetPlayChain {
                 instrument_id,
                 effects,
@@ -3352,6 +4293,7 @@ impl DesktopApp {
             SessionCommand::ActivateLiveTarget { location } => {
                 self.activate_live_target(location, Some(command_ref))
             }
+            SessionCommand::PreviewRack { rack } => self.preview_rack(rack),
             other => Err(format!(
                 "Desktop does not support {} yet",
                 serde_json::to_value(&other)
@@ -3385,7 +4327,66 @@ impl DesktopApp {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
+    #[cfg(desktop_host)]
+    /// Tells the web servers which forwarded MIDI may skip this thread: the
+    /// enabled ports and their routing keys, unless a MIDI learn is
+    /// listening. Cheap enough for every frame, and written only on change.
+    fn publish_forwarded_midi_route(&mut self) {
+        let approved = self
+            .audio_preferences
+            .as_ref()
+            .map(|preferences| {
+                preferences
+                    .midi_inputs
+                    .iter()
+                    .filter_map(|name| {
+                        desktop_audio::midi_source_descriptor(name)
+                            .ok()
+                            .map(|descriptor| {
+                                (
+                                    name.clone(),
+                                    desktop_audio::stable_midi_source_key_from_id(&descriptor.id),
+                                )
+                            })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let route = web::ForwardedMidiRoute {
+            approved,
+            learning: self.midi_learn.is_some(),
+        };
+        if route != self.forwarded_midi_route {
+            self.web_servers.set_forwarded_midi_route(route.clone());
+            self.forwarded_midi_route = route;
+        }
+    }
+
+    #[cfg(desktop_host)]
+    /// The ledger half of a forwarded note that the web server already sent
+    /// to the audio thread: which notes this driver holds, so they can be
+    /// released if it goes away. The same bookkeeping `accept_virtual_midi`
+    /// does, without the injection.
+    fn record_forwarded_midi(
+        &mut self,
+        client_id: ClientId,
+        source_name: &str,
+        message: VirtualMidiMessage,
+    ) {
+        let state = self.virtual_midi.entry(client_id).or_default();
+        if state.midi_source.is_none() {
+            state.midi_source = desktop_audio::midi_source_descriptor(source_name).ok();
+        }
+        let channel = message.channel();
+        state.channels.insert(channel);
+        if let Some(note) = message.note_on() {
+            state.notes.insert((channel, note));
+        } else if let Some(note) = message.note_off() {
+            state.notes.remove(&(channel, note));
+        }
+    }
+
     fn approved_midi_source(&self, source_name: &str) -> Result<MidiSourceDescriptor, String> {
         approved_midi_source(self.audio_preferences.as_ref(), source_name)
     }
@@ -3405,7 +4406,7 @@ impl DesktopApp {
                 ),
             };
         }
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let midi_source = match source_name
             .as_deref()
             .map(|name| self.approved_midi_source(name))
@@ -3422,9 +4423,9 @@ impl DesktopApp {
                 };
             }
         };
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let midi_source: Option<MidiSourceDescriptor> = None;
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let result = {
             let routing_descriptor = midi_source
                 .clone()
@@ -3442,7 +4443,7 @@ impl DesktopApp {
                         .map_err(|error| error.to_string())
                 })
         };
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let result: Result<(), String> = Err("Desktop audio is unavailable".into());
         if let Err(message) = result {
             return ControlResponse::Error {
@@ -3484,7 +4485,7 @@ impl DesktopApp {
                 messages.push([0xb0 | channel, controller, 0]);
             }
         }
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let result = {
             let descriptor = state
                 .midi_source
@@ -3500,7 +4501,7 @@ impl DesktopApp {
                         .map_err(|error| error.to_string())
                 })
         };
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let result: Result<(), String> = {
             let _ = messages;
             Err("Desktop audio is unavailable".into())
@@ -3520,8 +4521,103 @@ impl DesktopApp {
 
     fn handle_performance_control(&mut self, request: ControlRequest) -> ControlResponse {
         match request {
+            ControlRequest::SaveOutputCapture => {
+                #[cfg(desktop_host)]
+                {
+                    match self.audio.as_ref() {
+                        Some(audio) => {
+                            let (path, seconds, messages) = audio
+                                .save_output_capture(&self.options.rackforge_root.join("captures"));
+                            ControlResponse::OutputCaptureSaved {
+                                path: path.display().to_string(),
+                                seconds,
+                                midi_messages: messages as u64,
+                            }
+                        }
+                        None => ControlResponse::Error {
+                            code: ControlErrorCode::Unavailable,
+                            message: "No audio stream is running, so there is nothing recorded."
+                                .into(),
+                            current_revision: None,
+                        },
+                    }
+                }
+                #[cfg(not(desktop_host))]
+                {
+                    ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: "Desktop audio is unavailable".into(),
+                        current_revision: None,
+                    }
+                }
+            }
+            ControlRequest::OpenAudioDriverPanel => {
+                #[cfg(desktop_host)]
+                {
+                    use rackforge_control_api::AudioDriverPanel;
+                    let unavailable = |message: String| ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message,
+                        current_revision: None,
+                    };
+                    match self.audio_driver_panel() {
+                        Some((panel, Ok(()))) => {
+                            match panel {
+                                AudioDriverPanel::Asio => self.audio_driver_panel_pending = true,
+                                AudioDriverPanel::SystemSound => {
+                                    if let Err(error) = open_system_sound_settings() {
+                                        return unavailable(format!(
+                                            "Could not open the Windows sound settings: {error}"
+                                        ));
+                                    }
+                                }
+                            }
+                            ControlResponse::AudioDriverPanelOpening { panel }
+                        }
+                        Some((_, Err(reason))) => unavailable(reason.into()),
+                        None => unavailable("This audio driver has no settings window.".into()),
+                    }
+                }
+                #[cfg(not(desktop_host))]
+                {
+                    ControlResponse::Error {
+                        code: ControlErrorCode::Unavailable,
+                        message: "Desktop audio is unavailable".into(),
+                        current_revision: None,
+                    }
+                }
+            }
+            ControlRequest::AudioHealth => {
+                // Read straight off the callback's own counters rather than
+                // recomputed here: the callback is the only thing that knows
+                // how long it took and what it dropped.
+                let health = match self.audio.as_ref() {
+                    None => rackforge_control_api::AudioHealthSnapshot::default(),
+                    Some(audio) => {
+                        let status = audio.runtime_status();
+                        let peak_us = audio.take_callback_window_peak_us();
+                        let gap_percent = audio.take_callback_window_gap_percent();
+                        let midi_worst_us = audio.take_midi_window_worst_us();
+                        let mut health = audio_health_window(
+                            self.audio_health_previous.as_ref(),
+                            &status,
+                            peak_us,
+                            gap_percent,
+                            audio.sample_rate(),
+                        );
+                        health.worst_midi_driver_delay_ms = midi_worst_us.0 as f64 / 1_000.0;
+                        health.worst_midi_queue_delay_ms = midi_worst_us.1 as f64 / 1_000.0;
+                        self.audio_health_previous = Some(status);
+                        health
+                    }
+                };
+                ControlResponse::AudioHealth { health }
+            }
+            ControlRequest::AudioInput => ControlResponse::AudioInput {
+                input: self.audio_input_status(),
+            },
             ControlRequest::OutputMeter => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     ControlResponse::OutputMeter {
                         meter: self
@@ -3531,17 +4627,85 @@ impl DesktopApp {
                             .unwrap_or_default(),
                     }
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 {
                     ControlResponse::OutputMeter {
                         meter: Default::default(),
                     }
                 }
             }
+            ControlRequest::MidiActivity { after } => {
+                let (cursor, events) = self.midi_activity.since(after);
+                ControlResponse::MidiActivity { cursor, events }
+            }
+            ControlRequest::ControllerMaps => self.controller_maps_response(),
+            ControlRequest::SaveControllerMap { map } => self.save_controller_map(*map),
+            ControlRequest::SetControllerTakeover { takeover } => {
+                self.set_controller_takeover(takeover)
+            }
+            ControlRequest::ParameterTouch { after } => self.parameter_touch_response(after),
+            ControlRequest::SaveUserController { controller } => {
+                let store = rackforge_controller_package::PackageStore::new(
+                    self.options.rackforge_root.join("controllers"),
+                );
+                match store.save_user_controller(&controller) {
+                    Ok(installed) => {
+                        // The desktop attaches declarative controllers when
+                        // it starts; a new one is attached now instead.
+                        #[cfg(desktop_host)]
+                        if let Err(message) = self.reload_declarative_controllers() {
+                            eprintln!("USER_CONTROLLER_NOT_ATTACHED error={message}");
+                        }
+                        ControlResponse::UserControllerSaved {
+                            controller_id: installed.record.id,
+                            version: installed.record.version,
+                        }
+                    }
+                    Err(error) => ControlResponse::Error {
+                        code: ControlErrorCode::InvalidRequest,
+                        message: format!("Could not save the controller: {error}"),
+                        current_revision: None,
+                    },
+                }
+            }
+            ControlRequest::ExportControllerMap { controller_id } => {
+                let Some(map) = self.controller_maps.get(&controller_id) else {
+                    return ControlResponse::Error {
+                        code: ControlErrorCode::NotFound,
+                        message: format!("no map is stored for controller {controller_id}"),
+                        current_revision: None,
+                    };
+                };
+                let exported_unix_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |elapsed| elapsed.as_millis() as u64);
+                let (file_name, file) = export_rfmap(
+                    map,
+                    &format!("RackForge {}", env!("CARGO_PKG_VERSION")),
+                    exported_unix_ms,
+                );
+                ControlResponse::ControllerMapExported {
+                    file_name,
+                    file: Box::new(file),
+                }
+            }
+            ControlRequest::ImportControllerMap { file } => match file.validate() {
+                Err(error) => ControlResponse::Error {
+                    code: ControlErrorCode::InvalidRequest,
+                    message: error.to_string(),
+                    current_revision: None,
+                },
+                Ok(()) => match self.save_controller_map(file.map) {
+                    ControlResponse::ControllerMapSaved { map } => {
+                        ControlResponse::ControllerMapImported { map }
+                    }
+                    other => other,
+                },
+            },
             ControlRequest::MidiSources => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
-                    let inventory = match self.scan_inventory() {
+                    let inventory = match self.scan_inventory(false) {
                         Ok(inventory) => inventory,
                         Err(error) => {
                             return ControlResponse::Error {
@@ -3562,7 +4726,7 @@ impl DesktopApp {
                         approved_midi_source_statuses(self.audio_preferences.as_ref(), &present);
                     ControlResponse::MidiSources { sources }
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 {
                     ControlResponse::MidiSources {
                         sources: Vec::new(),
@@ -3570,11 +4734,11 @@ impl DesktopApp {
                 }
             }
             ControlRequest::MidiSettings => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     self.midi_settings_response()
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 {
                     ControlResponse::MidiSettings {
                         inputs: Vec::new(),
@@ -3583,11 +4747,11 @@ impl DesktopApp {
                 }
             }
             ControlRequest::SetMidiInputEnabled { name, enabled } => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     self.set_midi_input_enabled(&name, enabled)
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 {
                     let _ = (name, enabled);
                     ControlResponse::Error {
@@ -3598,11 +4762,11 @@ impl DesktopApp {
                 }
             }
             ControlRequest::SetVelocityCurve { device, curve } => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     self.set_velocity_curve(device, curve)
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 {
                     let _ = (device, curve);
                     ControlResponse::Error {
@@ -3617,7 +4781,7 @@ impl DesktopApp {
                 instance_id,
                 parameter_index,
             } => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     let plugin_id = self
                         .plugins
@@ -3671,7 +4835,7 @@ impl DesktopApp {
                     });
                     ControlResponse::MidiLearnStarted { learn_id }
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 {
                     ControlResponse::Error {
                         code: ControlErrorCode::Unavailable,
@@ -3681,7 +4845,7 @@ impl DesktopApp {
                 }
             }
             ControlRequest::MidiLearnStatus { learn_id } => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     match self
                         .midi_learn
@@ -3701,7 +4865,7 @@ impl DesktopApp {
                         },
                     }
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 {
                     ControlResponse::Error {
                         code: ControlErrorCode::Unavailable,
@@ -3711,7 +4875,7 @@ impl DesktopApp {
                 }
             }
             ControlRequest::CancelMidiLearn { learn_id } => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     if self
                         .midi_learn
@@ -3730,7 +4894,7 @@ impl DesktopApp {
                         }
                     }
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 {
                     ControlResponse::Error {
                         code: ControlErrorCode::Unavailable,
@@ -3767,11 +4931,29 @@ impl DesktopApp {
                     .live
                     .clone();
                 let previous_live = live.clone();
+                let active_rack =
+                    |library: &rackforge_performance_api::PerformanceLibrary,
+                     live: &rackforge_performance_api::LivePerformanceState| {
+                        live.active_rack_id.as_ref().and_then(|id| {
+                            library.racks.iter().find(|rack| &rack.id == id).cloned()
+                        })
+                    };
+                let rack_before = active_rack(self.performance_repository.library(), &live);
                 match self
                     .performance_repository
                     .apply_edit(&expected_revision, edit, &mut live)
                 {
                     Ok(()) => {
+                        // The Rack on stage follows its saved definition: a
+                        // save is heard at once, and a deleted Rack stops.
+                        let rack_after = active_rack(self.performance_repository.library(), &live);
+                        match (&rack_before, &rack_after) {
+                            (Some(_), None) => self.take_rack_off_stage(),
+                            (Some(before), Some(after)) if before != after => {
+                                self.reload_live_rack("saved")
+                            }
+                            _ => {}
+                        }
                         if live != previous_live {
                             if let Err(error) = self.apply_program_events(
                                 vec![SessionEvent::LiveStateReconciled { live }],
@@ -4165,7 +5347,7 @@ impl DesktopApp {
         else {
             return self.preset_error(ControlErrorCode::NotFound, "plugin instance is missing");
         };
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let bytes = match self
             .audio
             .as_ref()
@@ -4175,7 +5357,7 @@ impl DesktopApp {
             Ok(bytes) => bytes,
             Err(error) => return self.preset_error(ControlErrorCode::Unavailable, error),
         };
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let bytes = match plugin.instance.save_state() {
             Ok(bytes) => bytes,
             Err(error) => return self.preset_error(ControlErrorCode::Rejected, error),
@@ -4249,7 +5431,7 @@ impl DesktopApp {
         if let Err(error) = validation {
             return self.preset_error(ControlErrorCode::Rejected, error);
         }
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if let Err(error) = self
             .audio
             .as_ref()
@@ -4322,7 +5504,7 @@ impl DesktopApp {
         }
         drop(state);
 
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let result = self
             .audio
             .as_ref()
@@ -4332,7 +5514,7 @@ impl DesktopApp {
                     .plugin_parameters(instance_id.as_str())
                     .map_err(|error| error.to_string())
             });
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let result: std::result::Result<
             (
                 rackforge_plugin_api::ParameterSchema,
@@ -4455,7 +5637,7 @@ impl DesktopApp {
             };
         }
 
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let result = self
             .audio
             .as_ref()
@@ -4465,7 +5647,7 @@ impl DesktopApp {
                     .set_plugin_parameter(instance_id.as_str(), parameter_index, value)
                     .map_err(|error| error.to_string())
             });
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let result: std::result::Result<f64, String> = Err("Desktop audio is unavailable".into());
 
         match result {
@@ -4736,7 +5918,7 @@ impl DesktopApp {
         level: MasterLevel,
         command: Option<CommandRef>,
     ) -> Result<Vec<EventEnvelope>, String> {
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if let Some(audio) = &self.audio {
             audio
                 .set_master_level(level)
@@ -4765,7 +5947,7 @@ impl DesktopApp {
         pan: MasterPan,
         command: Option<CommandRef>,
     ) -> Result<Vec<EventEnvelope>, String> {
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if let Some(audio) = &self.audio {
             audio
                 .set_master_pan(pan)
@@ -4795,10 +5977,22 @@ impl DesktopApp {
         Ok(vec![event])
     }
 
-    /// Puts a LIVE target on stage: the session state and the Part's
-    /// sequencer freight. The Desktop keeps playing its active voice —
-    /// multi-Slot Rack audio remains the appliance's — so the Part's
-    /// patterns sound through it, quantised to the next bar.
+    /// Which list LIVE browses, kept across a restart like the rest of the
+    /// session: the mode alone was never checkpointed.
+    fn set_live_browse_mode(
+        &mut self,
+        mode: rackforge_performance_api::LiveBrowseMode,
+        command: Option<CommandRef>,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        let events =
+            self.apply_program_events(vec![SessionEvent::LiveBrowseModeChanged { mode }], command)?;
+        self.persist_session_checkpoint();
+        Ok(events)
+    }
+
+    /// Puts a LIVE target on stage: every Slot of its Rack, built and played
+    /// in place of the active voice, then the Part's sequencer freight,
+    /// quantised to the next bar. LIVE records the Rack only once it plays.
     fn activate_live_target(
         &mut self,
         location: rackforge_performance_api::LiveLocation,
@@ -4812,33 +6006,34 @@ impl DesktopApp {
         if active_mode != SurfaceMode::Live {
             return Err("LIVE targets can only be activated while LIVE is active".into());
         }
-        let (rack_id, part_commands, sounding, unsounded_slots) = {
+        let (rack, part_commands) = {
             let library = self.performance_repository.library();
+            // Every saved Rack is offered and every saved Rack loads, as on
+            // the appliance: `enabled` stays in the data, unused.
             let rack = library
                 .resolve_playable(&location)
                 .map_err(|error| error.to_string())?;
-            if !rack.enabled {
-                return Err("the selected Rack is disabled".into());
-            }
             let commands = library
                 .resolve_part(&location)
                 .map(|part| {
                     rackforge_core::sequencer::part_launch_commands(part, &library.patterns)
                 })
                 .unwrap_or_default();
-            // The Desktop renders one voice at a time, so a Rack sounds
-            // through its first enabled Slot. Mixing several Slots is the
-            // appliance's, and the Slot order is the Rack's own.
-            let enabled = rack.slots.iter().filter(|slot| slot.enabled);
-            let mut enabled = enabled.peekable();
-            let first = enabled
-                .next()
-                .map(|slot| (slot.plugin_id.clone(), slot.state.clone()));
-            let remaining = enabled.count();
-            (rack.id.clone(), commands, first, remaining)
+            (rack, commands)
         };
-        // A binding that fails must never fail the activation: the show
-        // goes on with the lanes that resolve.
+        self.put_rack_on_stage(self.performance_repository.library(), &rack)?;
+        let events = self.apply_program_events(
+            vec![SessionEvent::LiveTargetActivated {
+                location,
+                rack_id: rack.id.clone(),
+            }],
+            command,
+        )?;
+        self.persist_session_checkpoint();
+        // The Part's patterns go out once the Rack is on stage: queued
+        // before, a load that failed left them playing over the old one. A
+        // binding that fails never fails the activation; the show goes on
+        // with the lanes that resolve.
         for part_command in part_commands {
             match self
                 .audio
@@ -4856,129 +6051,156 @@ impl DesktopApp {
                 None => break,
             }
         }
-        // Until here the activation only moved LIVE's state, which is how a
-        // Rack could be shown on stage while PLAY's instrument kept sounding:
-        // the Desktop engine has no notion of a Rack, so nobody ever pointed
-        // the voice at the one the player chose.
-        let mut events = Vec::new();
-        if let Some((plugin_id, state)) = sounding {
-            let instance_id = self
-                .plugins
-                .iter()
-                .find(|plugin| plugin.plugin_id == plugin_id)
-                .map(|plugin| plugin.instance_id.clone())
-                .ok_or_else(|| {
-                    format!("The Rack needs {plugin_id}, which is not installed here")
-                })?;
-            let instance_id = InstanceId::new(instance_id)
-                .map_err(|error| format!("The Rack's instrument is unusable: {error}"))?;
-            let previous = self
-                .session
-                .read()
-                .expect("session lock poisoned")
-                .active_instance_id
-                .clone();
-            let already_sounding = previous.as_ref() == Some(&instance_id);
-            // Take the snapshot before anything is overwritten, and only the
-            // first time: a second Rack must not record the first Rack's
-            // sound as the one PLAY was holding.
-            if self.play_voice.is_none()
-                && let Some(previous) = previous.clone()
-            {
-                {
-                    let saved = {
-                        #[cfg(windows)]
-                        {
-                            self.audio
-                                .as_ref()
-                                .and_then(|audio| audio.save_active_state().ok())
-                        }
-                        #[cfg(not(windows))]
-                        {
-                            None::<Vec<u8>>
-                        }
-                    };
-                    // A voice whose state cannot be read is still worth
-                    // remembering by name; the player gets their instrument
-                    // back even if its knobs do not survive.
-                    println!(
-                        "PLAY_VOICE_BORROWED instrument={} state_bytes={}",
-                        previous.as_str(),
-                        saved.as_ref().map_or(0, Vec::len)
-                    );
-                    self.play_voice = Some((previous, saved.unwrap_or_default()));
-                }
-            }
-            if !already_sounding {
-                events.extend(self.select_plugin(&instance_id, command.clone())?);
-            }
-            // The Slot carries its sound with it. Loading the instrument
-            // without its state would hand the player the right box making
-            // the wrong noise.
-            if let Some(reference) = state {
-                let bytes = self
-                    .state_store
-                    .read(&reference)
-                    .map_err(|error| format!("Could not read the Slot's sound: {error:#}"))?;
-                #[cfg(windows)]
-                if let Some(audio) = &self.audio {
-                    audio
-                        .restore_state(instance_id.as_str(), bytes)
-                        .map_err(|error| format!("Could not load the Slot's sound: {error:#}"))?;
-                }
-            }
-            if unsounded_slots > 0 {
-                // Said out loud rather than mixed silently into nothing.
-                println!(
-                    "LIVE_RACK_PARTIAL sounding={} silent_slots={unsounded_slots} reason=desktop-renders-one-voice",
-                    instance_id.as_str()
-                );
-                self.status =
-                    format!("LIVE: {unsounded_slots} more Slot(s) in this Rack stay silent here");
-            }
-        }
-        events.extend(self.apply_program_events(
-            vec![SessionEvent::LiveTargetActivated { location, rack_id }],
-            command,
-        )?);
-        self.persist_session_checkpoint();
         Ok(events)
     }
 
-    /// Puts PLAY's own instrument and sound back under the player's hands.
-    ///
-    /// Separate from [`Self::set_active_mode`] so that its failure is a
-    /// failure to restore, not a failure to change mode.
-    fn restore_play_voice(
-        &mut self,
-        instance_id: &InstanceId,
-        state: Vec<u8>,
-        command: Option<CommandRef>,
-    ) -> Result<Vec<EventEnvelope>, String> {
-        let (known, sounding) = {
-            let session = self.session.read().expect("session lock poisoned");
-            (
-                session.instance(instance_id).is_some(),
-                session.active_instance_id.as_ref() == Some(instance_id),
+    /// Builds a Rack's Slots from the loaded plugins -- each Slot's own
+    /// instance, with its sound from the store and the links to its
+    /// parameters -- and puts it on stage in place of the active voice. The
+    /// voice and its chain are left as they are, for PLAY.
+    fn put_rack_on_stage(
+        &self,
+        library: &rackforge_performance_api::PerformanceLibrary,
+        rack: &rackforge_performance_api::RackDefinition,
+    ) -> Result<(), String> {
+        #[cfg(desktop_host)]
+        {
+            let audio = self
+                .audio
+                .as_ref()
+                .ok_or("The audio engine is not running; the Rack cannot be loaded")?;
+            let specs =
+                rackforge_core::rack_voice::rack_runtime_specs(library, rack, &self.state_store)
+                    .map_err(|error| format!("{} cannot be built: {error:#}", rack.name))?;
+            if let Some(missing) = specs.iter().find(|spec| {
+                !self
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.plugin_id == spec.plugin_id)
+            }) {
+                return Err(format!(
+                    "{} needs {}, which is not installed here",
+                    rack.name, missing.plugin_id
+                ));
+            }
+            let plugins = self
+                .plugins
+                .iter()
+                .map(|plugin| (plugin.plugin_id.clone(), plugin.runtime))
+                .collect();
+            let mut engine = rackforge_core::rack_voice::RackEngine::build(
+                &plugins,
+                &specs,
+                audio.sample_rate(),
+                desktop_audio::MAX_RACK_BLOCK_FRAMES,
+                2,
             )
-        };
-        if !known {
-            return Err(format!("{} is no longer loaded", instance_id.as_str()));
+            .map_err(|error| format!("{} cannot be built: {error:#}", rack.name))?;
+            engine.set_parameter_links(self.rack_parameter_links(&engine));
+            let slots = engine.slot_count();
+            audio
+                .set_rack(Some(engine))
+                .map_err(|error| format!("{} cannot be put on stage: {error:#}", rack.name))?;
+            println!("LIVE_RACK_ON_STAGE rack={} slots={slots}", rack.id);
         }
-        let events = if sounding {
-            Vec::new()
-        } else {
-            self.select_plugin(instance_id, command)?
+        #[cfg(not(desktop_host))]
+        let _ = (library, rack);
+        Ok(())
+    }
+
+    /// The session's links that name one of this Rack's Slots, compiled
+    /// against the Slot's plugin. A controller that is not connected waits.
+    #[cfg(desktop_host)]
+    fn rack_parameter_links(
+        &self,
+        rack: &rackforge_core::rack_voice::RackEngine<'static>,
+    ) -> Vec<CompiledParameterLink> {
+        let links = self
+            .session
+            .read()
+            .expect("session lock poisoned")
+            .parameter_links
+            .clone();
+        let approved: Vec<String> = self
+            .audio_preferences
+            .as_ref()
+            .map(|preferences| preferences.midi_inputs.clone())
+            .unwrap_or_default();
+        links
+            .into_iter()
+            .filter_map(|link| {
+                let plugin = rack.link_target_plugin(&link.instance_id)?;
+                let source_key = approved.iter().find_map(|name| {
+                    let descriptor = desktop_audio::midi_source_descriptor(name).ok()?;
+                    (descriptor.id == link.source.source_id)
+                        .then(|| desktop_audio::stable_midi_source_key_from_id(&descriptor.id))
+                })?;
+                let mut compiled =
+                    CompiledParameterLink::new(link.clone(), source_key, plugin.parameters())
+                        .map_err(|error| {
+                            eprintln!(
+                                "PARAMETER_LINK_PENDING link={} instance={} reason={error:#}",
+                                link.id, link.instance_id
+                            );
+                        })
+                        .ok()?;
+                compiled.set_takeover(self.controller_takeover);
+                Some(compiled)
+            })
+            .collect()
+    }
+
+    /// Takes the Rack off the stage; the active voice plays again.
+    fn take_rack_off_stage(&self) {
+        #[cfg(desktop_host)]
+        if let Some(audio) = &self.audio
+            && let Err(error) = audio.set_rack(None)
+        {
+            eprintln!("LIVE_RACK_RELEASE_FAILED error={error:#}");
+        }
+    }
+
+    /// The Rack LIVE names, built again: after its definition changed, or
+    /// after the audio engine was restarted without it. Nothing to do when
+    /// LIVE is not on stage or nothing is loaded.
+    fn reload_live_rack(&mut self, reason: &str) {
+        let (mode, active) = {
+            let session = self.session.read().expect("session lock poisoned");
+            (session.active_mode, session.live.active.clone())
         };
-        if !state.is_empty() {
-            #[cfg(windows)]
-            if let Some(audio) = &self.audio {
-                audio
-                    .restore_state(instance_id.as_str(), state)
-                    .map_err(|error| format!("could not load its sound: {error:#}"))?;
+        let Some(location) = active else { return };
+        if mode != SurfaceMode::Live {
+            return;
+        }
+        let result = self
+            .performance_repository
+            .library()
+            .resolve_playable(&location)
+            .map_err(|error| error.to_string())
+            .and_then(|rack| self.put_rack_on_stage(self.performance_repository.library(), &rack));
+        match result {
+            Ok(()) => println!("LIVE_RACK_RELOADED reason={reason}"),
+            Err(error) => {
+                eprintln!("LIVE_RACK_RELOAD_FAILED reason={reason} error={error}");
+                self.status = format!("The LIVE Rack could not be loaded again: {error}");
             }
         }
-        Ok(events)
+    }
+
+    /// A Rack being edited, heard as it stands: the library as it is, with
+    /// the draft in place of the Rack it edits. LIVE's record is untouched;
+    /// the editor loads what was playing again when it closes.
+    fn preview_rack(
+        &mut self,
+        draft: rackforge_performance_api::RackDefinition,
+    ) -> Result<Vec<EventEnvelope>, String> {
+        let mut library = self.performance_repository.library().clone();
+        match library.racks.iter_mut().find(|rack| rack.id == draft.id) {
+            Some(saved) => *saved = draft.clone(),
+            None => library.racks.push(draft.clone()),
+        }
+        self.put_rack_on_stage(&library, &draft)?;
+        Ok(Vec::new())
     }
 
     fn set_active_mode(
@@ -4986,7 +6208,7 @@ impl DesktopApp {
         mode: SurfaceMode,
         command: Option<CommandRef>,
     ) -> Result<Vec<EventEnvelope>, String> {
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if let Some(audio) = &self.audio {
             audio
                 .set_running(mode != SurfaceMode::Idle)
@@ -5038,39 +6260,14 @@ impl DesktopApp {
             events
         };
 
-        let mut events = events;
-
         let active_mode = active_mode_from_surface(mode);
         self.menu.sync_active_mode(active_mode);
         if mode == SurfaceMode::Play {
             let snapshot = self.performance_snapshot();
             self.menu.sync_performance_snapshot(snapshot);
-        }
-        // Returning to PLAY restores the instrument and the sound LIVE
-        // borrowed the voice from. A restore that cannot happen must not take
-        // the mode change down with it, and must not throw the memory away
-        // either: the player asked to be in PLAY, and the next attempt still
-        // has something to give them back.
-        if mode == SurfaceMode::Play
-            && let Some((instance_id, state)) = self.play_voice.clone()
-        {
-            match self.restore_play_voice(&instance_id, state, command.clone()) {
-                Ok(restored) => {
-                    println!(
-                        "PLAY_VOICE_RESTORED instrument={} events={}",
-                        instance_id.as_str(),
-                        restored.len()
-                    );
-                    events.extend(restored);
-                    self.play_voice = None;
-                }
-                Err(error) => {
-                    eprintln!(
-                        "PLAY_VOICE_RESTORE_FAILED instrument={} error={error}",
-                        instance_id.as_str()
-                    );
-                }
-            }
+            // PLAY's voice never left: taking the Rack off the stage is all
+            // there is to going back.
+            self.take_rack_off_stage();
         }
 
         self.status = format!("Active mode: {active_mode:?}");
@@ -5099,6 +6296,13 @@ impl DesktopApp {
             session.active_instance_id.as_ref() == Some(instrument_id)
         };
         chain.validate()?;
+        // The source's own plugin cannot follow itself: one instance per
+        // plugin, and it is already on stage.
+        let source_plugin_id = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.instance_id == instrument_id.as_str())
+            .map(|plugin| plugin.plugin_id.clone());
         for effect in &chain.effects {
             let plugin = self
                 .plugins
@@ -5108,12 +6312,15 @@ impl DesktopApp {
             if plugin.runtime.manifest().kind != PluginKind::Effect {
                 return Err(format!("{} is not an effect plugin", plugin.name));
             }
+            if source_plugin_id.as_deref() == Some(effect.plugin_id.as_str()) {
+                return Err(format!("{} cannot follow itself", plugin.name));
+            }
         }
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if active && let Some(audio) = &self.audio {
             apply_desktop_play_chain_state(audio, &chain, &self.plugins)?;
         }
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let _ = active;
         let events =
             self.apply_program_events(vec![SessionEvent::PlayChainChanged { chain }], command)?;
@@ -5145,7 +6352,7 @@ impl DesktopApp {
             .position(|plugin| plugin.instance_id == instance_id.as_str())
             .ok_or_else(|| format!("Unknown plugin instance: {instance_id}"))?;
 
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if let Some(audio) = &self.audio {
             audio
                 .select_plugin(instance_id.as_str())
@@ -5235,7 +6442,7 @@ impl DesktopApp {
                 ));
             }
             effect.program_id = Some(sound_id.to_owned());
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             {
                 let audio = self
                     .audio
@@ -5307,7 +6514,7 @@ impl DesktopApp {
 
         self.status = format!("Loaded {sound_id}");
         self.live_state_dirty = Some(Instant::now());
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if active
             && let Some(audio) = &self.audio
             && let Err(error) = audio.select_sound(instance_id.as_str(), sound_id)
@@ -5332,14 +6539,14 @@ impl DesktopApp {
             validate_desktop_surface_activation(&session, &instance_id, &request)?;
         }
 
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         let response = self
             .audio
             .as_ref()
             .ok_or_else(|| "Desktop audio is unavailable".to_owned())?
             .activate_surface(instance_id.as_str(), request.clone())
             .map_err(|error| format!("Could not activate the plugin surface: {error:#}"))?;
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         let response: rackforge_surface_api::SurfaceActivationResponse = {
             let _ = (&instance_id, &request);
             return Err("Desktop plugin surfaces require the Windows audio runtime".into());
@@ -5364,7 +6571,7 @@ impl DesktopApp {
         &mut self,
         command: Option<CommandRef>,
     ) -> Result<Vec<EventEnvelope>, String> {
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         if let Some(audio) = &self.audio {
             audio
                 .emergency_stop()
@@ -5420,7 +6627,7 @@ impl DesktopApp {
         prepared: PreparedProgram,
         reset: bool,
     ) -> Result<(), String> {
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         {
             let audio = self.audio.as_ref().ok_or_else(|| {
                 "Audio/MIDI is unavailable; program preview cannot start".to_owned()
@@ -5429,7 +6636,7 @@ impl DesktopApp {
                 .preview_program(instance_id, prepared, reset)
                 .map_err(|error| format!("Could not preview the program: {error:#}"))
         }
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         {
             let _ = (instance_id, prepared, reset);
             Err("Desktop program preview requires the Windows audio runtime".into())
@@ -5441,7 +6648,7 @@ impl DesktopApp {
         instance_id: &str,
         prepared: PreparedProgram,
     ) -> Result<PresetCatalog, String> {
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         {
             let audio = self.audio.as_ref().ok_or_else(|| {
                 "Audio/MIDI is unavailable; the program cannot be installed".to_owned()
@@ -5450,7 +6657,7 @@ impl DesktopApp {
                 .install_program(instance_id, prepared)
                 .map_err(|error| format!("Could not install the program in audio: {error:#}"))
         }
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         {
             let _ = (instance_id, prepared);
             Err("Desktop program installation requires the Windows audio runtime".into())
@@ -5462,7 +6669,7 @@ impl DesktopApp {
         instance_id: &str,
         sound_id: Option<&str>,
     ) -> Result<(), String> {
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         {
             let audio = self.audio.as_ref().ok_or_else(|| {
                 "Audio/MIDI is unavailable; the previous program cannot be restored".to_owned()
@@ -5471,7 +6678,7 @@ impl DesktopApp {
                 .restore_program(instance_id, sound_id)
                 .map_err(|error| format!("Could not restore the previous program: {error:#}"))
         }
-        #[cfg(not(windows))]
+        #[cfg(not(desktop_host))]
         {
             let _ = (instance_id, sound_id);
             Err("Desktop program restoration requires the Windows audio runtime".into())
@@ -6169,7 +7376,7 @@ impl DesktopApp {
                     session.revision = Revision::new(session.revision.get().saturating_add(1));
                 }
                 self.persist_session_checkpoint();
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 if let Some(audio) = &self.audio
                     && let Err(error) = audio.emergency_stop()
                 {
@@ -6178,6 +7385,50 @@ impl DesktopApp {
                     return;
                 }
                 self.status = "Emergency HOME · audio stopped".into();
+            }
+            // LIVE from LITTLE goes where the web's goes. These fell through
+            // to the pending arm, so LITTLE's LOAD did nothing and a Rack
+            // saved from it waited on its busy page for ever.
+            MenuCommand::SetLiveBrowseMode { mode } => {
+                match self.set_live_browse_mode(mode, None) {
+                    Ok(_) => {
+                        let snapshot = self.performance_snapshot();
+                        self.menu.sync_performance_snapshot(snapshot);
+                    }
+                    Err(error) => self.status = error,
+                }
+            }
+            MenuCommand::ActivateLiveTarget { location } => {
+                match self.activate_live_target(location, None) {
+                    Ok(_) => {
+                        let snapshot = self.performance_snapshot();
+                        self.menu.sync_performance_snapshot(snapshot);
+                    }
+                    Err(error) => self.status = format!("Could not load: {error}"),
+                }
+            }
+            MenuCommand::EditPerformance {
+                expected_revision,
+                edit,
+            } => {
+                let result =
+                    match self.handle_performance_control(ControlRequest::EditPerformance {
+                        expected_revision,
+                        edit,
+                    }) {
+                        ControlResponse::PerformanceEdited { snapshot } => Ok(*snapshot),
+                        ControlResponse::Error { message, .. } => Err(message),
+                        other => Err(format!("Unexpected performance response: {other:?}")),
+                    };
+                if let Err(error) = &result {
+                    self.status = error.clone();
+                }
+                self.menu.complete_performance_edit(result);
+            }
+            MenuCommand::PreviewRack { rack } => {
+                if let Err(error) = self.preview_rack(rack) {
+                    self.status = format!("Could not preview the Rack: {error}");
+                }
             }
             other => {
                 self.status = format!("Desktop bridge pending: {other:?}");
@@ -6375,11 +7626,11 @@ impl DesktopApp {
 
     fn button_is_down(&self, index: usize) -> bool {
         self.button_down[index].is_some() || self.keyboard_down[index].is_some() || {
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             {
                 self.controller_button_down[index].is_some()
             }
-            #[cfg(not(windows))]
+            #[cfg(not(desktop_host))]
             {
                 false
             }
@@ -6394,11 +7645,11 @@ impl eframe::App for DesktopApp {
         {
             self.flush_live_state();
         }
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         self.poll_audio_error();
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         self.poll_velocity_audition();
-        #[cfg(windows)]
+        #[cfg(desktop_host)]
         self.poll_controller();
         let _ = self.poll_plugin_install(context);
         self.keyboard(context);
@@ -6445,6 +7696,168 @@ impl eframe::App for DesktopApp {
                 );
             });
         });
+    }
+}
+
+/// Requests in the first second after a stream is published are the driver
+/// settling into the configuration it was just given, not a change.
+const DRIVER_RESET_SETTLING: Duration = Duration::from_secs(1);
+
+/// Whether the driver's reset requests call for reopening the stream.
+///
+/// `baseline` is the count and time the running stream was first seen at,
+/// `None` for a stream nobody has looked at yet. Returns the baseline to keep
+/// and, when the stream must be reopened, how many requests arrived since.
+/// Requests during the settling second move the baseline instead: some
+/// drivers ask once as buffers are created, and reopening for that would
+/// make them ask again, forever.
+fn driver_reset_decision(
+    baseline: Option<(u64, Instant)>,
+    requests: u64,
+    now: Instant,
+) -> ((u64, Instant), Option<u64>) {
+    match baseline {
+        None => ((requests, now), None),
+        Some((seen, since)) if requests > seen => {
+            if now.duration_since(since) < DRIVER_RESET_SETTLING {
+                ((requests, since), None)
+            } else {
+                ((requests, since), Some(requests - seen))
+            }
+        }
+        Some(kept) => (kept, None),
+    }
+}
+
+/// Turn two cumulative readings into the interval between them.
+///
+/// Everything the callback publishes only grows, and a mean over a stream
+/// that has been open for ten minutes moves too slowly to show what the
+/// machine is doing while someone watches it. Subtracting the previous
+/// reading gives the poll interval instead, and the budget is recomputed
+/// from the blocks that actually arrived in it rather than from the
+/// lifetime average block, so a driver that changes block size does not
+/// smear the two together.
+fn audio_health_window(
+    previous: Option<&desktop_audio::AudioRuntimeStatus>,
+    status: &desktop_audio::AudioRuntimeStatus,
+    window_peak_us: f64,
+    window_gap_percent: f64,
+    sample_rate: u32,
+) -> rackforge_control_api::AudioHealthSnapshot {
+    let base = previous.filter(|previous| {
+        // A restarted stream resets the counters; a reading that went
+        // backwards is from a different stream and cannot be subtracted.
+        previous.callback_count <= status.callback_count
+            && previous.callback_overruns <= status.callback_overruns
+            && previous.late_callbacks <= status.late_callbacks
+            && previous.silenced_blocks <= status.silenced_blocks
+    });
+    let capture = |status: &desktop_audio::AudioRuntimeStatus| {
+        status.capture_overruns + status.capture_underruns
+    };
+    let midi_late = |status: &desktop_audio::AudioRuntimeStatus| {
+        status.midi_driver_late + status.midi_queue_late
+    };
+    let (late, silenced, capture_glitches, recent_midi_late) = match base {
+        Some(previous) => (
+            status.late_callbacks - previous.late_callbacks,
+            status.silenced_blocks - previous.silenced_blocks,
+            capture(status).saturating_sub(capture(previous)),
+            midi_late(status).saturating_sub(midi_late(previous)),
+        ),
+        None => (
+            status.late_callbacks,
+            status.silenced_blocks,
+            capture(status),
+            midi_late(status),
+        ),
+    };
+    // The driver's counters belong to the process, not the stream: they do
+    // not reset when the stream does, so they are subtracted from whatever
+    // came before whether or not the stream restarted in between, and
+    // counted from zero only on the very first reading.
+    let driver = |status: &desktop_audio::AudioRuntimeStatus| {
+        status.driver_overloads + status.driver_resyncs + status.driver_skipped_buffers
+    };
+    let driver_dropouts = previous.map_or(driver(status), |previous| {
+        driver(status).saturating_sub(driver(previous))
+    });
+    let (blocks, frames, total_us, overruns, overrun_us, overrun_frames) = match base {
+        Some(previous) => (
+            status.callback_count - previous.callback_count,
+            status.callback_frames - previous.callback_frames,
+            status.callback_total_us - previous.callback_total_us,
+            status.callback_overruns - previous.callback_overruns,
+            status.callback_overrun_us - previous.callback_overrun_us,
+            status.callback_overrun_frames - previous.callback_overrun_frames,
+        ),
+        None => (
+            status.callback_count,
+            status.callback_frames,
+            status.callback_total_us,
+            status.callback_overruns,
+            status.callback_overrun_us,
+            status.callback_overrun_frames,
+        ),
+    };
+    let block_frames = if blocks == 0 {
+        0.0
+    } else {
+        frames as f64 / blocks as f64
+    };
+    let budget_us = if sample_rate == 0 {
+        0.0
+    } else {
+        block_frames / f64::from(sample_rate) * 1_000_000.0
+    };
+    let percent_of_budget = |us: f64| {
+        if budget_us > 0.0 {
+            us / budget_us * 100.0
+        } else {
+            0.0
+        }
+    };
+    rackforge_control_api::AudioHealthSnapshot {
+        load_percent: if blocks == 0 {
+            0.0
+        } else {
+            percent_of_budget(total_us / blocks as f64)
+        },
+        peak_percent: percent_of_budget(window_peak_us),
+        overruns: status.callback_overruns,
+        stream_errors: status.stream_error_count,
+        midi_dropped: status.midi_dropped_events,
+        recent_overruns: overruns,
+        overrun_average_percent: if overruns == 0 {
+            0.0
+        } else {
+            percent_of_budget(overrun_us / overruns as f64)
+        },
+        overrun_average_frames: if overruns == 0 {
+            0.0
+        } else {
+            overrun_frames as f64 / overruns as f64
+        },
+        block_frames,
+        late_callbacks: status.late_callbacks,
+        recent_late_callbacks: late,
+        worst_gap_percent: window_gap_percent,
+        silenced_blocks: status.silenced_blocks,
+        recent_silenced_blocks: silenced,
+        driver_overloads: status.driver_overloads,
+        driver_resyncs: status.driver_resyncs,
+        driver_skipped_buffers: status.driver_skipped_buffers,
+        recent_driver_dropouts: driver_dropouts,
+        capture_glitches: capture(status),
+        recent_capture_glitches: capture_glitches,
+        midi_late_driver: status.midi_driver_late,
+        midi_late_queue: status.midi_queue_late,
+        recent_midi_late,
+        // The worst delays are taken from the stream by the caller, which
+        // owns the window; nothing in two cumulative readings holds them.
+        worst_midi_driver_delay_ms: 0.0,
+        worst_midi_queue_delay_ms: 0.0,
     }
 }
 
@@ -6643,19 +8056,30 @@ fn desktop_program_draft_state(
     })
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 fn desktop_audio_specs(
     plugins: &[DesktopPlugin],
     live_state_dir: &Path,
 ) -> Vec<desktop_audio::VoiceSpec> {
     plugins
         .iter()
-        .map(|plugin| desktop_audio::VoiceSpec {
-            instance_id: plugin.instance_id.clone(),
-            plugin: plugin.runtime,
-            preset_id: plugin.selected_sound_id.clone(),
-            resources: plugin.resources.clone(),
-            initial_state: read_live_state(live_state_dir, &plugin.plugin_id),
+        .map(|plugin| {
+            // From this start on, what is saved is this program's: dropped
+            // here if it was another's, written by the next flush.
+            let matches = plugin.live_state_matches.replace(true);
+            desktop_audio::VoiceSpec {
+                instance_id: plugin.instance_id.clone(),
+                plugin: plugin.runtime,
+                preset_id: plugin.selected_sound_id.clone(),
+                resources: plugin.resources.clone(),
+                initial_state: if matches {
+                    read_live_state(live_state_dir, &plugin.plugin_id)
+                } else {
+                    discard_live_state(live_state_dir, &plugin.plugin_id);
+                    None
+                },
+                restore_live_parameters: matches,
+            }
         })
         .collect()
 }
@@ -6669,7 +8093,36 @@ fn read_live_state(dir: &Path, plugin_id: &str) -> Option<Vec<u8>> {
     fs::read(live_state_path(dir, plugin_id)).ok()
 }
 
+/// Drops a plugin's saved live state: it belongs to a program no longer
+/// selected, and the next flush writes the one now playing.
+fn discard_live_state(dir: &Path, plugin_id: &str) {
+    match fs::remove_file(live_state_path(dir, plugin_id)) {
+        Ok(()) => eprintln!("DESKTOP_LIVE_STATE_DISCARDED plugin={plugin_id}"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            eprintln!("DESKTOP_LIVE_STATE_NOT_DISCARDED plugin={plugin_id} error={error}")
+        }
+    }
+}
+
 #[cfg(windows)]
+/// Windows' Sound control panel, where a WASAPI device's shared-mode format
+/// is chosen. It is a program of its own, so this returns as soon as it has
+/// started and nothing here waits for it.
+fn open_system_sound_settings() -> std::io::Result<()> {
+    std::process::Command::new("control")
+        .arg("mmsys.cpl")
+        .spawn()
+        .map(drop)
+}
+
+#[cfg(all(desktop_host, not(windows)))]
+/// Linux has no one sound settings program: each desktop has its own, and
+/// the panel only offers it for WASAPI.
+fn open_system_sound_settings() -> std::io::Result<()> {
+    Err(std::io::ErrorKind::Unsupported.into())
+}
+
 fn start_desktop_audio(
     plugins: &[DesktopPlugin],
     preferences: &desktop_audio::AudioPreferences,
@@ -6696,18 +8149,24 @@ fn start_desktop_audio(
 /// First boot installs it into the controller store like any package --
 /// the same contract Android's bundled install honors -- so a fresh
 /// machine has its controller without anyone running a command.
+/// The KeyLab driver's platform in the package manifest, and its file name.
+#[cfg(windows)]
+const BUNDLED_DRIVER_TARGET: &str = "windows-x86-64";
+#[cfg(windows)]
+const BUNDLED_DRIVER_FILE: &str = "rackforge-arturia-keylab-essential-mk3-driver.exe";
+#[cfg(not(windows))]
+const BUNDLED_DRIVER_TARGET: &str = "linux-x86-64";
+#[cfg(not(windows))]
+const BUNDLED_DRIVER_FILE: &str = "rackforge-arturia-keylab-essential-mk3-driver";
+
 fn ensure_bundled_controller(rackforge_root: &Path) {
     let store = rackforge_controller_package::PackageStore::new(rackforge_root.join("controllers"));
     let driver = BUNDLED_CONTROLLER_DRIVER
         .map(|bytes| bytes.to_vec())
         .or_else(|| {
-            std::env::current_exe().ok().and_then(|exe| {
-                fs::read(
-                    exe.parent()?
-                        .join("rackforge-arturia-keylab-essential-mk3-driver.exe"),
-                )
+            std::env::current_exe()
                 .ok()
-            })
+                .and_then(|exe| fs::read(exe.parent()?.join(BUNDLED_DRIVER_FILE)).ok())
         });
     let Some(driver) = driver else {
         eprintln!("DESKTOP_BUNDLED_CONTROLLER_SKIPPED reason=driver-binary-unavailable");
@@ -6715,7 +8174,7 @@ fn ensure_bundled_controller(rackforge_root: &Path) {
     };
     let manifest_text = match rackforge_controller_package::stamp_bundled_manifest(
         keylab_essential_mk3::controller::PACKAGE_MANIFEST,
-        &[("windows-x86-64", driver.as_slice())],
+        &[(BUNDLED_DRIVER_TARGET, driver.as_slice())],
     ) {
         Ok(manifest) => manifest,
         Err(error) => {
@@ -6748,16 +8207,19 @@ fn ensure_bundled_controller(rackforge_root: &Path) {
         if staging.exists() {
             fs::remove_dir_all(&staging)?;
         }
-        let bin = staging.join("bin").join("windows-x86-64");
+        let bin = staging.join("bin").join(BUNDLED_DRIVER_TARGET);
         fs::create_dir_all(&bin)?;
         fs::write(
             staging.join(rackforge_controller_package::CONTROLLER_MANIFEST_FILE),
             &manifest_text,
         )?;
-        fs::write(
-            bin.join("rackforge-arturia-keylab-essential-mk3-driver.exe"),
-            &driver,
-        )?;
+        let binary = bin.join(BUNDLED_DRIVER_FILE);
+        fs::write(&binary, &driver)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&binary, fs::Permissions::from_mode(0o755))?;
+        }
         Ok(())
     })();
     if let Err(error) = staged {
@@ -6782,32 +8244,49 @@ fn external_controller_enabled(rackforge_root: &Path) -> bool {
     if !root.join("packages").exists() {
         return false;
     }
+    // A package with a driver owns its surface; a declarative one only
+    // names controls, and must not make this host let go of the KeyLab.
     rackforge_controller_package::PackageStore::new(root)
         .list()
-        .map(|installed| installed.iter().any(|controller| controller.record.enabled))
+        .map(|installed| {
+            installed.iter().any(|controller| {
+                controller.record.enabled
+                    && controller.package.manifest().runtime.kind
+                        != rackforge_controller_package::DriverRuntimeKind::DeclarativeV1
+            })
+        })
         .unwrap_or(false)
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 fn declarative_semantic_profiles(
     rackforge_root: &Path,
     approved_midi_inputs: &[String],
+    identities: &BTreeMap<String, rackforge_controller_package::IdentityReply>,
 ) -> Result<BTreeMap<String, RegisteredSemanticProfile>> {
     let store = rackforge_controller_package::PackageStore::new(rackforge_root.join("controllers"));
     let mut profiles = BTreeMap::new();
     for endpoint_name in approved_midi_inputs {
-        let Some(binding) = store
-            .resolve_declarative_input(endpoint_name)
-            .with_context(|| format!("resolving declarative controller for {endpoint_name:?}"))?
-        else {
-            continue;
-        };
+        // A port no package can settle on costs that port, never every
+        // other controller: this used to fail the whole reload.
+        let binding =
+            match store.resolve_identified_input(endpoint_name, identities.get(endpoint_name)) {
+                Ok(Some(binding)) => binding,
+                Ok(None) => continue,
+                Err(error) => {
+                    eprintln!(
+                        "DECLARATIVE_CONTROLLER_SKIPPED endpoint={endpoint_name:?} error={error}"
+                    );
+                    continue;
+                }
+            };
         let descriptor = desktop_audio::midi_source_descriptor(endpoint_name)?;
         if profiles.contains_key(&binding.controller_id) {
-            bail!(
-                "declarative controller {} matches more than one enabled MIDI input; make its endpoint matcher more specific",
+            eprintln!(
+                "DECLARATIVE_CONTROLLER_SKIPPED endpoint={endpoint_name:?} id={} reason=already-attached-to-another-input",
                 binding.controller_id
             );
+            continue;
         }
         profiles.insert(
             binding.controller_id,
@@ -6817,13 +8296,19 @@ fn declarative_semantic_profiles(
                 runtime_source_name: Some(descriptor.name),
                 host_controls: binding.host_controls,
                 host_actions: binding.host_actions,
+                held: binding.held_controls,
+                declarative: true,
+                identified: binding.identified,
+                on_connect: binding.on_connect,
+                setup_output: binding.setup_output,
+                setup_messages: binding.setup_messages,
             },
         );
     }
     Ok(profiles)
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 /// The chains that still make sense here: an instrument that exists, and
 /// only the effects whose plugins are installed and are effects.
 fn prune_play_chains(
@@ -6853,7 +8338,7 @@ fn prune_play_chains(
 
 /// The chain the session holds for `instrument_id`, or none, handed to
 /// the audio engine.
-#[cfg(windows)]
+#[cfg(desktop_host)]
 /// The instrument an effect instance belongs to: `<instrument>.fx.<id>`
 /// without its suffix. The caller has already established that it is one.
 fn chain_owner_id(instance_id: &InstanceId) -> String {
@@ -6865,11 +8350,21 @@ fn chain_owner_id(instance_id: &InstanceId) -> String {
 }
 
 /// The plugins LITTLE offers, instruments for PLAY and effects for the
-/// chain: one list each, told apart by what the plugin says it is.
+/// chain: one list each, told apart by what the plugin says it is. An effect
+/// played on its own from the audio input is in both: PLAY's sources, and
+/// the effects another source can take.
 fn little_play_plugins(plugins: &[DesktopPlugin], effects: bool) -> Vec<PlayPlugin> {
     plugins
         .iter()
-        .filter(|plugin| (plugin.runtime.manifest().kind == PluginKind::Effect) == effects)
+        .filter(|plugin| {
+            let manifest = plugin.runtime.manifest();
+            let effect = manifest.kind == PluginKind::Effect;
+            if effects {
+                effect
+            } else {
+                !effect || manifest.play_source
+            }
+        })
         .map(|plugin| {
             PlayPlugin::new(&plugin.instance_id, &plugin.plugin_id, &plugin.name)
                 .short_name(plugin.runtime.manifest().little_short_name())
@@ -6930,7 +8425,7 @@ fn apply_desktop_play_chain(
     apply_desktop_play_chain_state(audio, &chain, plugins)
 }
 
-#[cfg(windows)]
+#[cfg(desktop_host)]
 fn apply_desktop_play_chain_state(
     audio: &desktop_audio::DesktopAudio,
     chain: &PlayChainState,
@@ -6956,6 +8451,7 @@ fn apply_desktop_play_chain_state(
                 preset_id: effect.program_id.clone(),
                 resources: plugin.resources.clone(),
                 initial_state: None,
+                restore_live_parameters: true,
             },
             effect.enabled,
         ));
@@ -6977,6 +8473,23 @@ fn sync_desktop_audio(
     drop(state);
     audio.render_little(menu.render());
     Ok(())
+}
+
+/// Offers each keyboard the map made from the plugins' control layouts and
+/// the controller packages installed under `rackforge_root`.
+fn offer_factory_controller_maps(
+    store: &ControllerMapStore,
+    plugins: &[DesktopPlugin],
+    rackforge_root: &Path,
+) -> Result<Vec<String>> {
+    use rackforge_core::controller_layouts::{control_layouts, factory_maps, slotted_controllers};
+    let layouts = control_layouts(
+        plugins
+            .iter()
+            .map(|plugin| (plugin.plugin_id.as_str(), plugin.package_root.as_path())),
+    );
+    let controllers = slotted_controllers(Some(&rackforge_root.join("controllers")));
+    store.seed_factory_maps(&factory_maps(&controllers, &layouts))
 }
 
 fn load_desktop_plugins(options: &Options) -> Result<(Vec<DesktopPlugin>, Vec<String>)> {
@@ -7131,6 +8644,7 @@ fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<Desk
     }
 
     Ok(DesktopPlugin {
+        package_root: package.root().to_path_buf(),
         instance_id,
         plugin_id: package.manifest().id.clone(),
         name: package.manifest().name.clone(),
@@ -7141,6 +8655,7 @@ fn load_desktop_plugin(package: &PluginPackage, data_root: &Path) -> Result<Desk
         sound_summaries,
         sounds,
         selected_sound_id,
+        live_state_matches: Cell::new(false),
         instance,
         resources: BTreeMap::new(),
         resource_data_paths: package
@@ -7173,6 +8688,11 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
 
     install_bundled_default_plugin(&options)?;
     install_bundled_official_plugins(&options)?;
+    // The controllers RackForge describes from their makers' documentation,
+    // installed before the MIDI inputs are matched against the store.
+    rackforge_controller_catalog::install_bundled_and_report(
+        &options.rackforge_root.join("controllers"),
+    );
 
     let session = Arc::new(RwLock::new(SessionState::new(
         SessionId::new(DEFAULT_LIVE_SESSION_ID).expect("valid live session id"),
@@ -7198,7 +8718,7 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
         web_servers,
         web_control,
     )?;
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     if app.audio.is_some() {
         startup.advance(rackforge_core::startup::StartupPhase::AudioReady)?;
     }
@@ -7243,7 +8763,7 @@ fn create_desktop(options: Options) -> Result<DesktopApp> {
             })
             .context("starting the controller supervisor")?
     };
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     if app.audio.is_some() {
         if let Err(error) = controller_ready_receiver.recv_timeout(Duration::from_secs(2)) {
             eprintln!("DESKTOP_CONTROLLER_STARTUP_DEGRADED error={error}");
@@ -7285,7 +8805,8 @@ fn install_bundled_default_plugin(options: &Options) -> Result<()> {
         fs::write(&marker, b"1\n")?;
         return Ok(());
     }
-    let installed = install_local_archive(store_root, bytes)
+    // Built with this release, as the official set is: see below.
+    let installed = install_official_archive(store_root, bytes)
         .context("installing the bundled default instrument")?;
     eprintln!(
         "DESKTOP_DEFAULT_PLUGIN id={} version={} path={} existing={}",
@@ -7317,7 +8838,7 @@ fn install_bundled_official_plugins(options: &Options) -> Result<()> {
         // what its versions contain. A same-version copy left by an earlier
         // build is corrected rather than kept: keeping it meant a player ran
         // a stale instrument that no release could ever replace.
-        let installed = install_local_archive_replacing(store_root, bytes)
+        let installed = install_official_archive(store_root, bytes)
             .with_context(|| format!("installing bundled official plugin {archive_name}"))?;
         if !known_plugin {
             set_plugin_enabled(store_root, &inspection.plugin_id, true).with_context(|| {
@@ -7354,7 +8875,7 @@ impl RackForgeApp {
         Ok(mode)
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn new(startup: Startup, creation: &eframe::CreationContext<'_>) -> Result<Self> {
         Ok(Self {
             mode: Self::initial_mode(startup)?,
@@ -7363,7 +8884,7 @@ impl RackForgeApp {
         })
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(desktop_host))]
     fn new(startup: Startup, _creation: &eframe::CreationContext<'_>) -> Result<Self> {
         Ok(Self {
             mode: Self::initial_mode(startup)?,
@@ -7394,13 +8915,18 @@ impl eframe::App for RackForgeApp {
     }
 
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "linux")]
+        {
+            self.webview.pump();
+            pace_linux_frame();
+        }
         let close_requested = context.input(|input| input.viewport().close_requested());
         if close_requested
             && self.shutdown.is_none()
             && let AppMode::Desktop(app) = &mut self.mode
         {
             context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            #[cfg(windows)]
+            #[cfg(desktop_host)]
             {
                 let _ = self.webview.hide();
             }
@@ -7428,7 +8954,7 @@ impl eframe::App for RackForgeApp {
                 web_preferences,
                 install_archives,
             } => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     let _ = self.webview.hide();
                 }
@@ -7444,15 +8970,19 @@ impl eframe::App for RackForgeApp {
                 })
             }
             AppMode::Desktop(app) => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 app.poll_audio_error();
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 app.poll_controller();
                 app.poll_web_control();
+                #[cfg(desktop_host)]
+                app.publish_forwarded_midi_route();
+                #[cfg(desktop_host)]
+                app.poll_audio_driver_panel();
                 context.request_repaint_after(Duration::from_millis(16));
                 let reload_web = app.poll_plugin_install(context);
                 context.send_viewport_cmd(egui::ViewportCommand::Title(app.window_title().into()));
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     let web_rect = egui::CentralPanel::default()
                         .frame(egui::Frame::NONE)
@@ -7461,11 +8991,14 @@ impl eframe::App for RackForgeApp {
                     if reload_web && let Err(error) = self.webview.reload() {
                         app.status = format!("Could not reload Web UI: {error:#}");
                     }
-                    if let Err(error) = self.webview.show(&app.web_url, web_rect) {
+                    if let Err(error) =
+                        self.webview
+                            .show(&app.web_url, web_rect, context.pixels_per_point())
+                    {
                         app.status = format!("Could not show embedded Web UI: {error:#}");
                     }
                 }
-                #[cfg(not(windows))]
+                #[cfg(not(desktop_host))]
                 egui::CentralPanel::default().show(context, |ui| {
                     ui.centered_and_justified(|ui| {
                         ui.label(format!("Open RackForge Web at {}", app.web_url));
@@ -7474,7 +9007,7 @@ impl eframe::App for RackForgeApp {
                 None
             }
             AppMode::Error(message) => {
-                #[cfg(windows)]
+                #[cfg(desktop_host)]
                 {
                     let _ = self.webview.hide();
                 }
@@ -7514,7 +9047,7 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     let _single_instance = match single_instance::acquire()? {
         single_instance::AcquireOutcome::Acquired(guard) => guard,
         single_instance::AcquireOutcome::AlreadyRunning => {
@@ -7573,7 +9106,8 @@ fn run() -> Result<()> {
         "../../../assets/brand/rackforge-mark-256.png"
     ))
     .context("loading the embedded RackForge app icon")?;
-    let native = eframe::NativeOptions {
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("RackForge Desktop")
             .with_inner_size([1280.0, 800.0])
@@ -7581,12 +9115,64 @@ fn run() -> Result<()> {
             .with_icon(Arc::new(app_icon)),
         ..Default::default()
     };
+    // On Linux the embedded WebView can only be placed in an X11 window, so
+    // the window is X11's even on a Wayland desktop -- through XWayland, which
+    // the Wayland desktops carry -- and GTK is told the same.
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: nothing has started a thread yet; the variable is set
+        // before GTK or any other library reads the environment.
+        unsafe { std::env::set_var("GDK_BACKEND", "x11") };
+        // WebKitGTK's accelerated compositing, in a child of an X11 window,
+        // drew the interface at two frames a second for a core and a quarter
+        // of a handheld's CPU (a Ryzen Z1 Extreme, inside the Flatpak), and
+        // took from the plugins' audio: a fixed load through RF-Musette ran
+        // some 10 % slower and missed blocks it otherwise made. Without it
+        // the same page draws at 120 frames for a quarter of a core. No
+        // interface or plugin panel uses WebGL, the one thing it costs. The
+        // setting's own policy, Never, is not the same: the view stays black.
+        // SAFETY: as above.
+        unsafe { std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1") };
+        // The desktop file's StartupWMClass: how the desktop matches this
+        // window to RackForge's launcher and icon.
+        native.viewport = native
+            .viewport
+            .with_app_id("io.github.kalexis1994.RackForge");
+        // Frames are not tied to the display's refresh: the window's own
+        // surface is entirely under the WebView, and XWayland presents a
+        // surface nobody sees once a second, so a frame that waited for vsync
+        // held the app loop -- and every request the interface sends the host
+        // -- for a second each time.
+        native.vsync = false;
+        native.event_loop_builder = Some(Box::new(|builder| {
+            use winit::platform::x11::EventLoopBuilderExtX11;
+            builder.with_x11();
+        }));
+    }
     eframe::run_native(
         "RackForge Desktop",
         native,
         Box::new(move |creation| Ok(Box::new(RackForgeApp::new(startup, creation)?))),
     )
     .map_err(|error| anyhow::anyhow!(error.to_string()))
+}
+
+/// Holds Linux frames to about 120 a second. With vsync off (see `run`)
+/// nothing else paces them -- the loop spun at some 2,500 -- and 120 keeps the
+/// WebView's GTK events and the interface's requests answered within a few
+/// milliseconds for next to no CPU.
+#[cfg(target_os = "linux")]
+fn pace_linux_frame() {
+    const FRAME: Duration = Duration::from_micros(8_333);
+    static LAST: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(previous) = *last {
+        let elapsed = previous.elapsed();
+        if elapsed < FRAME {
+            thread::sleep(FRAME - elapsed);
+        }
+    }
+    *last = Some(Instant::now());
 }
 
 #[cfg(windows)]
@@ -7638,7 +9224,27 @@ fn show_startup_error(message: &str) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn show_already_running() {
+    eprintln!("RackForge is already running.");
+    message_dialog::show(
+        message_dialog::Level::Info,
+        "RackForge is already running",
+        "Another RackForge instance is already running. The audio engine was not started.",
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn show_startup_error(message: &str) {
+    eprintln!("RackForge could not start: {message}");
+    message_dialog::show(
+        message_dialog::Level::Error,
+        "RackForge could not start",
+        message,
+    );
+}
+
+#[cfg(not(desktop_host))]
 fn show_startup_error(message: &str) {
     eprintln!("RackForge could not start: {message}");
 }
@@ -7652,6 +9258,197 @@ mod tests {
         PROGRAM_SCHEMA_VERSION, PresetDescriptor, ProgramEditorField, ProgramEditorFieldKind,
         ProgramEditorPage, ProgramEditorView,
     };
+
+    fn health_reading(
+        blocks: u64,
+        frames: u64,
+        total_us: f64,
+        overruns: u64,
+        overrun_us: f64,
+        overrun_frames: u64,
+    ) -> desktop_audio::AudioRuntimeStatus {
+        desktop_audio::AudioRuntimeStatus {
+            callback_count: blocks,
+            callback_frames: frames,
+            callback_total_us: total_us,
+            callback_overrun_us: overrun_us,
+            callback_overrun_frames: overrun_frames,
+            callback_overruns: overruns,
+            ..desktop_audio::AudioRuntimeStatus::default()
+        }
+    }
+
+    #[test]
+    fn the_health_window_reports_the_interval_and_not_the_life_of_the_stream() {
+        // Ten minutes of a 2% load, then one poll interval at 40%: the
+        // lifetime mean barely moves, which is why it is not what is
+        // reported. 256 frames at 48 kHz is a 5333 µs budget.
+        let previous = health_reading(200_000, 200_000 * 256, 200_000.0 * 107.0, 0, 0.0, 0);
+        let status = health_reading(
+            200_000 + 400,
+            (200_000 + 400) * 256,
+            200_000.0 * 107.0 + 400.0 * 2_133.0,
+            0,
+            0.0,
+            0,
+        );
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert!(
+            (health.load_percent - 40.0).abs() < 0.5,
+            "reported {}",
+            health.load_percent
+        );
+        assert!((health.block_frames - 256.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn the_health_window_separates_a_late_callback_from_a_short_one() {
+        // Four overruns, all of them full blocks that ran 150% of budget:
+        // nothing about the block size explains them.
+        let previous = health_reading(1_000, 1_000 * 256, 100_000.0, 0, 0.0, 0);
+        let status = health_reading(1_400, 1_400 * 256, 200_000.0, 4, 4.0 * 8_000.0, 4 * 256);
+        let health = audio_health_window(Some(&previous), &status, 8_000.0, 0.0, 48_000);
+        assert_eq!(health.recent_overruns, 4);
+        assert!((health.overrun_average_frames - 256.0).abs() < f64::EPSILON);
+        assert!(
+            (health.overrun_average_percent - 150.0).abs() < 0.5,
+            "reported {}",
+            health.overrun_average_percent
+        );
+        assert!((health.peak_percent - 150.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn a_stream_nobody_has_seen_takes_the_current_count_as_its_baseline() {
+        let now = Instant::now();
+        // Resets from before this stream existed -- the one that made the
+        // host reopen it, say -- are not this stream's to answer.
+        assert_eq!(driver_reset_decision(None, 7, now), ((7, now), None));
+    }
+
+    #[test]
+    fn a_reset_asked_for_while_the_driver_settles_moves_the_baseline_only() {
+        let published = Instant::now();
+        let during = published + Duration::from_millis(400);
+        assert_eq!(
+            driver_reset_decision(Some((7, published)), 8, during),
+            ((8, published), None)
+        );
+    }
+
+    #[test]
+    fn a_reset_asked_for_after_the_driver_settled_reopens_the_stream() {
+        let published = Instant::now();
+        let later = published + Duration::from_secs(5);
+        assert_eq!(
+            driver_reset_decision(Some((7, published)), 9, later),
+            ((9, published), Some(2))
+        );
+        assert_eq!(
+            driver_reset_decision(Some((9, published)), 9, later),
+            ((9, published), None),
+            "no new request, nothing to do"
+        );
+    }
+
+    #[test]
+    fn late_and_silenced_blocks_are_reported_for_the_window_and_in_total() {
+        let mut previous = health_reading(1_000, 1_000 * 128, 100_000.0, 0, 0.0, 0);
+        previous.late_callbacks = 3;
+        previous.silenced_blocks = 1;
+        let mut status = health_reading(1_400, 1_400 * 128, 140_000.0, 0, 0.0, 0);
+        status.late_callbacks = 5;
+        status.silenced_blocks = 1;
+        let health = audio_health_window(Some(&previous), &status, 0.0, 212.5, 48_000);
+        assert_eq!(health.late_callbacks, 5);
+        assert_eq!(health.recent_late_callbacks, 2);
+        assert_eq!(health.silenced_blocks, 1);
+        assert_eq!(health.recent_silenced_blocks, 0);
+        assert!((health.worst_gap_percent - 212.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn driver_dropouts_survive_a_stream_restart_without_being_counted_twice() {
+        // The driver's counters are process-wide. A restarted stream resets
+        // the callback's counters but not these, so reporting them "whole"
+        // on a restart, as the stream's own are, would count every old
+        // dropout a second time.
+        let mut previous = health_reading(500_000, 500_000 * 128, 1.0, 0, 0.0, 0);
+        previous.driver_overloads = 4;
+        previous.driver_resyncs = 1;
+        let mut status = health_reading(100, 100 * 128, 1.0, 0, 0.0, 0);
+        status.driver_overloads = 4;
+        status.driver_resyncs = 2;
+        status.driver_skipped_buffers = 3;
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert_eq!(health.recent_driver_dropouts, 4);
+        assert_eq!(health.driver_overloads, 4);
+        assert_eq!(health.driver_resyncs, 2);
+        assert_eq!(health.driver_skipped_buffers, 3);
+    }
+
+    #[test]
+    fn capture_glitches_are_overruns_and_underruns_together() {
+        let mut previous = health_reading(1_000, 1_000 * 128, 1.0, 0, 0.0, 0);
+        previous.capture_overruns = 2;
+        let mut status = health_reading(1_400, 1_400 * 128, 1.0, 0, 0.0, 0);
+        status.capture_overruns = 3;
+        status.capture_underruns = 5;
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert_eq!(health.capture_glitches, 8);
+        assert_eq!(health.recent_capture_glitches, 6);
+    }
+
+    #[test]
+    fn late_midi_is_reported_by_stage_in_total_and_together_for_the_window() {
+        let mut previous = health_reading(1_000, 1_000 * 128, 1.0, 0, 0.0, 0);
+        previous.midi_driver_late = 1;
+        let mut status = health_reading(1_400, 1_400 * 128, 1.0, 0, 0.0, 0);
+        status.midi_driver_late = 3;
+        status.midi_queue_late = 1;
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert_eq!(health.midi_late_driver, 3);
+        assert_eq!(health.midi_late_queue, 1);
+        assert_eq!(health.recent_midi_late, 3);
+    }
+
+    #[test]
+    fn a_restarted_stream_is_reported_whole_rather_than_subtracted() {
+        // The counters reset with the stream. Subtracting the reading from
+        // before it would underflow, and on a u64 that is a panic in debug
+        // and a colossal number in release.
+        let previous = health_reading(
+            500_000,
+            500_000 * 256,
+            50_000_000.0,
+            12,
+            120_000.0,
+            12 * 256,
+        );
+        let status = health_reading(100, 100 * 256, 100.0 * 1_066.0, 0, 0.0, 0);
+        let health = audio_health_window(Some(&previous), &status, 0.0, 0.0, 48_000);
+        assert_eq!(health.recent_overruns, 0);
+        assert!(
+            (health.load_percent - 20.0).abs() < 0.5,
+            "reported {}",
+            health.load_percent
+        );
+    }
+
+    #[test]
+    fn a_stream_with_no_blocks_yet_reports_zero_rather_than_dividing_by_it() {
+        let health = audio_health_window(
+            None,
+            &health_reading(0, 0, 0.0, 0, 0.0, 0),
+            0.0,
+            0.0,
+            48_000,
+        );
+        assert_eq!(
+            health,
+            rackforge_control_api::AudioHealthSnapshot::default()
+        );
+    }
 
     #[test]
     fn chooses_safe_activation_for_plugin_versions() {
@@ -7887,7 +9684,7 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     #[test]
     fn midi_source_api_exposes_only_the_settings_allowlist() {
         let preferences = desktop_audio::AudioPreferences {
@@ -7919,7 +9716,7 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     #[test]
     fn forwarded_controller_must_resolve_to_an_approved_physical_input() {
         let preferences = desktop_audio::AudioPreferences {

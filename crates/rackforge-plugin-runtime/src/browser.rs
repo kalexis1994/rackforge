@@ -26,7 +26,8 @@ use crate::shared::{
     validate_realtime_events, write_f32, write_midi, write_parameters,
 };
 use crate::{
-    ABI_VERSION_V1, ABI_VERSION_V1_1, MidiEvent, MidiEvent2, ParameterEvent, RuntimeLimits,
+    ABI_VERSION_V1, ABI_VERSION_V1_1, ABI_VERSION_V1_2, MidiEvent, MidiEvent2, ParameterEvent,
+    RuntimeLimits,
 };
 use anyhow::{Context, Result, bail};
 use std::path::Path;
@@ -78,6 +79,16 @@ pub mod export {
     pub const PARALLEL_BEGIN_BLOCK: i32 = 40;
     pub const PARALLEL_RENDER_UNIT: i32 = 41;
     pub const PARALLEL_END_BLOCK: i32 = 42;
+    pub const LATENCY_FRAMES: i32 = 43;
+    /// How many f32 a unit writes per frame. Optional: a component built
+    /// before it existed does not export it, and the host then uses the
+    /// output channels.
+    pub const PARALLEL_UNIT_CHANNELS: i32 = 44;
+    /// How many bytes a unit writes BACK per block, and where those bytes
+    /// live. Optional in the same way: a component that reports nothing
+    /// does not export either, and the host then copies nothing back.
+    pub const PARALLEL_REPORT_STRIDE: i32 = 45;
+    pub const PARALLEL_REPORT_PTR: i32 = 46;
 }
 
 /// Raw imports the embedding page must supply.
@@ -233,6 +244,11 @@ pub struct PortableModule {
 }
 
 impl PortableModule {
+    /// Always false: the page runs components only, never a native build.
+    pub fn is_native_build(&self) -> bool {
+        false
+    }
+
     pub fn instantiate(&self) -> Result<PortableInstance> {
         // SAFETY: the handle is a live module produced by `rf_compile`.
         let handle = unsafe { host::rf_instantiate(self.handle.0) };
@@ -392,6 +408,22 @@ impl PortableModule {
                 raw.call_0(export::PARALLEL_DISPATCH_PTR, "parallel_dispatch_ptr")?;
             let plan_offset = raw.call_0(export::PARALLEL_PLAN_PTR, "parallel_plan_ptr")?;
             let mix_offset = raw.call_0(export::PARALLEL_MIX_PTR, "parallel_mix_ptr")?;
+            // Optional, as on the native host: zero means the output channels.
+            let unit_channels = raw
+                .call_0(export::PARALLEL_UNIT_CHANNELS, "parallel_unit_channels")
+                .unwrap_or(0)
+                .max(0);
+            // Optional, as on the native host: zero means a unit has
+            // nothing to say and there is nothing to bring back.
+            let report_stride = raw
+                .call_0(export::PARALLEL_REPORT_STRIDE, "parallel_report_stride")
+                .unwrap_or(0)
+                .max(0);
+            let report_offset = if report_stride > 0 {
+                raw.call_0(export::PARALLEL_REPORT_PTR, "parallel_report_ptr")?
+            } else {
+                0
+            };
             let shared_offset = raw.call_0(export::PARALLEL_SHARED_PTR, "parallel_shared_ptr")?;
             let shared_capacity =
                 raw.call_0(export::PARALLEL_SHARED_CAPACITY, "parallel_shared_capacity")?;
@@ -446,17 +478,24 @@ impl PortableModule {
                     max_units,
                     dispatch_stride,
                     mix_slot_samples: output_capacity as usize,
+                    unit_channels: unit_channels as usize,
+                    report_stride: report_stride as usize,
                     shared_capacity,
                 },
                 dispatch_offset,
                 plan_offset,
                 mix_offset,
                 shared_offset,
+                report_offset,
             })
         } else {
             None
         };
 
+        let has_latency = raw.export_present(export::LATENCY_FRAMES);
+        if version > ABI_VERSION_V1_2 && !has_latency {
+            bail!("wasm-v1 ABI v1.3 plugin is missing export rackforge_latency_frames");
+        }
         Ok(PortableInstance {
             raw,
             input_offset,
@@ -471,6 +510,7 @@ impl PortableModule {
             capacity_transfer_bytes: transfer_capacity as usize,
             program_api,
             parallel_api,
+            has_latency,
             prepared_sample_rate: 0.0,
             prepared_input_channels: 0,
             prepared_output_channels: 0,
@@ -495,6 +535,12 @@ struct PortableParallelApi {
     dispatch_offset: i32,
     plan_offset: i32,
     mix_offset: i32,
+    /// Where the component keeps what its units wrote back. Read from the
+    /// component and kept here, but nothing uses it yet: the worker arena
+    /// carries audio only, so a plugin that reports takes the sequential
+    /// fallback. This is the half of the wiring that is already done.
+    #[allow(dead_code)]
+    report_offset: i32,
     shared_offset: i32,
 }
 
@@ -587,6 +633,7 @@ pub struct PortableInstance {
     capacity_transfer_bytes: usize,
     program_api: Option<PortableProgramApi>,
     parallel_api: Option<PortableParallelApi>,
+    has_latency: bool,
     prepared_sample_rate: f64,
     prepared_input_channels: u32,
     prepared_output_channels: u32,
@@ -599,6 +646,11 @@ pub struct PortableInstance {
 }
 
 impl PortableInstance {
+    /// Always false: the page runs components only, never a native build.
+    pub fn is_native_build(&self) -> bool {
+        false
+    }
+
     /// The live module handle, used to name this component to the render
     /// pool: the page keeps the compiled bytes under the same handle.
     fn module_handle(&self) -> i32 {
@@ -688,6 +740,17 @@ impl PortableInstance {
             bail!("portable plugin does not expose parameter {index}");
         }
         Ok(value)
+    }
+
+    pub fn latency_frames(&mut self) -> Result<u32> {
+        if !self.has_latency {
+            return Ok(0);
+        }
+        let value = self.raw.call_0(export::LATENCY_FRAMES, "latency_frames")?;
+        if value < 0 {
+            bail!("portable plugin returned an invalid latency");
+        }
+        Ok(value as u32)
     }
 
     pub fn reset(&mut self) -> Result<()> {
@@ -992,7 +1055,18 @@ impl PortableInstance {
         // the parallel path is taken only while a worker pool is actually
         // standing by. Everything serial about the block happens on this
         // thread either way.
-        if self.parallel_api.is_some() {
+        // A plugin that reports is one whose coordinator decides things from
+        // what its units did -- which string is busy, which is quietest --
+        // and the pool has no way home for that yet: the worker arena
+        // carries audio and nothing else. Running it there would leave the
+        // coordinator allocating from a picture nobody is painting, so the
+        // whole block goes through the sequential fallback instead, which is
+        // the same component rendering the same audio on one thread.
+        let carries_reports = self
+            .parallel_api
+            .as_ref()
+            .is_some_and(|api| api.layout.report_stride > 0);
+        if self.parallel_api.is_some() && !carries_reports {
             // SAFETY: no arguments; reports pool readiness.
             let workers = unsafe { host::rf_par_ready() };
             if workers > 0 {
@@ -1142,7 +1216,11 @@ impl PortableInstance {
         // SAFETY: no arguments; reads the completion bitmask.
         let finished_mask = unsafe { host::rf_par_unit_mask() } as u32;
 
-        let mix_samples = checked_samples(frames, self.prepared_output_channels)?;
+        // The same width a unit actually writes, not the instrument's
+        // channels -- see the native host, where reading two channels of a
+        // twenty-channel unit silenced every section.
+        let unit_width = layout.unit_width(self.prepared_output_channels as usize) as u32;
+        let mix_samples = checked_samples(frames, unit_width)?;
         for entry in &plan[..active] {
             let slot_offset =
                 mix_offset + (entry.unit as usize * layout.mix_slot_samples * 4) as i32;
@@ -1182,6 +1260,26 @@ impl PortableInstance {
         let rendered = self.raw.read(self.output_offset, mix_samples * 4)?;
         read_f32(&rendered, 0..mix_samples * 4, output);
         Ok(())
+    }
+
+    /// Always false. A budget is denominated in fuel, and this engine does not
+    /// meter fuel, so there is no honest number to hand over here -- a plugin
+    /// running in a browser keeps whatever quality its author calibrated.
+    pub const fn accepts_realtime_budget(&self) -> bool {
+        false
+    }
+
+    /// Always `Ok(false)`, for the same reason. The host asks every backend
+    /// the same question rather than branching on which one it has.
+    pub const fn set_realtime_budget(&mut self, _fuel: u64) -> Result<bool> {
+        Ok(false)
+    }
+
+    /// Always false: the browser engine does not meter guest execution, so
+    /// there is no fuel figure to report and the governor is told so rather
+    /// than handed a zero it would read as a free block.
+    pub const fn is_metered(&self) -> bool {
+        false
     }
 
     /// Always `0`: the browser engine does not meter guest execution, so no

@@ -11,6 +11,7 @@
 use crate::{
     MIDI_FAMILY_NOTE, MIDI2_FLAG_ORIGIN_7BIT, MIDI2_KIND_NOTE_ON, MidiEvent, MidiEvent2,
     ParameterEvent, Processor, STATUS_INVALID_ARGUMENT, STATUS_INVALID_STATE, STATUS_OK,
+    portable::native::{NativeApiV1, region},
 };
 
 #[derive(Default)]
@@ -106,6 +107,7 @@ fn the_wide_entry_hands_over_exactly_what_the_host_wrote() {
     }
     assert_eq!(rackforge_process_v2(64, 0, 2, 1, 0, 1), STATUS_OK);
     let output = unsafe { *core::ptr::addr_of!(RF_OUTPUT) };
+    let component = output;
     assert_eq!(
         &output[..10],
         &[
@@ -138,4 +140,42 @@ fn the_wide_entry_hands_over_exactly_what_the_host_wrote() {
     // The narrow entry is still exported and still reaches `process`.
     assert_eq!(rackforge_process(64, 0, 2, 0, 0), STATUS_OK);
     assert_eq!(unsafe { (*core::ptr::addr_of!(RF_OUTPUT))[0] }, -1.0);
+
+    // The native table carries the same wide contract: its families, its
+    // entry, and a region of two words per event.
+    let api = unsafe { &*rackforge_portable_native_entry_v1() };
+    assert_eq!(api.midi2_families, MIDI_FAMILY_NOTE);
+    let process_v2 = api
+        .process_v2
+        .expect("a midi2 clause exports the wide entry");
+    let instance = unsafe { (api.create)() };
+    assert_eq!(
+        unsafe { (api.prepare)(instance, 48_000.0, 64, 0, 2) },
+        STATUS_OK
+    );
+    let mut capacity = 0;
+    let wide = unsafe { (api.region)(instance, region::MIDI2, &mut capacity) }.cast::<u64>();
+    assert_eq!(capacity, 8);
+    let narrow_region = unsafe { (api.region)(instance, region::MIDI, &mut capacity) };
+    unsafe {
+        narrow_region.cast::<u64>().write(narrow);
+        wide.write(head);
+        wide.add(1).write(tail);
+    }
+    assert_eq!(
+        unsafe { process_v2(instance, 64, 0, 2, 1, 0, 1) },
+        STATUS_OK
+    );
+    let output = unsafe { (api.region)(instance, region::OUTPUT, &mut capacity) };
+    let output = unsafe { core::slice::from_raw_parts(output.cast::<f32>(), capacity) };
+    assert_eq!(output[..10], component[..10]);
+    assert_eq!(
+        unsafe { process_v2(instance, 64, 0, 2, 0, 0, 5) },
+        STATUS_INVALID_ARGUMENT
+    );
+    unsafe { (api.destroy)(instance) };
+}
+
+unsafe extern "C" {
+    fn rackforge_portable_native_entry_v1() -> *const NativeApiV1;
 }

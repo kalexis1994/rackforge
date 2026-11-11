@@ -1,0 +1,339 @@
+# Novation Launch Control (the first, 2014), on factory template 1, which
+# RackForge selects on connect. Every value below is sourced in SOURCES.md; [PR]
+# is the Launch Control Programmer's Reference Guide, [GSG] its Getting Started
+# Guide v2, [AB] Ableton Live 12's Launch_Control script.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-launch-control"
+name = "Launch Control"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "launch-control"
+
+# Its one MIDI port, "Launch Control", or "Launch Control n" for a unit set to
+# device ID n [PR p2]. The Launch Control XL and XL 3 name themselves apart.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["launch control"]
+exclude_contains = ["xl", "lcxl"]
+
+# Where the template message goes: the same port.
+[[devices.endpoints]]
+role = "setup_output"
+name_contains = ["launch control"]
+exclude_contains = ["xl", "lcxl"]
+
+# On connect, factory template 1 (F0 00 20 29 02 0A 77 08 F7): factory
+# templates are 08h-0Fh and speak on MIDI channels 9-16 [PR p2, p7 "Change
+# current template"]. Ableton selects the same template with the same message
+# [AB Sysex.MIXER_MODE].
+[permissions]
+midi_input = true
+midi_output = true
+sysex = true
+
+[[on_connect]]
+message = "F0 00 20 29 02 0A 77 08 F7"
+to = "setup_output"
+
+# The knobs, on template 1's channel, 9: the top row CC 21-28, the bottom row
+# CC 41-48, absolute [AB make_all_encoders on channel 8 zero-based, absolute].
+# No faders: the top row takes the first row, the bottom one the second. The
+# Launch Control has no keys: none of its controls ever plays.
+
+[[inputs]]
+id = "knob-1"
+name = "Knob 1"
+kind = "knob"
+group = "Top knobs"
+midi = { channel = 8, cc = 21 }
+slot = "control-1.1"
+plays = false
+
+[[inputs]]
+id = "knob-2"
+name = "Knob 2"
+kind = "knob"
+group = "Top knobs"
+midi = { channel = 8, cc = 22 }
+slot = "control-1.2"
+plays = false
+
+[[inputs]]
+id = "knob-3"
+name = "Knob 3"
+kind = "knob"
+group = "Top knobs"
+midi = { channel = 8, cc = 23 }
+slot = "control-1.3"
+plays = false
+
+[[inputs]]
+id = "knob-4"
+name = "Knob 4"
+kind = "knob"
+group = "Top knobs"
+midi = { channel = 8, cc = 24 }
+slot = "control-1.4"
+plays = false
+
+[[inputs]]
+id = "knob-5"
+name = "Knob 5"
+kind = "knob"
+group = "Top knobs"
+midi = { channel = 8, cc = 25 }
+slot = "control-1.5"
+plays = false
+
+[[inputs]]
+id = "knob-6"
+name = "Knob 6"
+kind = "knob"
+group = "Top knobs"
+midi = { channel = 8, cc = 26 }
+slot = "control-1.6"
+plays = false
+
+[[inputs]]
+id = "knob-7"
+name = "Knob 7"
+kind = "knob"
+group = "Top knobs"
+midi = { channel = 8, cc = 27 }
+slot = "control-1.7"
+plays = false
+
+[[inputs]]
+id = "knob-8"
+name = "Knob 8"
+kind = "knob"
+group = "Top knobs"
+midi = { channel = 8, cc = 28 }
+slot = "control-1.8"
+plays = false
+
+[[inputs]]
+id = "knob-9"
+name = "Knob 9"
+kind = "knob"
+group = "Bottom knobs"
+midi = { channel = 8, cc = 41 }
+slot = "control-2.1"
+plays = false
+
+[[inputs]]
+id = "knob-10"
+name = "Knob 10"
+kind = "knob"
+group = "Bottom knobs"
+midi = { channel = 8, cc = 42 }
+slot = "control-2.2"
+plays = false
+
+[[inputs]]
+id = "knob-11"
+name = "Knob 11"
+kind = "knob"
+group = "Bottom knobs"
+midi = { channel = 8, cc = 43 }
+slot = "control-2.3"
+plays = false
+
+[[inputs]]
+id = "knob-12"
+name = "Knob 12"
+kind = "knob"
+group = "Bottom knobs"
+midi = { channel = 8, cc = 44 }
+slot = "control-2.4"
+plays = false
+
+[[inputs]]
+id = "knob-13"
+name = "Knob 13"
+kind = "knob"
+group = "Bottom knobs"
+midi = { channel = 8, cc = 45 }
+slot = "control-2.5"
+plays = false
+
+[[inputs]]
+id = "knob-14"
+name = "Knob 14"
+kind = "knob"
+group = "Bottom knobs"
+midi = { channel = 8, cc = 46 }
+slot = "control-2.6"
+plays = false
+
+[[inputs]]
+id = "knob-15"
+name = "Knob 15"
+kind = "knob"
+group = "Bottom knobs"
+midi = { channel = 8, cc = 47 }
+slot = "control-2.7"
+plays = false
+
+[[inputs]]
+id = "knob-16"
+name = "Knob 16"
+kind = "knob"
+group = "Bottom knobs"
+midi = { channel = 8, cc = 48 }
+slot = "control-2.8"
+plays = false
+
+# The pads, on template 1: notes 9-12 and 25-28 on channel 9, velocity 127 on
+# press and a release [AB pad_identifiers, is_pad=True, channel 8 zero-based;
+# PR p7]. They take the first switch row, in order. Such low notes are no
+# instrument's: they never play.
+
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads"
+midi = { channel = 8, note = 9 }
+slot = "switch-1.1"
+plays = false
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads"
+midi = { channel = 8, note = 10 }
+slot = "switch-1.2"
+plays = false
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads"
+midi = { channel = 8, note = 11 }
+slot = "switch-1.3"
+plays = false
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads"
+midi = { channel = 8, note = 12 }
+slot = "switch-1.4"
+plays = false
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads"
+midi = { channel = 8, note = 25 }
+slot = "switch-1.5"
+plays = false
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads"
+midi = { channel = 8, note = 26 }
+slot = "switch-1.6"
+plays = false
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads"
+midi = { channel = 8, note = 27 }
+slot = "switch-1.7"
+plays = false
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads"
+midi = { channel = 8, note = 28 }
+slot = "switch-1.8"
+plays = false
+
+# The four buttons: up CC 114, down 115, left 116, right 117 [AB; GSG p1 "4
+# buttons"]. Left and right step the main selector, up and down the second.
+
+[[inputs]]
+id = "up"
+name = "Up"
+kind = "button"
+group = "Buttons"
+midi = { channel = 8, cc = 114 }
+slot = "step-2.up"
+plays = false
+
+[[inputs]]
+id = "down"
+name = "Down"
+kind = "button"
+group = "Buttons"
+midi = { channel = 8, cc = 115 }
+slot = "step-2.down"
+plays = false
+
+[[inputs]]
+id = "left"
+name = "Left"
+kind = "button"
+group = "Buttons"
+midi = { channel = 8, cc = 116 }
+slot = "step.down"
+plays = false
+
+[[inputs]]
+id = "right"
+name = "Right"
+kind = "button"
+group = "Buttons"
+midi = { channel = 8, cc = 117 }
+slot = "step.up"
+plays = false
+
+# RackForge's default meanings for eight knobs and no faders, on the top row;
+# the bottom row is left for the player.
+[[roles]]
+input = "knob-1"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "knob-2"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "knob-3"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "knob-4"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "knob-5"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "knob-6"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "knob-7"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "knob-8"
+role = "synth.envelope.amp.release"

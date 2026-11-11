@@ -1,31 +1,17 @@
-import { useState, type CSSProperties } from "react";
+import { useId, useState } from "react";
+import { useCanvasModal } from "../hooks/useCanvasModal";
+import { normalizeRackMidiTransform } from "../rackGraph";
+import { noteName, transposedRange } from "../keyRange";
 import type { RackGraphEdge, RackMidiTransform } from "../types";
+import { KeyRangeEditor } from "./KeyRangeEditor";
 import { ScrubNumberField } from "./ScrubNumberField";
 
 interface RackMidiLinkEditorProps {
   edge: RackGraphEdge;
   fallback?: RackMidiTransform;
   targetLabel?: string;
-  style?: CSSProperties;
   onApply: (transform: RackMidiTransform) => void;
   onClose: () => void;
-}
-
-const identityTransform: RackMidiTransform = {
-  source_channels: [],
-  note_low: 0,
-  note_high: 127,
-  transpose: 0,
-  notes_only: false,
-  velocity_input_low: 0,
-  velocity_input_high: 127,
-  velocity_output_low: 0,
-  velocity_output_high: 127,
-};
-
-function noteName(note: number) {
-  const names = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
-  return `${names[note % 12]}${Math.floor(note / 12) - 1}`;
 }
 
 function ChannelPicker({
@@ -110,36 +96,43 @@ export function RackMidiLinkEditor({
   edge,
   fallback,
   targetLabel = "Instrument",
-  style,
   onApply,
   onClose,
 }: RackMidiLinkEditorProps) {
+  const { sectionRef, closeRef, onKeyDown } = useCanvasModal(onClose);
+  const titleId = useId();
   const [draft, setDraft] = useState<RackMidiTransform>(
-    edge.midi_transform ?? fallback ?? identityTransform,
+    () => normalizeRackMidiTransform(edge.midi_transform ?? fallback),
   );
 
   const patch = (next: Partial<RackMidiTransform>) => setDraft((current) => ({ ...current, ...next }));
   const valid = draft.note_low <= draft.note_high
     && draft.velocity_input_low < draft.velocity_input_high
     && draft.velocity_output_low <= draft.velocity_output_high;
+  const played = transposedRange({ low: draft.note_low, high: draft.note_high }, draft.transpose);
   const curveX1 = (draft.velocity_input_low / 127) * 100;
   const curveX2 = (draft.velocity_input_high / 127) * 100;
   const curveY1 = 100 - (draft.velocity_output_low / 127) * 100;
   const curveY2 = 100 - (draft.velocity_output_high / 127) * 100;
 
   return (
+    <>
+    <div className="rack-link-editor-scrim" aria-hidden="true" onPointerDown={(event) => event.stopPropagation()} />
     <section
+      ref={sectionRef}
       className="rack-midi-link-editor"
-      style={style}
-      aria-label="MIDI connection settings"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onKeyDown={onKeyDown}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <header>
         <div>
           <span>MIDI CONNECTION</span>
-          <strong>Input → {targetLabel}</strong>
+          <strong id={titleId}>Input → {targetLabel}</strong>
         </div>
-        <button type="button" className="rack-midi-close" aria-label="Close" onClick={onClose}>×</button>
+        <button ref={closeRef} type="button" className="rack-midi-close" aria-label="Close" title="Close (Esc)" onClick={onClose}>×</button>
       </header>
       <div className="rack-midi-link-scroll">
         <section className="rack-midi-section">
@@ -158,10 +151,19 @@ export function RackMidiLinkEditor({
 
         <section className="rack-midi-section">
           <h3>Key range</h3>
-          <div className="rack-midi-field-grid">
-            <ScrubNumberField label="Lowest note" value={draft.note_low} minimum={0} maximum={127} suffix={noteName(draft.note_low)} onChange={(note_low) => patch({ note_low })} />
-            <ScrubNumberField label="Highest note" value={draft.note_high} minimum={0} maximum={127} suffix={noteName(draft.note_high)} onChange={(note_high) => patch({ note_high })} />
+          <KeyRangeEditor
+            range={{ low: draft.note_low, high: draft.note_high }}
+            onChange={({ low, high }) => patch({ note_low: low, note_high: high })}
+          />
+          <div className="rack-midi-transpose">
             <ScrubNumberField label="Transpose" value={draft.transpose} minimum={-48} maximum={48} suffix={`${draft.transpose > 0 ? "+" : ""}${draft.transpose} st`} onChange={(transpose) => patch({ transpose })} />
+            <p className={played ? "" : "warning"} aria-live="polite">
+              {draft.transpose === 0
+                ? "Played as received."
+                : played
+                  ? `The instrument receives ${noteName(played.low)}–${noteName(played.high)}.`
+                  : "Transposed past MIDI's range: nothing reaches the instrument."}
+            </p>
           </div>
           <label className="rack-midi-check">
             <input type="checkbox" checked={draft.notes_only} onChange={(event) => patch({ notes_only: event.target.checked })} />
@@ -186,11 +188,12 @@ export function RackMidiLinkEditor({
         </section>
       </div>
       <footer>
-        <button type="button" onClick={() => setDraft(identityTransform)}>Reset</button>
+        <button type="button" onClick={() => setDraft(normalizeRackMidiTransform())}>Reset</button>
         <span />
         <button type="button" onClick={onClose}>Cancel</button>
         <button type="button" className="primary" disabled={!valid} onClick={() => onApply(draft)}>Apply</button>
       </footer>
     </section>
+    </>
   );
 }

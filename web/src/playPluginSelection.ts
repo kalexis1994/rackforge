@@ -1,4 +1,19 @@
-import type { SessionCommand } from "./types";
+import type { PluginWebDescriptor, SessionCommand } from "./types";
+
+/**
+ * What PLAY can put on stage: every instrument, and every effect that is
+ * played on its own from the audio input (a pedalboard). A host with no
+ * capture at all -- the browser -- gets no such effect: it would only be
+ * silent there.
+ */
+export function playSourcePlugins(
+  plugins: PluginWebDescriptor[],
+  { capture = true }: { capture?: boolean } = {},
+): PluginWebDescriptor[] {
+  return plugins.filter((plugin) =>
+    plugin.kind === "instrument"
+    || (capture && plugin.kind === "effect" && plugin.play_source === true));
+}
 
 export interface PlayPluginTarget {
   pluginId: string;

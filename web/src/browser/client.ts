@@ -12,10 +12,10 @@ import { HostRequestError } from "../host";
 import engineWorkletUrl from "./engine.worklet.ts?worker&url";
 import {
   ENGINE_PROCESSOR,
-  PACKAGED_STORAGE_PREFIX,
   type EngineEvent,
   type SeedFile,
   waitForLinkedStoragePublication,
+  writableStorageFiles,
 } from "./protocol";
 import {
   canServePluginAssets,
@@ -37,6 +37,7 @@ import {
   automaticWorkerCount,
   poolLayout,
   deviceIsMobile,
+  parallelPoolAllowed,
   poolSupported,
   type WorkerInit,
 } from "./renderPool";
@@ -49,9 +50,14 @@ import type {
   WebAuthStatus,
   WebPublicConfig,
 } from "../types";
+import {
+  DEFAULT_WEB_BUFFER_FRAMES,
+  WEB_BUFFER_STORAGE_KEY,
+  requestedWebBufferFrames,
+  validWebBufferFrames,
+  webBufferChoices,
+} from "./audioBuffer";
 
-/** Frames per render. Web Audio always asks for 128. */
-const RENDER_FRAMES = 128;
 const OUTPUT_CHANNELS = 2;
 /** Where the built site keeps the storage image the host boots against. */
 const STORAGE_MANIFEST = "demo/storage.json";
@@ -84,6 +90,24 @@ interface Pending {
 }
 
 let context: AudioContext | null = null;
+let activeRenderFrames = DEFAULT_WEB_BUFFER_FRAMES;
+let readyRenderFrames = DEFAULT_WEB_BUFFER_FRAMES;
+
+function variableRenderQuantaSupported(): boolean {
+  return typeof AudioContext !== "undefined" && "renderQuantumSize" in AudioContext.prototype;
+}
+
+function savedRenderFrames(): number {
+  try {
+    return requestedWebBufferFrames(
+      localStorage.getItem(WEB_BUFFER_STORAGE_KEY),
+      variableRenderQuantaSupported(),
+    );
+  } catch {
+    return DEFAULT_WEB_BUFFER_FRAMES;
+  }
+}
+let bootAudioContext: AudioContext | null = null;
 let engine: AudioWorkletNode | null = null;
 let booting: Promise<void> | null = null;
 let bootError: string | null = null;
@@ -250,17 +274,18 @@ async function loadStorage(): Promise<SeedFile[]> {
     ),
     readStoredFiles(),
   ]);
+  const packagedPaths = packaged.map((file) => file.path);
+  const writable = writableStorageFiles(stored, packagedPaths);
   const files = [
     ...packaged,
-    ...stored.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX)),
+    ...writable,
   ];
   // Copies, because booting the engine transfers every file's buffer to the
   // worklet and leaves these detached. Republishing then threw on the first
   // storage write, and a plugin's interface quietly stopped following its
   // package for the rest of the session.
   packagedFiles = packaged.map((file) => ({ path: file.path, bytes: file.bytes.slice() }));
-  latestStoredFiles = stored
-    .filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX))
+  latestStoredFiles = writable
     .map((file) => ({ path: file.path, bytes: file.bytes.slice() }));
   installPluginAssetRecovery();
   await queuePluginAssetPublication(latestStoredFiles, true).catch((error: unknown) => {
@@ -277,6 +302,10 @@ async function loadStorage(): Promise<SeedFile[]> {
  */
 let storageWrite: number | null = null;
 let pendingStorage: SeedFile[] = [];
+let storageWaiters: Array<{
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}> = [];
 
 function storeFiles(files: SeedFile[], publishAssets: boolean): Promise<void> {
   pendingStorage = files;
@@ -284,17 +313,23 @@ function storeFiles(files: SeedFile[], publishAssets: boolean): Promise<void> {
   const publication = publishAssets
     ? queuePluginAssetPublication(files, true)
     : pluginAssetPublicationTail;
+  const durable = new Promise<void>((resolve, reject) => {
+    storageWaiters.push({ resolve, reject });
+  });
   if (storageWrite === null) {
     storageWrite = window.setTimeout(() => {
       storageWrite = null;
       const files = pendingStorage;
+      const waiters = storageWaiters;
       pendingStorage = [];
-      void writeStoredFiles(files).catch((error: unknown) => {
-        console.warn("RackForge could not keep its storage in this browser", error);
-      });
+      storageWaiters = [];
+      void writeStoredFiles(files).then(
+        () => waiters.forEach((waiter) => waiter.resolve()),
+        (error: unknown) => waiters.forEach((waiter) => waiter.reject(error)),
+      );
     }, 400);
   }
-  return publication;
+  return Promise.all([publication, durable]).then(() => undefined);
 }
 
 /**
@@ -358,6 +393,11 @@ function buildRenderPool(request: PoolRequestEvent) {
       "rackforge render pool: the page is not cross-origin isolated, so a"
         + " parallel instrument will render on the audio thread alone",
     );
+    return;
+  }
+  if (!parallelPoolAllowed(true, deviceIsMobile())) {
+    poolReason = "parallel rendering is disabled on mobile to prevent silent missed blocks";
+    console.warn(`rackforge render pool: ${poolReason}`);
     return;
   }
   poolReason = undefined;
@@ -466,10 +506,15 @@ function handleEngineEvent(event: EngineEvent) {
         // observer immediately so a fast Cache Storage rejection is never
         // reported as an unhandled promise before that response event arrives.
         void publication.catch(() => undefined);
+      } else {
+        void publication.catch((error: unknown) => {
+          console.warn("RackForge could not keep its storage in this browser", error);
+        });
       }
       break;
     }
     case "ready":
+      readyRenderFrames = event.frames;
       milestones.ready?.();
       break;
     case "pool_request":
@@ -515,6 +560,12 @@ export async function startBrowserHost(): Promise<void> {
     throw new Error("the browser engine must not run inside the desktop shell");
   }
   if (booting) {
+    // This call can come from a new user gesture while the first boot is
+    // waiting for audio permission. Resume *before* awaiting that boot: the
+    // context is not assigned to `context` until the worklet is ready.
+    if (bootAudioContext?.state === "suspended") {
+      void bootAudioContext.resume().catch(() => undefined);
+    }
     await booting;
     if (context?.state === "suspended") {
       await context.resume();
@@ -523,7 +574,15 @@ export async function startBrowserHost(): Promise<void> {
   }
   booting = (async () => {
     const startup = new StartupTimeline("browser");
-    const audio = new AudioContext({ latencyHint: "interactive" });
+    const requestedFrames = savedRenderFrames();
+    const audio = new AudioContext({
+      latencyHint: "interactive",
+      ...(variableRenderQuantaSupported() ? { renderSizeHint: requestedFrames } : {}),
+    } as AudioContextOptions & { renderSizeHint?: number });
+    bootAudioContext = audio;
+    // A first tap can happen while the packaged filesystem is still being
+    // downloaded. Listen before the first await so that gesture is not lost.
+    resumeOnGesture(audio);
     await audio.audioWorklet.addModule(engineWorkletUrl);
     // The worker keeps non-hashed files available offline. Tie the host ABI to
     // the hashed UI build so a deployment can never pair a new worklet with
@@ -532,6 +591,16 @@ export async function startBrowserHost(): Promise<void> {
       fetchBytes(versionedBrowserAsset(HOST_MODULE)),
       loadStorage(),
     ]);
+    console.info(`BROWSER_BOOT files_ready count=${files.length} audio_state=${audio.state}`);
+
+    // The worklet can announce readiness as soon as it is constructed on a
+    // running context. Arm both listeners before creating the node.
+    const ready = milestone(
+      "ready",
+      audio,
+      "the RackForge engine did not start on the audio thread",
+    );
+    const booted = milestone("booted", audio, "the RackForge engine did not answer");
 
     const node = new AudioWorkletNode(audio, ENGINE_PROCESSOR, {
       numberOfInputs: 0,
@@ -548,28 +617,27 @@ export async function startBrowserHost(): Promise<void> {
     };
     node.connect(audio.destination);
 
-    const ready = milestone(
-      "ready",
-      audio,
-      "the RackForge engine did not start on the audio thread",
-    );
-    const booted = milestone("booted", audio, "the RackForge engine did not answer");
-
     // The processor only exists once the context is running, and a suspended
     // context never delivers the boot message. Most browsers keep it suspended
     // until someone has interacted with the page, so this waits for that
     // rather than failing: the engine has done nothing wrong, and a person who
     // has not touched the page yet is not waiting for sound.
-    resumeOnGesture(audio);
     await running(audio);
+    console.info("BROWSER_BOOT audio_running");
     await ready;
+    // The hint is advisory. The first actual worklet callback, rather than
+    // the stored preference, determines the host and plugin buffer capacity.
+    const frames = readyRenderFrames;
+    activeRenderFrames = frames;
+    console.info(`BROWSER_BOOT render_frames=${frames} requested=${requestedFrames}`);
 
     node.port.postMessage(
       {
         kind: "boot",
         wasm,
         files,
-        maximumFrames: RENDER_FRAMES,
+        packagedPaths: packagedFiles.map((file) => file.path),
+        maximumFrames: frames,
         channels: OUTPUT_CHANNELS,
       },
       [wasm.buffer, ...files.map((file) => file.bytes.buffer)],
@@ -591,9 +659,15 @@ export async function startBrowserHost(): Promise<void> {
     await booting;
   } catch (error) {
     booting = null;
+    bootAudioContext = null;
     console.error("RackForge could not start in this page", error);
     throw error;
   }
+}
+
+/** Whether startup still needs a browser gesture to activate audio. */
+export function browserAudioNeedsGesture(): boolean {
+  return bootAudioContext?.state === "suspended";
 }
 
 /** Warnings the host reported while loading its packages. */
@@ -700,17 +774,23 @@ function milestone(
  * asks once per gesture kind and stops asking as soon as it is running.
  */
 function resumeOnGesture(audio: AudioContext) {
+  const events = ["pointerdown", "keydown", "touchstart"] as const;
+  const stop = () => {
+    for (const event of events) window.removeEventListener(event, resume);
+    audio.removeEventListener("statechange", stopWhenRunning);
+  };
+  const stopWhenRunning = () => {
+    if (audio.state === "running") stop();
+  };
   const resume = () => {
     void audio.resume().catch(() => undefined);
-    if (audio.state === "running") {
-      for (const event of ["pointerdown", "keydown", "touchstart"] as const) {
-        window.removeEventListener(event, resume);
-      }
-    }
+    stopWhenRunning();
   };
-  for (const event of ["pointerdown", "keydown", "touchstart"] as const) {
+  audio.addEventListener("statechange", stopWhenRunning);
+  for (const event of events) {
     window.addEventListener(event, resume);
   }
+  resume();
 }
 
 function send(request: string): Promise<string> {
@@ -933,7 +1013,10 @@ export function isKeyLabMainEndpoint(
   const maker = (manufacturer ?? "").trim().toLowerCase();
   if (
     !folded ||
-    !["keylab", "kl essential"].some((part) => folded.includes(part)) ||
+    // This keyboard alone: "keylab" also names a KeyLab mkII's or mk3's main
+    // port and the first KeyLab Essential's, which speak other protocols.
+    !["keylab essential", "kl essential"].some((part) => folded.includes(part)) ||
+    !folded.includes("mk3") ||
     ["mcu", "hui", "dinthru", "alv"].some((part) => folded.includes(part))
   ) {
     return false;
@@ -944,11 +1027,14 @@ export function isKeyLabMainEndpoint(
   // not the desktop port label. The KeyLab's main endpoint therefore appears
   // simply as "KeyLab Essential 61 mk3". Android preserves port ordering, so
   // resolveKeyLabTransport pairs the first matching input and output.
-  const androidProductNames = new Set([
-    "keylab essential 61 mk3",
-    "arturia keylab essential 61 mk3",
-    "kl essential 61 mk3",
-  ]);
+  // The 49, 61 and 88 have one panel and one display.
+  const androidProductNames = new Set(
+    ["49", "61", "88"].flatMap((size) => [
+      `keylab essential ${size} mk3`,
+      `arturia keylab essential ${size} mk3`,
+      `kl essential ${size} mk3`,
+    ]),
+  );
   return androidProductNames.has(folded) || maker.includes("arturia");
 }
 
@@ -1159,6 +1245,11 @@ function withAssetUrls(plugin: CatalogEntry, serving: boolean): PluginWebDescrip
     && published;
   return {
     ...plugin,
+    web_ui_unavailable_reason: !assetsAvailable && plugin.surfaces.length > 0
+      ? published
+        ? "The plugin includes a web interface, but this browser could not connect to its installed files."
+        : "The plugin includes a web interface, but its installed files are not ready."
+      : undefined,
     branding: assetsAvailable && plugin.branding
       ? {
           icon_url: asset(plugin.branding.icon),
@@ -1243,6 +1334,10 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     } satisfies WebPublicConfig as T;
   }
   if (path === "/api/v1/plugins" && method === "GET") {
+    // The UI starts this request at the same time as the session connection.
+    // Without this gate the first request sees engine=null, turns the shared
+    // catalog into an error, and only a manual Retry works after boot.
+    await startBrowserHost();
     const answer = await sendPackage("catalog");
     if (!answer.ok || !answer.catalog) {
       throw new HostRequestError(answer.error ?? "The plugin catalog is unavailable.", 503);
@@ -1253,6 +1348,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
   }
   if (path === "/api/v1/host/audio" && method === "GET") {
     const rate = context?.sampleRate ?? 48_000;
+    const requestedFrames = savedRenderFrames();
     return {
       status: "ok",
       host: "browser",
@@ -1266,7 +1362,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
             channels: OUTPUT_CHANNELS,
             default_sample_rate: rate,
             sample_rates: [rate],
-            buffer_frames: [RENDER_FRAMES],
+            buffer_frames: webBufferChoices(variableRenderQuantaSupported()),
           },
         ],
         midi_inputs: [...midiInputNames],
@@ -1276,7 +1372,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
         driver: "Web Audio",
         output_device: "Browser audio output",
         sample_rate_hz: rate,
-        buffer_frames: RENDER_FRAMES,
+        buffer_frames: requestedFrames,
         output_gain_db: 0,
         midi_inputs: [...midiInputNames],
       },
@@ -1284,7 +1380,7 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
         running: Boolean(engine),
         stream_health: engine ? "healthy" : "lost",
         sample_rate: rate,
-        buffer_size_frames: RENDER_FRAMES,
+        buffer_size_frames: engine ? activeRenderFrames : undefined,
         render_pool: (() => {
           const report = renderPoolReport();
           return {
@@ -1297,6 +1393,30 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
       },
       runtime_status: engine ? "running" : "stopped",
     } satisfies HostAudioSettings as T;
+  }
+  if (path === "/api/v1/host/audio" && method === "PUT") {
+    const preferences = JSON.parse(String(init.body ?? "{}")) as Partial<HostAudioSettings["preferences"]>;
+    const available = webBufferChoices(variableRenderQuantaSupported());
+    if (!validWebBufferFrames(preferences.buffer_frames) ||
+        !available.includes(preferences.buffer_frames)) {
+      throw new HostRequestError("This browser does not offer that audio buffer size.", 400);
+    }
+    if (preferences.driver !== "Web Audio" ||
+        preferences.output_device !== "Browser audio output" ||
+        preferences.output_gain_db !== 0) {
+      throw new HostRequestError("The browser controls the audio device and output gain.", 400);
+    }
+    if (JSON.stringify(preferences.midi_inputs) !== JSON.stringify([...midiInputNames]) ||
+        preferences.velocity_curve !== undefined ||
+        preferences.velocity_curves !== undefined) {
+      throw new HostRequestError("Browser MIDI settings cannot be changed here yet.", 400);
+    }
+    try {
+      localStorage.setItem(WEB_BUFFER_STORAGE_KEY, String(preferences.buffer_frames));
+    } catch {
+      throw new HostRequestError("The browser could not save this audio setting.", 507);
+    }
+    return browserHostJson<T>("/api/v1/host/audio");
   }
   if (path === "/api/v1/controllers" && method === "GET") {
     const answer = await requestControllerCatalog();
@@ -1315,7 +1435,9 @@ export async function browserHostJson<T>(path: string, init: RequestInit = {}): 
     return {
       controllers: answer.controllers.map((controller) => ({
         ...controller,
-        runtime,
+        // Only the KeyLab has a browser MIDI driver. Preserve the shipped
+        // declarative models' runtime so the editor groups them as a catalog.
+        runtime: controller.runtime === "Browser" ? runtime : controller.runtime,
         settings: controller.settings.map((setting) => ({
           ...setting,
           value:

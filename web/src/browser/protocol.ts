@@ -16,6 +16,27 @@ export interface SeedFile {
   bytes: Uint8Array;
 }
 
+/** Control requests that cannot change files in the browser host's storage.
+ * In particular, the output meter is polled every 50 ms on the audio thread:
+ * treating it as a write copies the whole writable storage on every poll.
+ */
+const READ_ONLY_OPERATIONS = new Set([
+  "snapshot", "performance_snapshot", "events", "audio_snapshot", "output_meter",
+  "audio_input", "midi_sources", "plugin_presets", "plugin_preset",
+  "export_plugin_preset", "inspect_plugin_preset", "plugin_parameters",
+  "plugin_state_parameters", "controller_maps", "midi_activity",
+  "sequencer_status", "virtual_midi", "release_virtual_midi",
+]);
+
+export function requestChangesStorage(request: string): boolean {
+  try {
+    const operation = (JSON.parse(request) as { op?: unknown }).op;
+    return typeof operation !== "string" || !READ_ONLY_OPERATIONS.has(operation);
+  } catch {
+    return true;
+  }
+}
+
 export interface BootMessage {
   kind: "boot";
   /**
@@ -28,6 +49,8 @@ export interface BootMessage {
    */
   wasm: Uint8Array;
   files: SeedFile[];
+  /** Exact site-owned files that must be fetched again instead of filed in IndexedDB. */
+  packagedPaths: string[];
   maximumFrames: number;
   channels: number;
 }
@@ -112,11 +135,12 @@ export type EngineCommand =
   | ControllerRestorePlanMessage;
 
 /**
- * Sent as soon as the processor exists. A port message posted before that is
- * not delivered, so the page waits for this before it boots the engine.
+ * Sent on the first render callback. This gives the page the actual quantum
+ * selected by the browser before it allocates the host's render buffers.
  */
 export interface ReadyMessage {
   kind: "ready";
+  frames: number;
 }
 
 export interface BootedMessage {
@@ -199,7 +223,7 @@ export type EngineEvent =
   | PoolRequestEvent
   | ControllerOutputMessage;
 
-/** Constructs the only valid event order for a successful package mutation. */
+/** Constructs the only valid event order for a storage mutation. */
 export function linkedPackageMutationEvents(
   operationId: number,
   response: string,
@@ -288,10 +312,20 @@ export function engineFailureEvent(
 }
 
 /**
- * Storage the host does not own: RackForge ships these with the site, and a
- * stored copy would go stale as soon as the site was rebuilt.
+ * Removes only the files the deployed site owns from a host snapshot.
+ *
+ * Plugin-private data also lives below `plugins/`, so filtering that entire
+ * directory loses saved programs and imported resources on the next visit.
+ * The page knows the exact packaged paths from the deployment manifest and
+ * passes them to the worklet at boot.
  */
-export const PACKAGED_STORAGE_PREFIX = "plugins/";
+export function writableStorageFiles(
+  files: SeedFile[],
+  packagedPaths: Iterable<string>,
+): SeedFile[] {
+  const packaged = new Set(packagedPaths);
+  return files.filter((file) => !packaged.has(file.path));
+}
 
 /** Name the page registers the engine processor under. */
 export const ENGINE_PROCESSOR = "rackforge-engine";

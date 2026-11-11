@@ -1,9 +1,13 @@
-schema_version = 1
+schema_version = 2
 kind = "controller"
 id = "org.rackforge.arturia-keylab-essential-mk3"
-name = "Arturia KeyLab Essential 61 mk3"
-version = "0.2.37"
+name = "Arturia KeyLab Essential mk3"
+vendor = "Arturia"
+version = "0.6.0"
 controller_api = "^1.0"
+# The identity the controls had under schema 1: what a player learnt on them
+# stays linked across the move.
+source_id = "controller.arturia.keylab-essential-mk3.midi"
 
 [runtime]
 kind = "process-v1"
@@ -23,153 +27,504 @@ firmware_write = false
 filesystem = false
 network = false
 
-[[host_actions]]
-target = "keyboard_parts"
+# Inputs, as read off the hardware with the `midi_map` example (2026-09-24):
+# everything below arrives on the main MIDI port. Channels are zero-based.
+#
+# Not listed, because the driver owns them on the controller plane: the four
+# OLED buttons (CC 44-47) and the main encoder (CC 116 turn, 117 press) drive
+# LITTLE; Stop, Play, Record, TAP and Loop (CC 20-24) drive the transport.
+# Not listed, because they send nothing a map can use: MIDI Ch, Transp -/+,
+# Oct -/+, Arp, Chord, Scale and Hold act inside the keyboard, and Prog sends
+# a SysEx program change.
+#
+# The ids are the ones the controls have always had -- a player's mappings
+# refer to them -- so the nine knobs keep `encoder-N` although they turn
+# between end stops and send absolute values.
+[[inputs]]
+id = "encoder-1"
+name = "Knob 1"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 96, channel = 0 }
+slot = "control-2.1"
 
-[host_actions.midi_cc]
-channel = 0
-controller = 119
-press_value = 127
-release_value = 0
+[[inputs]]
+id = "encoder-2"
+name = "Knob 2"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 97, channel = 0 }
+slot = "control-2.2"
 
-# RackForge Control Profile v1. The first eight DAW-preset encoders and faders
-# are transport-independent controls. Encoder 9 and fader 9 use the same
-# semantic vocabulary for RackForge's global pan and level; they are not
-# private controller shortcuts. Plugins opt in by publishing matching roles.
-[semantic_profile]
-schema_version = 1
-source_id = "controller.arturia.keylab-essential-mk3.midi"
+[[inputs]]
+id = "encoder-3"
+name = "Knob 3"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 98, channel = 0 }
+slot = "control-2.3"
 
-[[semantic_profile.controls]]
+[[inputs]]
+id = "encoder-4"
+name = "Knob 4"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 99, channel = 0 }
+slot = "control-2.4"
+
+[[inputs]]
+id = "encoder-5"
+name = "Knob 5"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 100, channel = 0 }
+slot = "control-2.5"
+
+[[inputs]]
+id = "encoder-6"
+name = "Knob 6"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 101, channel = 0 }
+slot = "control-2.6"
+
+[[inputs]]
+id = "encoder-7"
+name = "Knob 7"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 102, channel = 0 }
+slot = "control-2.7"
+
+[[inputs]]
+id = "encoder-8"
+name = "Knob 8"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 103, channel = 0 }
+slot = "control-2.8"
+
+# Knob 9 is declared an encoder, reading absolute values, only so its pan
+# role can follow it relatively (see the role below): a package reads only
+# an encoder relatively.
+[[inputs]]
+id = "encoder-9"
+name = "Knob 9"
+kind = "encoder"
+group = "Knobs"
+midi = { cc = 104, channel = 0 }
+
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { cc = 105, channel = 0 }
+slot = "control-1.1"
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { cc = 106, channel = 0 }
+slot = "control-1.2"
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { cc = 107, channel = 0 }
+slot = "control-1.3"
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { cc = 108, channel = 0 }
+slot = "control-1.4"
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { cc = 109, channel = 0 }
+slot = "control-1.5"
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { cc = 110, channel = 0 }
+slot = "control-1.6"
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { cc = 111, channel = 0 }
+slot = "control-1.7"
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { cc = 112, channel = 0 }
+slot = "control-1.8"
+
+[[inputs]]
+id = "fader-9"
+name = "Fader 9"
+kind = "fader"
+group = "Faders"
+midi = { cc = 113, channel = 0 }
+
+# The pads play notes on MIDI channel 11. Bank 1 starts its top row at 40
+# and its bottom row at 36; bank 2 the same, eight notes up. A pad mapped as
+# a button is taken by its mapping and does not also play its note.
+[[inputs]]
+id = "pad-1"
+name = "Pad 1"
+kind = "pad"
+group = "Pads bank 1"
+midi = { note = 40, channel = 10 }
+slot = "switch-1.1"
+
+[[inputs]]
+id = "pad-2"
+name = "Pad 2"
+kind = "pad"
+group = "Pads bank 1"
+midi = { note = 41, channel = 10 }
+slot = "switch-1.2"
+
+[[inputs]]
+id = "pad-3"
+name = "Pad 3"
+kind = "pad"
+group = "Pads bank 1"
+midi = { note = 42, channel = 10 }
+slot = "switch-1.3"
+
+[[inputs]]
+id = "pad-4"
+name = "Pad 4"
+kind = "pad"
+group = "Pads bank 1"
+midi = { note = 43, channel = 10 }
+slot = "switch-1.4"
+
+[[inputs]]
+id = "pad-5"
+name = "Pad 5"
+kind = "pad"
+group = "Pads bank 1"
+midi = { note = 36, channel = 10 }
+slot = "switch-1.5"
+
+[[inputs]]
+id = "pad-6"
+name = "Pad 6"
+kind = "pad"
+group = "Pads bank 1"
+midi = { note = 37, channel = 10 }
+slot = "switch-1.6"
+
+[[inputs]]
+id = "pad-7"
+name = "Pad 7"
+kind = "pad"
+group = "Pads bank 1"
+midi = { note = 38, channel = 10 }
+slot = "switch-1.7"
+
+[[inputs]]
+id = "pad-8"
+name = "Pad 8"
+kind = "pad"
+group = "Pads bank 1"
+midi = { note = 39, channel = 10 }
+slot = "switch-1.8"
+
+[[inputs]]
+id = "pad-b1"
+name = "Pad 1 (bank 2)"
+kind = "pad"
+group = "Pads bank 2"
+midi = { note = 48, channel = 10 }
+slot = "switch-2.1"
+
+[[inputs]]
+id = "pad-b2"
+name = "Pad 2 (bank 2)"
+kind = "pad"
+group = "Pads bank 2"
+midi = { note = 49, channel = 10 }
+slot = "switch-2.2"
+
+[[inputs]]
+id = "pad-b3"
+name = "Pad 3 (bank 2)"
+kind = "pad"
+group = "Pads bank 2"
+midi = { note = 50, channel = 10 }
+slot = "switch-2.3"
+
+[[inputs]]
+id = "pad-b4"
+name = "Pad 4 (bank 2)"
+kind = "pad"
+group = "Pads bank 2"
+midi = { note = 51, channel = 10 }
+slot = "switch-2.4"
+
+[[inputs]]
+id = "pad-b5"
+name = "Pad 5 (bank 2)"
+kind = "pad"
+group = "Pads bank 2"
+midi = { note = 44, channel = 10 }
+slot = "switch-2.5"
+
+[[inputs]]
+id = "pad-b6"
+name = "Pad 6 (bank 2)"
+kind = "pad"
+group = "Pads bank 2"
+midi = { note = 45, channel = 10 }
+slot = "switch-2.6"
+
+[[inputs]]
+id = "pad-b7"
+name = "Pad 7 (bank 2)"
+kind = "pad"
+group = "Pads bank 2"
+midi = { note = 46, channel = 10 }
+slot = "switch-2.7"
+
+[[inputs]]
+id = "pad-b8"
+name = "Pad 8 (bank 2)"
+kind = "pad"
+group = "Pads bank 2"
+midi = { note = 47, channel = 10 }
+slot = "switch-2.8"
+
+# The buttons that send a control change the driver does not own: 127 on
+# press, 0 on release.
+[[inputs]]
+id = "part"
+name = "Part"
+kind = "button"
+group = "Buttons"
+midi = { cc = 119, channel = 0 }
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "bank"
+name = "Bank"
+kind = "button"
+group = "Buttons"
+midi = { cc = 118, channel = 0 }
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "save"
+name = "Save"
+kind = "button"
+group = "Buttons"
+midi = { cc = 40, channel = 0 }
+slot = "switch-3.1"
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "quant"
+name = "Quant"
+kind = "button"
+group = "Buttons"
+midi = { cc = 41, channel = 0 }
+slot = "switch-3.2"
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "undo"
+name = "Undo"
+kind = "button"
+group = "Buttons"
+midi = { cc = 42, channel = 0 }
+slot = "step-2.down"
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "redo"
+name = "Redo"
+kind = "button"
+group = "Buttons"
+midi = { cc = 43, channel = 0 }
+slot = "step-2.up"
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "rewind"
+name = "Rewind"
+kind = "button"
+group = "Buttons"
+midi = { cc = 25, channel = 0 }
+slot = "step.down"
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "forward"
+name = "Forward"
+kind = "button"
+group = "Buttons"
+midi = { cc = 26, channel = 0 }
+slot = "step.up"
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "metronome"
+name = "Metronome"
+kind = "button"
+group = "Buttons"
+midi = { cc = 27, channel = 0 }
+slot = "switch-3.3"
+button = { press = 127, release = 0 }
+
+[[inputs]]
+id = "pitch-bend"
+name = "Pitch bend"
+kind = "wheel"
+group = "Wheels"
+midi = { pitch_bend = true, channel = 0 }
+
+[[inputs]]
+id = "modulation"
+name = "Modulation"
+kind = "wheel"
+group = "Wheels"
+midi = { cc = 1, channel = 0 }
+slot = "mod-wheel"
+
+# RackForge Control Profile v1. The first eight knobs and faders are
+# transport-independent controls. Knob 9 and fader 9 use the same semantic
+# vocabulary for RackForge's global pan and level; they are not private
+# controller shortcuts. Plugins opt in by publishing matching roles.
+[[roles]]
+input = "encoder-1"
 role = "synth.oscillator.pulse_width"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 96
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-2"
 role = "synth.oscillator.sub.level"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 97
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-3"
 role = "synth.oscillator.noise.level"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 98
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-4"
 role = "synth.filter.envelope.amount"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 99
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-5"
 role = "synth.filter.lfo.amount"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 100
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-6"
 role = "synth.filter.key_tracking"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 101
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-7"
 role = "synth.lfo.delay"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 102
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "encoder-8"
 role = "synth.amplifier.level"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 103
 
-[[semantic_profile.controls]]
-role = "synth.envelope.amp.attack"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 105
-
-[[semantic_profile.controls]]
-role = "synth.envelope.amp.decay"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 106
-
-[[semantic_profile.controls]]
-role = "synth.envelope.amp.sustain"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 107
-
-[[semantic_profile.controls]]
-role = "synth.envelope.amp.release"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 108
-
-[[semantic_profile.controls]]
-role = "synth.filter.cutoff"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 109
-
-[[semantic_profile.controls]]
-role = "synth.filter.resonance"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 110
-
-[[semantic_profile.controls]]
-role = "synth.lfo.rate"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 111
-
-[[semantic_profile.controls]]
-role = "synth.lfo.depth"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 112
-
-[[semantic_profile.controls]]
-role = "rackforge.master.level"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 113
-
-[[semantic_profile.controls]]
+# Moves the pan by how far the knob turned, from where the pan already is:
+# the first reading only anchors it, so the mix never jumps to the knob.
+[[roles]]
+input = "encoder-9"
 role = "rackforge.master.pan"
 mode = "relative"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 104
 
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"
+
+[[roles]]
+input = "fader-9"
+role = "rackforge.master.level"
+
+[[actions]]
+input = "part"
+target = "keyboard_parts"
+
+# The 49, 61 and 88 "sport exactly the same buttons, knobs, faders and
+# connectivity" (Arturia's KeyLab Essential mk3 User Manual 1.1.6, p7), and
+# the same display, so one driver drives the three. Their USB product ids are
+# Ableton's (KeyLab_Essential_mk3 `get_capabilities`: 588, 652, 716). The 61's
+# product name was read from a running Android host; the 49's and 88's
+# follow it.
 [[devices]]
 id = "arturia.keylab-essential-mk3"
 usb_vendor_id = 0x1c75
-usb_product_ids = [0x028c]
-product_names = ["KeyLab Essential 61 mk3"]
+usb_product_ids = [0x024c, 0x028c, 0x02cc]
+product_names = ["KeyLab Essential 49 mk3", "KeyLab Essential 61 mk3", "KeyLab Essential 88 mk3"]
 
 [[devices.endpoints]]
 role = "surface_input"
-name_contains_any = ["keylab", "kl essential"]
+name_contains = ["mk3"]
+name_contains_any = ["keylab essential", "kl essential"]
 name_ends_with = "midi"
 exclude_contains = ["mcu", "hui", "dinthru", "alv"]
 
 [[devices.endpoints]]
 role = "display_output"
-name_contains_any = ["keylab", "kl essential"]
+name_contains = ["mk3"]
+name_contains_any = ["keylab essential", "kl essential"]
 name_ends_with = "midi"
 exclude_contains = ["mcu", "hui", "dinthru", "alv"]
 
 [[devices.endpoints]]
 role = "performance_input"
-name_contains_any = ["keylab", "kl essential"]
+name_contains = ["mk3"]
+name_contains_any = ["keylab essential", "kl essential"]
 name_ends_with = "midi"
 exclude_contains = ["mcu", "hui", "dinthru", "alv"]
 
@@ -193,3 +548,13 @@ id = "key-light-color"
 name = "Key light color"
 kind = "color"
 default = "#145080"
+
+# Bank and the eight pads while the pads are on bank B. By default an amber
+# as bright as the key light's default blue -- its channels in another
+# order -- so bank B reads by colour, not by brightness. The 49, 61 and 88
+# share the panel, so it applies to all three.
+[[settings]]
+id = "bank-b-light-color"
+name = "Bank B light color"
+kind = "color"
+default = "#805014"

@@ -1,0 +1,69 @@
+# RackForge Desktop for Linux, as a Flatpak.
+#
+# Built by tools/build-linux-flatpak.sh, which first builds the Web interface
+# and fetches the officially pinned plugins outside the sandbox, as the other
+# desktop builds do, and writes the revision this manifest copies over
+# REVISION. Cargo fetches the crates while it builds (`--share=network`);
+# a Flathub submission needs them vendored instead.
+id: io.github.kalexis1994.RackForge
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: rackforge
+finish-args:
+  - --share=ipc
+  # The window is X11's -- through XWayland on a Wayland desktop -- because
+  # the embedded WebKit view can only be placed in an X11 window.
+  - --socket=x11
+  # Sound through the desktop's sound server, PipeWire or PulseAudio, which
+  # ALSA's default device leads to: RackForge shares the card.
+  - --socket=pulseaudio
+  - --filesystem=xdg-run/pipewire-0
+  # MIDI keyboards (the ALSA sequencer) and USB controllers.
+  - --device=all
+  # The local Web server, the optional LAN interface and plugin downloads.
+  - --share=network
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/rackforge/cargo
+    CARGO_INCREMENTAL: '0'
+modules:
+  - name: rackforge
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+    build-commands:
+      - cargo build --release --locked
+          -p rackforge-controller-arturia-keylab-essential-mk3
+          --bin rackforge-arturia-keylab-essential-mk3-driver
+      - RACKFORGE_EDITION=standard
+        RACKFORGE_BUNDLED_PLUGIN="$PWD/dist/bundled-plugins/RF-Concert-Grand.rfplugin"
+        RACKFORGE_BUNDLED_OFFICIAL_PLUGINS="$PWD/dist/bundled-plugins/official"
+        RACKFORGE_BUNDLED_CONTROLLER_DRIVER="$PWD/target/release/rackforge-arturia-keylab-essential-mk3-driver"
+        cargo build --release --locked -p rackforge-desktop
+      - install -Dm755 target/release/rackforge-desktop /app/bin/rackforge
+      - install -Dm644 platforms/linux-flatpak/io.github.kalexis1994.RackForge.desktop
+          /app/share/applications/io.github.kalexis1994.RackForge.desktop
+      - install -Dm644 platforms/linux-flatpak/io.github.kalexis1994.RackForge.metainfo.xml
+          /app/share/metainfo/io.github.kalexis1994.RackForge.metainfo.xml
+      - install -Dm644 assets/brand/rackforge-icon.svg
+          /app/share/icons/hicolor/scalable/apps/io.github.kalexis1994.RackForge.svg
+      - install -Dm644 assets/brand/rackforge-mark-256.png
+          /app/share/icons/hicolor/256x256/apps/io.github.kalexis1994.RackForge.png
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - target
+          - web/node_modules
+          - dist/linux-flatpak
+          - dist/windows-x86_64
+          - dist/linux-x86_64
+          - dist/android
+      - type: file
+        path: ../../dist/linux-flatpak/REVISION

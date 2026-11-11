@@ -32,6 +32,9 @@ export function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null>
     registration = navigator.serviceWorker
       .register(assetUrl("sw.js"), { scope: import.meta.env.BASE_URL })
       .catch((error: unknown) => {
+        // A transient registration error must not disable installed UIs for
+        // the rest of the visit. A later catalog request may retry.
+        registration = null;
         // Not fatal: packaged plugins are served directly and the application
         // itself can still run online. Installed plugin pages need the worker.
         console.warn("RackForge could not register its offline worker", error);

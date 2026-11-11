@@ -13,3 +13,5 @@ interface ImportMeta {
 }
 
 declare const __UI_REVISION__: string;
+/** RackForge's version: the workspace's in the root Cargo.toml, "dev" without it. */
+declare const __RACKFORGE_VERSION__: string;

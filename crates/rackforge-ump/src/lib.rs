@@ -4,10 +4,12 @@
 //! service's performance-counter timestamp. Shared by the desktop host and
 //! the Concert Grand laboratory, which is why it is a crate of its own:
 //! `midir`'s WinMM view does not list an endpoint a controller package owns,
-//! this does.
-#![cfg(windows)]
+//! this does. Elsewhere it has the same surface and finds nothing
+//! (`unavailable.rs`), so the desktop host keeps one MIDI code path.
 
+#[cfg(windows)]
 mod input;
+#[cfg(windows)]
 #[allow(
     dead_code,
     non_snake_case,
@@ -16,4 +18,10 @@ mod input;
     clippy::all
 )]
 pub mod midi2_sdk;
+#[cfg(windows)]
 pub use input::*;
+
+#[cfg(not(windows))]
+mod unavailable;
+#[cfg(not(windows))]
+pub use unavailable::*;

@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as pwa from "./pwa";
 import {
   canServePluginAssets,
   declaredPluginAssetsPublished,
   isPackagedPluginRoot,
   pluginAssetUrl,
+  probePluginAssetRoute,
   publishPluginAssets,
   supportsPluginAssetProtocol,
   versionPluginAssetUrl,
+  whenServing,
 } from "./pluginAssets";
 import {
   linkedPackageMutationEvents,
@@ -49,9 +52,72 @@ function seed(path: string, body: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("browser plugin asset routing", () => {
+  it("recovers an uncontrolled tab through its already-active worker", async () => {
+    vi.resetModules();
+    const workerEvents = new EventTarget();
+    const serviceWorker = Object.assign(workerEvents, { controller: null as unknown });
+    const active = { postMessage: vi.fn((message: { kind: string }, transfer?: Transferable[]) => {
+      if (message.kind === "rackforge-plugin-assets-claim") {
+        serviceWorker.controller = active;
+        queueMicrotask(() => workerEvents.dispatchEvent(new Event("controllerchange")));
+      } else {
+        (transfer![0] as MessagePort).postMessage({ kind: "rackforge-plugin-assets-capabilities", protocol: 1 });
+      }
+    }) };
+    vi.stubGlobal("navigator", { serviceWorker });
+    vi.stubGlobal("window", globalThis);
+    const freshPwa = await import("./pwa");
+    vi.spyOn(freshPwa, "ensureServiceWorker").mockResolvedValue({
+      active, update: async () => undefined,
+    } as unknown as ServiceWorkerRegistration);
+    const assets = await import("./pluginAssets");
+    await expect(assets.whenServing(1_000)).resolves.toBe(true);
+    expect(active.postMessage.mock.calls[0][0].kind).toBe("rackforge-plugin-assets-claim");
+    expect(serviceWorker.controller).toBe(active);
+  });
+
+  it("serves installed interfaces despite a lost reply and a stalled worker update", async () => {
+    const cache = new MemoryCache();
+    vi.spyOn(pwa, "ensureServiceWorker").mockResolvedValue({
+      update: () => new Promise(() => {}),
+    } as unknown as ServiceWorkerRegistration);
+    vi.stubGlobal("navigator", { serviceWorker: { controller: { postMessage() {} } } });
+    vi.stubGlobal("caches", { open: async () => cache });
+    vi.stubGlobal("fetch", async (url: string) => cache.match(url));
+    await expect(whenServing(1_000)).resolves.toBe(true);
+    expect(await cache.keys()).toHaveLength(0);
+  });
+
+  it("proves the installed route works without relying on a capability reply", async () => {
+    const cache = new MemoryCache();
+    vi.stubGlobal("caches", { open: async () => cache });
+    vi.stubGlobal("fetch", async (url: string) => cache.match(url));
+    await expect(probePluginAssetRoute()).resolves.toBe(true);
+    expect(await cache.keys()).toHaveLength(0);
+  });
+
+  it.each([200, 404])("rejects network fallback with status %s and removes its probe", async (status) => {
+    const cache = new MemoryCache();
+    vi.stubGlobal("caches", { open: async () => cache });
+    vi.stubGlobal("fetch", async () => new Response("<html>Application shell</html>", { status }));
+    await expect(probePluginAssetRoute()).resolves.toBe(false);
+    expect(await cache.keys()).toHaveLength(0);
+  });
+
+  it("bounds an unresponsive route and removes its probe", async () => {
+    const cache = new MemoryCache();
+    vi.stubGlobal("caches", { open: async () => cache });
+    vi.stubGlobal("fetch", (_url: string, options: RequestInit) => new Promise((_, reject) => {
+      options.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+    }));
+    await expect(probePluginAssetRoute(10)).resolves.toBe(false);
+    expect(await cache.keys()).toHaveLength(0);
+  });
+
   it("distinguishes the current asset worker from a stale controller", async () => {
     const current = {
       postMessage(_message: unknown, transfer: Transferable[]) {

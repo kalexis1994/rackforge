@@ -7,5 +7,5 @@ usb_product = "Scarlett Solo USB"
 channels = 2
 sample_rate = 48000
 sample_format = "S32_LE"
-period_frames = 128
-buffer_frames = 384
+period_frames = 256
+buffer_frames = 768

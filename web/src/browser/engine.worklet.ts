@@ -24,9 +24,10 @@ import { ParallelBridge } from "./parallelBridge";
 import { PluginHost } from "./pluginHost";
 import {
   ENGINE_PROCESSOR,
-  PACKAGED_STORAGE_PREFIX,
   engineFailureEvent,
   linkedPackageMutationEvents,
+  requestChangesStorage,
+  writableStorageFiles,
   type EngineCommand,
   type EngineEvent,
   type PackageMessage,
@@ -86,18 +87,6 @@ interface HostExports {
  * Control requests that only read. Everything else may have written to
  * storage, so the page is told to file a fresh copy afterwards.
  */
-const READ_ONLY_OPERATIONS = new Set([
-  "snapshot",
-  "performance_snapshot",
-  "events",
-  "audio_snapshot",
-  "plugin_presets",
-  "plugin_preset",
-  "export_plugin_preset",
-  "inspect_plugin_preset",
-  "plugin_parameters",
-  "plugin_state_parameters",
-]);
 const READ_ONLY_PACKAGE_ACTIONS = new Set(["inspect", "catalog", "resource_status"]);
 const PACKAGE_ASSET_MUTATIONS = new Set(["install", "activate", "deactivate", "uninstall"]);
 
@@ -124,12 +113,16 @@ function seedDirectory(files: SeedFile[]): Map<string, Inode> {
   return root;
 }
 
-/** Reads the operation name out of a control request without validating it. */
-function operationOf(request: string): string {
+/** Mutations whose success must mean their files are already durable. */
+function requiresDurableStorage(request: string): boolean {
   try {
-    return String((JSON.parse(request) as { op?: unknown }).op ?? "");
+    const decoded = JSON.parse(request) as {
+      op?: unknown;
+      envelope?: { command?: { type?: unknown } };
+    };
+    return decoded.op === "dispatch" && decoded.envelope?.command?.type === "save_program_draft";
   } catch {
-    return "";
+    return false;
   }
 }
 
@@ -187,9 +180,11 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #encoder = new TextEncoder();
   #channels = 2;
   #frames = 128;
+  #ready = false;
   #failed = false;
   #sessionRevision = 0;
   #storageRevision = 0;
+  #packagedPaths = new Set<string>();
 
   constructor() {
     super();
@@ -200,21 +195,41 @@ class RackForgeEngine extends AudioWorkletProcessor {
         this.#reportFailure(event.data, error);
       }
     };
-    this.#post({ kind: "ready" });
   }
 
   #handle(command: EngineCommand) {
     switch (command.kind) {
       case "boot":
-        this.#boot(command.wasm, command.files, command.maximumFrames, command.channels);
+        this.#boot(
+          command.wasm,
+          command.files,
+          command.packagedPaths,
+          command.maximumFrames,
+          command.channels,
+        );
         break;
       case "request": {
         const response = this.#request(command.request);
-        this.#post({ kind: "response", id: command.id, response });
-        this.#publishControllerOutput();
-        if (!READ_ONLY_OPERATIONS.has(operationOf(command.request))) {
-          this.#publishStorage();
+        const mutatesStorage = requestChangesStorage(command.request);
+        if (mutatesStorage) {
+          const files = this.#storageFiles();
+          if (files && requiresDurableStorage(command.request)) {
+            for (const event of linkedPackageMutationEvents(
+              command.id,
+              response,
+              files,
+              false,
+            )) {
+              this.#post(event);
+            }
+          } else {
+            this.#post({ kind: "response", id: command.id, response });
+            if (files) this.#post({ kind: "storage", files });
+          }
+        } else {
+          this.#post({ kind: "response", id: command.id, response });
         }
+        this.#publishControllerOutput();
         break;
       }
       case "package":
@@ -306,6 +321,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #boot(
     wasm: Uint8Array,
     files: SeedFile[],
+    packagedPaths: string[],
     maximumFrames: number,
     channels: number,
   ) {
@@ -344,6 +360,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     this.#pluginHost.attach(exports.memory);
     this.#parallel.attach(exports.memory);
     this.#host = exports;
+    this.#packagedPaths = new Set(packagedPaths);
     this.#sessionRevision = exports.rf_session_revision();
     this.#storageRevision = exports.rf_storage_revision?.() ?? 0;
     this.#frames = maximumFrames;
@@ -426,7 +443,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     const files: SeedFile[] = [];
     collectFiles(storage.dir.contents, "", files);
     this.#storageRevision = this.#host?.rf_storage_revision?.() ?? this.#storageRevision;
-    return files.filter((file) => !file.path.startsWith(PACKAGED_STORAGE_PREFIX));
+    return writableStorageFiles(files, this.#packagedPaths);
   }
 
   #publishStorage() {
@@ -479,6 +496,10 @@ class RackForgeEngine extends AudioWorkletProcessor {
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
     const output = outputs[0];
+    if (!this.#ready && output?.[0]?.length) {
+      this.#ready = true;
+      this.#post({ kind: "ready", frames: output[0].length });
+    }
     const host = this.#host;
     if (!output || output.length === 0) {
       return !this.#failed;

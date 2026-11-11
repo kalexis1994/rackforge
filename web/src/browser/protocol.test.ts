@@ -2,8 +2,34 @@ import { describe, expect, it } from "vitest";
 import {
   engineFailureEvent,
   linkedPackageMutationEvents,
+  requestChangesStorage,
   waitForLinkedStoragePublication,
+  writableStorageFiles,
 } from "./protocol";
+
+describe("browser storage snapshots", () => {
+  it("does not snapshot storage for meter polls or playable MIDI", () => {
+    for (const op of ["output_meter", "virtual_midi", "release_virtual_midi", "sequencer_status"]) {
+      expect(requestChangesStorage(JSON.stringify({ op }))).toBe(false);
+    }
+    expect(requestChangesStorage(JSON.stringify({ op: "edit_performance" }))).toBe(true);
+    expect(requestChangesStorage("not JSON")).toBe(true);
+  });
+  it("keeps plugin-private files while omitting exact packaged assets", () => {
+    const packaged = "plugins/concert-grand/component.wasm";
+    const program = "plugins/org.rackforge.rftines/programs/lab-1.rackforge-program.json";
+    const files = [
+      { path: packaged, bytes: new Uint8Array([1]) },
+      { path: program, bytes: new Uint8Array([2]) },
+      { path: "sessions/play.main.json", bytes: new Uint8Array([3]) },
+    ];
+
+    expect(writableStorageFiles(files, [packaged]).map((file) => file.path)).toEqual([
+      program,
+      "sessions/play.main.json",
+    ]);
+  });
+});
 
 describe("browser engine failures", () => {
   it("answers the package request that failed", () => {
@@ -48,6 +74,7 @@ describe("browser engine failures", () => {
           kind: "boot",
           wasm: new Uint8Array(),
           files: [],
+          packagedPaths: [],
           maximumFrames: 128,
           channels: 2,
         },

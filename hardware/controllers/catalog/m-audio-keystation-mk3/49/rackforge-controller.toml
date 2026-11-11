@@ -1,0 +1,62 @@
+# M-Audio Keystation 49 MK3, on its MIDI port as it leaves the factory.
+# Every value below is sourced in ../SOURCES.md; [UG] is the Keystation 49
+# MK3 User Guide, [M32] the Keystation Mini 32 MK3 User Guide.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.m-audio-keystation-49-mk3"
+name = "Keystation 49 MK3"
+vendor = "M-Audio"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "keystation-49-mk3"
+
+# The first port, "Keystation 49 MK3" [UG p6]. The second, "Keystation 49
+# MK3 (Port 2)" in Ableton [UG p5], "MIDIIN2 (Keystation 49 MK3)" on
+# Windows, carries the transport and arrows as Mackie Control, HUI or MIDI
+# [UG p13] and is not this package's. "MK3" keeps the Keystation 49 II and
+# 49e out, and "mini" the Keystation Mini 32 MK3.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["keystation 49"]
+name_contains_any = ["mk3", "mkiii"]
+exclude_contains = ["midiin2", "port 2", "midi 2 ", "mini"]
+
+# The volume slider sends MIDI volume, CC 7 [UG p6 "controls the volume";
+# M32: its volume knob's default is CC 7; a user's report, SOURCES.md], on the
+# keyboard's channel, 1 by default [UG p11]. It keeps RackForge's master level.
+[[inputs]]
+id = "volume"
+name = "Volume slider"
+kind = "fader"
+group = "Controls"
+midi = { channel = 0, cc = 7 }
+
+# Wheels and pedal, on the keyboard's channel: pitch bend; modulation CC 1
+# [UG p7, p13]; sustain CC 64 [UG p7].
+[[inputs]]
+id = "pitch-bend"
+name = "Pitch bend wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, pitch_bend = true }
+
+[[inputs]]
+id = "modulation"
+name = "Modulation wheel"
+kind = "wheel"
+group = "Wheels"
+midi = { channel = 0, cc = 1 }
+slot = "mod-wheel"
+
+[[inputs]]
+id = "sustain"
+name = "Sustain pedal"
+kind = "pedal"
+group = "Pedals"
+midi = { channel = 0, cc = 64 }
+
+[[roles]]
+input = "volume"
+role = "rackforge.master.level"

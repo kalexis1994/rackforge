@@ -205,5 +205,13 @@ fi
 [[ ! -e "$backup" ]] || rm -rf -- "$backup"
 address="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 printf '\nRackForge is installed at %s\n' "$root"
-printf 'Open http://%s:8787 to select MIDI and audio devices.\n' \
+# This host does not configure audio devices over the network -- that screen
+# belongs to the desktop shell -- so pointing at it was an instruction nobody
+# could follow. Activating an instrument is what writes config/audio.toml
+# here, and the engine starts from that file.
+printf 'Open http://%s:8787 and activate an instrument to start the engine.\n' \
   "${address:-RASPBERRY_PI_ADDRESS}"
+printf 'Audio devices are chosen in %s/config/audio.toml.\n' \
+  "$root"
+printf 'The installed %s/config/audio.toml.example is a working start.\n' \
+  "$root"

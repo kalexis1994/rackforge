@@ -1,6 +1,7 @@
+import { useState } from "react";
 import type { PluginWebDescriptor } from "../types";
+import { FadeImage } from "./FadeImage";
 
-/** A plugin's icon from its branding, or its initials on the accent when it has none. */
 export function PluginIcon({
   plugin,
   name,
@@ -10,8 +11,15 @@ export function PluginIcon({
   name: string;
   className?: string;
 }) {
-  return plugin?.branding ? (
-    <img className={className} src={plugin.branding.icon_url} alt="" />
+  // An icon that cannot be loaded gives way to the plugin's initials, as a
+  // plugin without artwork shows.
+  const [failed, setFailed] = useState(false);
+  return plugin?.branding && !failed ? (
+    <FadeImage
+      className={className}
+      src={plugin.branding.icon_url}
+      onFailed={() => setFailed(true)}
+    />
   ) : (
     <span className={`${className} plugin-icon-fallback`} aria-hidden="true">
       {name.slice(0, 2).toUpperCase()}

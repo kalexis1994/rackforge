@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pluginContextInstance } from "./pluginContext";
+import { pluginContextInstance, shouldPublishPluginContext } from "./pluginContext";
 import type { PluginInstance, PluginStateReference } from "./types";
 
 const instance: PluginInstance = {
@@ -35,5 +35,22 @@ describe("pluginContextInstance", () => {
 
   it("keeps the required context field for legacy states", () => {
     expect(pluginContextInstance(instance, true, state()).selected_sound_id).toBe("");
+  });
+});
+
+describe("shouldPublishPluginContext", () => {
+  const published = { identity: "rf-106:play", json: '{"selected":"p1"}' };
+
+  it("suppresses an identical Rack re-render", () => {
+    expect(shouldPublishPluginContext(published, { ...published })).toBe(false);
+  });
+
+  it("publishes real changes and a different surface", () => {
+    expect(shouldPublishPluginContext(published, { ...published, json: '{"selected":"p2"}' })).toBe(true);
+    expect(shouldPublishPluginContext(published, { ...published, identity: "rf-7:play" })).toBe(true);
+  });
+
+  it("always answers a new iframe load or ready handshake", () => {
+    expect(shouldPublishPluginContext(published, { ...published }, true)).toBe(true);
   });
 });

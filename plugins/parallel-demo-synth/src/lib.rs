@@ -519,6 +519,9 @@ impl ParallelProcessor for ParallelDemoSynth {
         payload: &[u8],
         context: &UnitContext<'_>,
         output: &mut [f32],
+        // A voice knows nothing the coordinator does not, so it reports
+        // nothing and the region it is handed is empty.
+        _report: &mut [u8],
     ) {
         let channels = (context.output_channels as usize).clamp(1, MAX_OUTPUT_CHANNELS);
         let Some(payload) = Payload::read(payload) else {
@@ -711,11 +714,12 @@ mod tests {
                 payload,
                 &unit_context,
                 &mut voice_output,
+                &mut [],
             );
             mix[unit as usize * SAMPLES..][..SAMPLES].copy_from_slice(&voice_output);
         }
 
-        let unit_mix = UnitMix::new(&mix, SAMPLES, &plan, count, SAMPLES);
+        let unit_mix = UnitMix::new(&mix, SAMPLES, &plan, count, SAMPLES, &[], 0);
         let mut output = [0.0_f32; SAMPLES];
         synth.end_block(&unit_mix, &mut output, FRAMES, 2);
         output

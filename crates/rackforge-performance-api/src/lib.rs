@@ -14,6 +14,13 @@ pub const MAX_RACK_SLOTS: usize = 32;
 pub const MAX_RACK_GRAPH_NODES: usize = 128;
 pub const MAX_RACK_GRAPH_EDGES: usize = 512;
 pub const MAX_RACK_GRAPH_LABELS: usize = 128;
+/// The highest physical input a cable from a Rack's audio input may name.
+/// Interfaces number their inputs from 1; 64 covers every class-compliant
+/// interface RackForge is expected to meet.
+pub const MAX_AUDIO_INPUT_CHANNEL: u16 = 64;
+/// The trim a cable from the audio input may apply, in dB -- the range the
+/// host's own input trim uses.
+pub const AUDIO_INPUT_ROUTE_GAIN_DB: std::ops::RangeInclusive<i8> = -60..=24;
 pub const MAX_SONGS: usize = 256;
 pub const MAX_SONG_PARTS: usize = 64;
 pub const MAX_SETLISTS: usize = 128;
@@ -373,6 +380,46 @@ pub struct RackGraphEdge {
     /// to the legacy Slot MIDI fields when the graph is compiled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi_transform: Option<RackMidiTransform>,
+    /// Which of the hardware input's channels a cable from the Rack's audio
+    /// input carries, and at what level. It belongs to the cable, as MIDI's
+    /// filter does, so one input can feed a guitar chain from input 1 and a
+    /// vocal chain from input 2. `None` carries what the host captures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_input_route: Option<RackAudioInputRoute>,
+}
+
+/// A cable's share of the hardware audio input.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RackAudioInputRoute {
+    /// Physical inputs, one-based, as the interface numbers them. Empty:
+    /// every channel the host captures. One: a mono source, spread to both
+    /// sides of a stereo plugin. Two: a stereo pair, left then right. An
+    /// input the host does not capture is heard as silence, never another
+    /// input in its place.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub channels: Vec<u16>,
+    /// Trim on this cable, in dB, applied after the host's input trim.
+    #[serde(default)]
+    pub gain_db: i8,
+}
+
+impl RackAudioInputRoute {
+    fn validate(&self) -> Result<(), PerformanceError> {
+        if self.channels.len() > 2
+            || self
+                .channels
+                .iter()
+                .any(|channel| !(1..=MAX_AUDIO_INPUT_CHANNEL).contains(channel))
+            || self.channels.iter().collect::<BTreeSet<_>>().len() != self.channels.len()
+        {
+            return Err(PerformanceError::InvalidAudioInputRouteChannels);
+        }
+        if !AUDIO_INPUT_ROUTE_GAIN_DB.contains(&self.gain_db) {
+            return Err(PerformanceError::InvalidAudioInputRouteGain);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -599,6 +646,7 @@ impl RackGraph {
                     port_id: "midi_in".into(),
                 },
                 midi_transform: Some(RackMidiTransform::from_slot(slot)),
+                audio_input_route: None,
             });
             edges.push(RackGraphEdge {
                 id: RackGraphEdgeId::new(format!("audio.{number:02}"))
@@ -613,6 +661,7 @@ impl RackGraph {
                     port_id: "in".into(),
                 },
                 midi_transform: None,
+                audio_input_route: None,
             });
             if let MidiOutputRoute::Bus { bus_id } = &slot.midi_output {
                 edges.push(RackGraphEdge {
@@ -628,6 +677,7 @@ impl RackGraph {
                         port_id: "in".into(),
                     },
                     midi_transform: None,
+                    audio_input_route: None,
                 });
             }
         }
@@ -693,6 +743,16 @@ impl RackGraph {
                     return Err(PerformanceError::MidiTransformOnNonMidiEdge);
                 }
                 transform.validate()?;
+            }
+            if let Some(route) = &edge.audio_input_route {
+                let from_audio_input = edge.signal == RackGraphSignal::Audio
+                    && nodes.get(edge.source.node_id.as_str()).is_some_and(|node| {
+                        matches!(node.kind, RackGraphNodeKind::AudioInput { .. })
+                    });
+                if !from_audio_input {
+                    return Err(PerformanceError::AudioInputRouteOnOtherEdge);
+                }
+                route.validate()?;
             }
         }
         for label in &self.labels {
@@ -1990,6 +2050,12 @@ pub enum PerformanceError {
     InvalidMidiVelocityCurve,
     #[error("MIDI transformation can only be attached to a MIDI connection")]
     MidiTransformOnNonMidiEdge,
+    #[error("an audio input route can only be attached to a cable from the audio input")]
+    AudioInputRouteOnOtherEdge,
+    #[error("an audio input cable carries one or two distinct inputs within 1..64")]
+    InvalidAudioInputRouteChannels,
+    #[error("an audio input cable's trim must be within -60..24 dB")]
+    InvalidAudioInputRouteGain,
     #[error("keyboard split must start Part 2 on a MIDI note within 1..127")]
     InvalidKeyboardSplit,
     #[error("Rack Slot level or pan is outside its supported range")]
@@ -2209,6 +2275,7 @@ mod tests {
                     port_id: "midi_in".into(),
                 },
                 midi_transform: Some(RackMidiTransform::default()),
+                audio_input_route: None,
             },
             RackGraphEdge {
                 id: RackGraphEdgeId::new("layer.audio").unwrap(),
@@ -2222,6 +2289,7 @@ mod tests {
                     port_id: "in".into(),
                 },
                 midi_transform: None,
+                audio_input_route: None,
             },
         ]);
         part.content = Some(SongPartGraph {
@@ -2594,6 +2662,7 @@ mod tests {
                     port_id: "audio_in".into(),
                 },
                 midi_transform: None,
+                audio_input_route: None,
             },
             RackGraphEdge {
                 id: RackGraphEdgeId::new("cycle.back").unwrap(),
@@ -2607,6 +2676,7 @@ mod tests {
                     port_id: "audio_in".into(),
                 },
                 midi_transform: None,
+                audio_input_route: None,
             },
         ]);
         assert_eq!(library.validate(), Err(PerformanceError::RackGraphCycle));
@@ -2634,6 +2704,7 @@ mod tests {
                         port_id: "midi_in".into(),
                     },
                     midi_transform: None,
+                    audio_input_route: None,
                 },
                 RackGraphEdge {
                     id: RackGraphEdgeId::new("child.audio").unwrap(),
@@ -2647,6 +2718,7 @@ mod tests {
                         port_id: "in".into(),
                     },
                     midi_transform: None,
+                    audio_input_route: None,
                 },
             ]);
         }

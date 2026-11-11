@@ -15,3 +15,12 @@ export function pluginContextInstance(
       state?.selected_sound_id ?? instance.selected_sound_id ?? "",
   };
 }
+
+/** A Rack render may allocate a fresh context without changing its contents. */
+export function shouldPublishPluginContext(
+  previous: { identity: string; json: string } | null,
+  next: { identity: string; json: string },
+  force = false,
+): boolean {
+  return force || previous?.identity !== next.identity || previous.json !== next.json;
+}

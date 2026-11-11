@@ -1,23 +1,13 @@
-schema_version = 1
+schema_version = 2
 kind = "controller"
 id = "org.example.my-midi-controller"
 name = "My MIDI Controller"
+vendor = "Example"
 version = "1.0.0"
 controller_api = "^1.0"
 
-[runtime]
-kind = "declarative-v1"
-
-[permissions]
-midi_input = true
-midi_output = false
-sysex = false
-usb_metadata = false
-raw_usb = false
-firmware_write = false
-filesystem = false
-network = false
-
+# Identity: how RackForge recognises the device. With no [runtime] and no
+# [permissions], the package is data only and asks for MIDI input alone.
 [[devices]]
 id = "my-midi-controller.v1"
 
@@ -26,51 +16,84 @@ role = "performance_input"
 name_contains = ["my midi controller"]
 exclude_contains = ["daw", "mcu", "hui", "dinthru"]
 
-[[host_actions]]
-target = "keyboard_parts"
+# Inputs: every physical control, with the message it sends. A player's own
+# mappings refer to these ids, so they stay the same across versions.
+[[inputs]]
+id = "knob-1"
+name = "Cutoff"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 74, channel = 0 }
 
-[host_actions.midi_cc]
-channel = 0
-controller = 119
-press_value = 127
-release_value = 0
+[[inputs]]
+id = "knob-2"
+name = "Resonance"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 71, channel = 0 }
 
-[semantic_profile]
-schema_version = 1
-source_id = "controller.example.my-midi-controller.main"
+[[inputs]]
+id = "knob-3"
+name = "Attack"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 73, channel = 0 }
 
-[[semantic_profile.controls]]
+[[inputs]]
+id = "knob-4"
+name = "Release"
+kind = "knob"
+group = "Knobs"
+midi = { cc = 72, channel = 0 }
+
+[[inputs]]
+id = "fader-master"
+name = "Master"
+kind = "fader"
+group = "Master"
+midi = { cc = 7, channel = 0 }
+
+[[inputs]]
+id = "knob-pan"
+name = "Pan"
+kind = "knob"
+group = "Master"
+midi = { cc = 10, channel = 0 }
+
+[[inputs]]
+id = "button-parts"
+name = "Parts"
+kind = "button"
+group = "Buttons"
+midi = { cc = 119, channel = 0 }
+button = { press = 127, release = 0 }
+
+# Meanings: the standard assignment of each input, until a player maps it
+# themselves. Plugins that publish a role receive it.
+[[roles]]
+input = "knob-1"
 role = "synth.filter.cutoff"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 74
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "knob-2"
 role = "synth.filter.resonance"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 71
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "knob-3"
 role = "synth.envelope.amp.attack"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 73
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "knob-4"
 role = "synth.envelope.amp.release"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 72
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "fader-master"
 role = "rackforge.master.level"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 7
 
-[[semantic_profile.controls]]
+[[roles]]
+input = "knob-pan"
 role = "rackforge.master.pan"
-[semantic_profile.controls.midi_cc]
-channel = 0
-controller = 10
+
+[[actions]]
+input = "button-parts"
+target = "keyboard_parts"

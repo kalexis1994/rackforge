@@ -21,7 +21,7 @@ cannot exist on that host, and `unaudited` means nobody has checked yet.
 | Notice controllers connecting while running | unaudited | yes | unaudited | yes | yes |
 | Read and write plugin parameters | yes | yes | yes | yes | yes |
 | Save, load, rename, delete, import and export host presets | yes | yes | yes | yes | yes |
-| Create, preview and save Custom Programs | yes | yes | unaudited | yes | planned |
+| Create, preview and save Custom Programs | yes | yes | unaudited | yes | yes |
 | Audition a program and keep the selected one | yes | yes | unaudited | yes | planned |
 | Create and edit Racks, Songs and Setlists | yes | yes | yes | yes | yes |
 | Play a Rack, with every slot rendered | unaudited | yes | unaudited | yes | planned |
@@ -41,8 +41,7 @@ cannot exist on that host, and `unaudited` means nobody has checked yet.
 
 ### Browser
 
-- **Create, preview and save Custom Programs** (planned): the program-draft commands are not implemented in the browser host
-- **Audition a program and keep the selected one** (planned): audition leases are not implemented in the browser host
+- **Audition a program and keep the selected one** (planned): standalone audition leases are not implemented in the browser host
 - **Play a Rack, with every slot rendered** (planned): the page renders the active PLAY instrument; Rack slots are not mixed yet
 - **Edit one Rack slot without disturbing PLAY** (planned): isolated plugin state is not exposed by the browser host yet
 - **Give a plugin a sound library or ROM it declares** (planned): the host installs a chosen file into a plugin's private storage and reloads it, but no packaged plugin here asks for one, so the path a plugin's own interface takes is unproven

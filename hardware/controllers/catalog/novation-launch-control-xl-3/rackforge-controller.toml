@@ -1,0 +1,571 @@
+# Novation Launch Control XL 3, Mode 16: the default set of Control Changes
+# that cannot be edited. Every value below is sourced in SOURCES.md; [UG] is
+# the Launch Control XL 3 User Guide, [PR] its Programmer's Reference Guide
+# 1.0, [AL] Novation's Ableton Live setup article for it.
+schema_version = 2
+kind = "controller"
+id = "org.rackforge.novation-launch-control-xl-3"
+name = "Launch Control XL 3"
+vendor = "Novation"
+version = "1.0.0"
+controller_api = "^1.0"
+
+[[devices]]
+id = "launch-control-xl-3"
+
+# The MIDI interface only: "LCXL3 1 MIDI" on Windows, "LCXL3 1 (MIDI Out)" on
+# a Mac, the number being the device ID [AL; PR p4]. The DAW interface is
+# "LCXL3 1 MIDI (Port 2)" or "MIDIIN2 (...)" on Windows and "(DAW Out)" on a
+# Mac [AL]. The Launch Control 3 is "LC3 1 MIDI" and never matches.
+[[devices.endpoints]]
+role = "performance_input"
+name_contains = ["lcxl3"]
+exclude_contains = ["daw", "midiin2", "port 2", "midi 2 "]
+
+# Its DAW port, where it takes the messages that change its mode: "LCXL3 1
+# (DAW In)" on a Mac, "MIDIOUT2 (LCXL3 1 MIDI)" or "LCXL3 1 MIDI (Port 2)" on
+# Windows [AL; PR p5].
+[[devices.endpoints]]
+role = "setup_output"
+name_contains = ["lcxl3"]
+name_contains_any = ["daw", "midiout2", "port 2", "midi 2 "]
+
+# On connect, RackForge selects Mode 16, the mode described below: feature
+# controls on (9Fh 0Bh 7Fh), then surface mode select, Control Change 1Eh on
+# channel 7, value 1Dh for Custom Mode 16 [PR p16-17]. Both go to the DAW
+# port. RackForge's own packages send without asking.
+[permissions]
+midi_input = true
+midi_output = true
+
+[[on_connect]]
+message = "9F 0B 7F"
+to = "setup_output"
+
+[[on_connect]]
+message = "B6 1E 1D"
+to = "setup_output"
+
+# Encoders, Mode 16: row 1 CC 13-20, row 2 CC 21-28, row 3 CC 29-36, on
+# channel 16 [UG p88]. Endless, reporting absolute values [UG p16; PR p10].
+# The XL 3 has no keys, and its controls' numbers are an instrument's
+# controllers (its buttons' CC 37-52 are LSBs of volume, pan and expression):
+# none of them ever plays.
+[[inputs]]
+id = "encoder-1-1"
+name = "Row 1 encoder 1"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 13 }
+slot = "control-2.1"
+plays = false
+
+[[inputs]]
+id = "encoder-1-2"
+name = "Row 1 encoder 2"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 14 }
+slot = "control-2.2"
+plays = false
+
+[[inputs]]
+id = "encoder-1-3"
+name = "Row 1 encoder 3"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 15 }
+slot = "control-2.3"
+plays = false
+
+[[inputs]]
+id = "encoder-1-4"
+name = "Row 1 encoder 4"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 16 }
+slot = "control-2.4"
+plays = false
+
+[[inputs]]
+id = "encoder-1-5"
+name = "Row 1 encoder 5"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 17 }
+slot = "control-2.5"
+plays = false
+
+[[inputs]]
+id = "encoder-1-6"
+name = "Row 1 encoder 6"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 18 }
+slot = "control-2.6"
+plays = false
+
+[[inputs]]
+id = "encoder-1-7"
+name = "Row 1 encoder 7"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 19 }
+slot = "control-2.7"
+plays = false
+
+[[inputs]]
+id = "encoder-1-8"
+name = "Row 1 encoder 8"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 1"
+midi = { channel = 15, cc = 20 }
+slot = "control-2.8"
+plays = false
+
+[[inputs]]
+id = "encoder-2-1"
+name = "Row 2 encoder 1"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 21 }
+slot = "control-3.1"
+plays = false
+
+[[inputs]]
+id = "encoder-2-2"
+name = "Row 2 encoder 2"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 22 }
+slot = "control-3.2"
+plays = false
+
+[[inputs]]
+id = "encoder-2-3"
+name = "Row 2 encoder 3"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 23 }
+slot = "control-3.3"
+plays = false
+
+[[inputs]]
+id = "encoder-2-4"
+name = "Row 2 encoder 4"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 24 }
+slot = "control-3.4"
+plays = false
+
+[[inputs]]
+id = "encoder-2-5"
+name = "Row 2 encoder 5"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 25 }
+slot = "control-3.5"
+plays = false
+
+[[inputs]]
+id = "encoder-2-6"
+name = "Row 2 encoder 6"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 26 }
+slot = "control-3.6"
+plays = false
+
+[[inputs]]
+id = "encoder-2-7"
+name = "Row 2 encoder 7"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 27 }
+slot = "control-3.7"
+plays = false
+
+[[inputs]]
+id = "encoder-2-8"
+name = "Row 2 encoder 8"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 2"
+midi = { channel = 15, cc = 28 }
+slot = "control-3.8"
+plays = false
+
+[[inputs]]
+id = "encoder-3-1"
+name = "Row 3 encoder 1"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 3"
+midi = { channel = 15, cc = 29 }
+plays = false
+
+[[inputs]]
+id = "encoder-3-2"
+name = "Row 3 encoder 2"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 3"
+midi = { channel = 15, cc = 30 }
+plays = false
+
+[[inputs]]
+id = "encoder-3-3"
+name = "Row 3 encoder 3"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 3"
+midi = { channel = 15, cc = 31 }
+plays = false
+
+[[inputs]]
+id = "encoder-3-4"
+name = "Row 3 encoder 4"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 3"
+midi = { channel = 15, cc = 32 }
+plays = false
+
+[[inputs]]
+id = "encoder-3-5"
+name = "Row 3 encoder 5"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 3"
+midi = { channel = 15, cc = 33 }
+plays = false
+
+[[inputs]]
+id = "encoder-3-6"
+name = "Row 3 encoder 6"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 3"
+midi = { channel = 15, cc = 34 }
+plays = false
+
+[[inputs]]
+id = "encoder-3-7"
+name = "Row 3 encoder 7"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 3"
+midi = { channel = 15, cc = 35 }
+plays = false
+
+[[inputs]]
+id = "encoder-3-8"
+name = "Row 3 encoder 8"
+kind = "encoder"
+encoder = "absolute"
+group = "Encoders, row 3"
+midi = { channel = 15, cc = 36 }
+plays = false
+
+# Faders, Mode 16: CC 5-12 on channel 16 [UG p88].
+[[inputs]]
+id = "fader-1"
+name = "Fader 1"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 5 }
+slot = "control-1.1"
+plays = false
+
+[[inputs]]
+id = "fader-2"
+name = "Fader 2"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 6 }
+slot = "control-1.2"
+plays = false
+
+[[inputs]]
+id = "fader-3"
+name = "Fader 3"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 7 }
+slot = "control-1.3"
+plays = false
+
+[[inputs]]
+id = "fader-4"
+name = "Fader 4"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 8 }
+slot = "control-1.4"
+plays = false
+
+[[inputs]]
+id = "fader-5"
+name = "Fader 5"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 9 }
+slot = "control-1.5"
+plays = false
+
+[[inputs]]
+id = "fader-6"
+name = "Fader 6"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 10 }
+slot = "control-1.6"
+plays = false
+
+[[inputs]]
+id = "fader-7"
+name = "Fader 7"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 11 }
+slot = "control-1.7"
+plays = false
+
+[[inputs]]
+id = "fader-8"
+name = "Fader 8"
+kind = "fader"
+group = "Faders"
+midi = { channel = 15, cc = 12 }
+slot = "control-1.8"
+plays = false
+
+# Buttons, Mode 16: top row CC 37-44, bottom row CC 45-52, on channel 16
+# [UG p88]. Page, Track, Record, Play, Solo/Arm and Mute/Select send nothing
+# outside DAW mode [PR p7].
+[[inputs]]
+id = "button-1-1"
+name = "Top button 1"
+kind = "button"
+group = "Buttons, top row"
+midi = { channel = 15, cc = 37 }
+slot = "switch-1.1"
+plays = false
+
+[[inputs]]
+id = "button-1-2"
+name = "Top button 2"
+kind = "button"
+group = "Buttons, top row"
+midi = { channel = 15, cc = 38 }
+slot = "switch-1.2"
+plays = false
+
+[[inputs]]
+id = "button-1-3"
+name = "Top button 3"
+kind = "button"
+group = "Buttons, top row"
+midi = { channel = 15, cc = 39 }
+slot = "switch-1.3"
+plays = false
+
+[[inputs]]
+id = "button-1-4"
+name = "Top button 4"
+kind = "button"
+group = "Buttons, top row"
+midi = { channel = 15, cc = 40 }
+slot = "switch-1.4"
+plays = false
+
+[[inputs]]
+id = "button-1-5"
+name = "Top button 5"
+kind = "button"
+group = "Buttons, top row"
+midi = { channel = 15, cc = 41 }
+slot = "switch-1.5"
+plays = false
+
+[[inputs]]
+id = "button-1-6"
+name = "Top button 6"
+kind = "button"
+group = "Buttons, top row"
+midi = { channel = 15, cc = 42 }
+slot = "switch-1.6"
+plays = false
+
+[[inputs]]
+id = "button-1-7"
+name = "Top button 7"
+kind = "button"
+group = "Buttons, top row"
+midi = { channel = 15, cc = 43 }
+slot = "switch-1.7"
+plays = false
+
+[[inputs]]
+id = "button-1-8"
+name = "Top button 8"
+kind = "button"
+group = "Buttons, top row"
+midi = { channel = 15, cc = 44 }
+slot = "switch-1.8"
+plays = false
+
+[[inputs]]
+id = "button-2-1"
+name = "Bottom button 1"
+kind = "button"
+group = "Buttons, bottom row"
+midi = { channel = 15, cc = 45 }
+slot = "switch-2.1"
+plays = false
+
+[[inputs]]
+id = "button-2-2"
+name = "Bottom button 2"
+kind = "button"
+group = "Buttons, bottom row"
+midi = { channel = 15, cc = 46 }
+slot = "switch-2.2"
+plays = false
+
+[[inputs]]
+id = "button-2-3"
+name = "Bottom button 3"
+kind = "button"
+group = "Buttons, bottom row"
+midi = { channel = 15, cc = 47 }
+slot = "switch-2.3"
+plays = false
+
+[[inputs]]
+id = "button-2-4"
+name = "Bottom button 4"
+kind = "button"
+group = "Buttons, bottom row"
+midi = { channel = 15, cc = 48 }
+slot = "switch-2.4"
+plays = false
+
+[[inputs]]
+id = "button-2-5"
+name = "Bottom button 5"
+kind = "button"
+group = "Buttons, bottom row"
+midi = { channel = 15, cc = 49 }
+slot = "switch-2.5"
+plays = false
+
+[[inputs]]
+id = "button-2-6"
+name = "Bottom button 6"
+kind = "button"
+group = "Buttons, bottom row"
+midi = { channel = 15, cc = 50 }
+slot = "switch-2.6"
+plays = false
+
+[[inputs]]
+id = "button-2-7"
+name = "Bottom button 7"
+kind = "button"
+group = "Buttons, bottom row"
+midi = { channel = 15, cc = 51 }
+slot = "switch-2.7"
+plays = false
+
+[[inputs]]
+id = "button-2-8"
+name = "Bottom button 8"
+kind = "button"
+group = "Buttons, bottom row"
+midi = { channel = 15, cc = 52 }
+slot = "switch-2.8"
+plays = false
+
+# RackForge's default meanings for rows of knobs and eight faders: the first
+# row shapes the tone, the faders take the envelope, filter and LFO; the other
+# rows are left for the player.
+[[roles]]
+input = "encoder-1-1"
+role = "synth.oscillator.pulse_width"
+
+[[roles]]
+input = "encoder-1-2"
+role = "synth.oscillator.sub.level"
+
+[[roles]]
+input = "encoder-1-3"
+role = "synth.oscillator.noise.level"
+
+[[roles]]
+input = "encoder-1-4"
+role = "synth.filter.envelope.amount"
+
+[[roles]]
+input = "encoder-1-5"
+role = "synth.filter.lfo.amount"
+
+[[roles]]
+input = "encoder-1-6"
+role = "synth.filter.key_tracking"
+
+[[roles]]
+input = "encoder-1-7"
+role = "synth.lfo.delay"
+
+[[roles]]
+input = "encoder-1-8"
+role = "synth.amplifier.level"
+
+[[roles]]
+input = "fader-1"
+role = "synth.envelope.amp.attack"
+
+[[roles]]
+input = "fader-2"
+role = "synth.envelope.amp.decay"
+
+[[roles]]
+input = "fader-3"
+role = "synth.envelope.amp.sustain"
+
+[[roles]]
+input = "fader-4"
+role = "synth.envelope.amp.release"
+
+[[roles]]
+input = "fader-5"
+role = "synth.filter.cutoff"
+
+[[roles]]
+input = "fader-6"
+role = "synth.filter.resonance"
+
+[[roles]]
+input = "fader-7"
+role = "synth.lfo.rate"
+
+[[roles]]
+input = "fader-8"
+role = "synth.lfo.depth"

@@ -1,3 +1,5 @@
+pub mod control_layout;
+pub mod controller_map;
 pub mod velocity_curve;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -61,6 +63,220 @@ pub struct ParameterLink {
     pub transform: ParameterLinkTransform,
     #[serde(default)]
     pub pass_through: ParameterLinkPassThrough,
+    /// What the control does to the parameter. Left out -- as every link
+    /// written before modes existed -- the control drives the parameter
+    /// across its whole range.
+    #[serde(default, skip_serializing_if = "ParameterLinkMode::is_direct")]
+    pub mode: ParameterLinkMode,
+    /// The layer it acts in: the base one, or the one the controller's Fn
+    /// button opens. Left out, the base one.
+    #[serde(default, skip_serializing_if = "MapLayer::is_base")]
+    pub layer: MapLayer,
+}
+
+/// A layer of a controller's mappings. The Fn layer acts while the
+/// controller's Fn button is held or latched; a control with nothing in it
+/// keeps doing what it does in the base layer.
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MapLayer {
+    #[default]
+    Base,
+    Fn,
+}
+
+impl MapLayer {
+    pub fn is_base(&self) -> bool {
+        *self == Self::Base
+    }
+}
+
+/// How a controller's Fn button opens its Fn layer.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModifierMode {
+    /// Open while the button is held.
+    Hold,
+    /// Each press opens or closes it.
+    Toggle,
+    /// Open while held; two quick presses leave it open until the next.
+    #[default]
+    HoldOrDoubleTap,
+}
+
+/// A plugin parameter value named by a link's mode, in the parameter's own
+/// units: a choice's value, a boolean's 0 or 1, a float within its range.
+/// Always finite, and compared bit for bit, so a link stays comparable.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(try_from = "f64", into = "f64")]
+pub struct LinkValue(f64);
+
+impl LinkValue {
+    pub fn new(value: f64) -> Result<Self, MidiRoutingError> {
+        if value.is_finite() {
+            Ok(Self(value))
+        } else {
+            Err(MidiRoutingError::InvalidParameterLinkMode(
+                "a mode value must be finite",
+            ))
+        }
+    }
+
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for LinkValue {
+    type Error = MidiRoutingError;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<LinkValue> for f64 {
+    fn from(value: LinkValue) -> Self {
+        value.0
+    }
+}
+
+impl PartialEq for LinkValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.to_bits() == other.0.to_bits()
+    }
+}
+
+impl Eq for LinkValue {}
+
+/// How a knob or fader takes over a parameter that stands somewhere else --
+/// set from the screen, by a pad, by a sound. A player's choice for the
+/// whole installation, as synthesizers offer it: Korg's Jump, Catch and
+/// Scale, Sequential's Jump, Pass Thru and Relative.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControlTakeover {
+    /// Nothing moves until the control reaches the parameter; the screen
+    /// shows which way to go.
+    #[default]
+    Pickup,
+    /// The parameter jumps to the control the moment it moves.
+    Jump,
+    /// The parameter moves the way the control does, in proportion to the
+    /// room each has left, so the two meet at the end of the travel.
+    Scale,
+}
+
+/// The most values a Zones or Cycle mode may name.
+pub const MAX_LINK_MODE_VALUES: usize = 128;
+
+/// What a control does to the parameter it is linked to.
+///
+/// Continuous controls -- knobs, faders, pedals, wheels -- use `Direct`,
+/// `Range` or `Zones`. Buttons and pads use the rest: they act on a press,
+/// and `Hold` on the release too.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ParameterLinkMode {
+    /// The control's travel spans the parameter's whole range.
+    #[default]
+    Direct,
+    /// The control's travel spans `min` to `max`.
+    Range { min: LinkValue, max: LinkValue },
+    /// The control's travel is divided evenly among these values.
+    Zones { values: Vec<LinkValue> },
+    /// A press sets this value.
+    Set { value: LinkValue },
+    /// A press alternates between two values.
+    Toggle { first: LinkValue, second: LinkValue },
+    /// A press moves to the next of these values, back to the first after
+    /// the last.
+    Cycle { values: Vec<LinkValue> },
+    /// One value while the control is held, another once it is released.
+    Hold {
+        pressed: LinkValue,
+        released: LinkValue,
+    },
+    /// A press moves the parameter one step up or down.
+    Step {
+        direction: StepDirection,
+        /// Past the end, start again from the other end.
+        #[serde(default)]
+        wrap: bool,
+    },
+    /// A press fires a trigger parameter.
+    Trigger,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StepDirection {
+    Up,
+    Down,
+}
+
+impl ParameterLinkMode {
+    pub fn is_direct(&self) -> bool {
+        matches!(self, Self::Direct)
+    }
+
+    /// Whether the mode acts on presses rather than following a position.
+    pub fn is_button(&self) -> bool {
+        matches!(
+            self,
+            Self::Set { .. }
+                | Self::Toggle { .. }
+                | Self::Cycle { .. }
+                | Self::Hold { .. }
+                | Self::Step { .. }
+                | Self::Trigger
+        )
+    }
+
+    /// The values the mode may write, for checking against the parameter.
+    pub fn values(&self) -> Vec<f64> {
+        match self {
+            Self::Direct | Self::Step { .. } | Self::Trigger => Vec::new(),
+            Self::Range { min, max } => vec![min.get(), max.get()],
+            Self::Zones { values } | Self::Cycle { values } => {
+                values.iter().map(|value| value.get()).collect()
+            }
+            Self::Set { value } => vec![value.get()],
+            Self::Toggle { first, second } => vec![first.get(), second.get()],
+            Self::Hold { pressed, released } => vec![pressed.get(), released.get()],
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), MidiRoutingError> {
+        match self {
+            Self::Zones { values } | Self::Cycle { values } => {
+                if values.len() < 2 {
+                    return Err(MidiRoutingError::InvalidParameterLinkMode(
+                        "zones and cycles need at least two values",
+                    ));
+                }
+                if values.len() > MAX_LINK_MODE_VALUES {
+                    return Err(MidiRoutingError::InvalidParameterLinkMode(
+                        "zones and cycles name at most 128 values",
+                    ));
+                }
+            }
+            Self::Range { min, max } if min == max => {
+                return Err(MidiRoutingError::InvalidParameterLinkMode(
+                    "a range needs two different ends",
+                ));
+            }
+            Self::Toggle { first, second } if first == second => {
+                return Err(MidiRoutingError::InvalidParameterLinkMode(
+                    "a toggle alternates two different values",
+                ));
+            }
+            _ => {}
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -96,6 +312,36 @@ pub enum ParameterLinkMessage {
 pub struct ParameterLinkTransform {
     #[serde(default)]
     pub invert: bool,
+    /// The control is an endless encoder that sends how far it turned, not
+    /// where it stands: each message moves the parameter from where it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative: Option<RelativeEncoding>,
+}
+
+/// How an endless encoder writes a turn into a control change's value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelativeEncoding {
+    /// 1..=63 turn up by that much, 127..=65 down by 1..=63.
+    TwosComplement,
+    /// 64 is still: 65 and above turn up, 63 and below down.
+    BinaryOffset,
+    /// The low six bits are how far; bit 6 set turns down.
+    SignMagnitude,
+}
+
+impl RelativeEncoding {
+    /// How many steps, and which way, a control change value turns.
+    pub fn delta(self, value: u8) -> i32 {
+        let value = i32::from(value & 0x7f);
+        match self {
+            Self::TwosComplement if value >= 64 => value - 128,
+            Self::TwosComplement => value,
+            Self::BinaryOffset => value - 64,
+            Self::SignMagnitude if value & 0x40 != 0 => -(value & 0x3f),
+            Self::SignMagnitude => value & 0x3f,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -130,7 +376,10 @@ impl ParameterLink {
         if number.is_some_and(|number| number > 127) {
             return Err(MidiRoutingError::InvalidParameterLinkNumber);
         }
-        Ok(())
+        if self.transform.relative.is_some() {
+            validate_relative(self.message, &self.mode)?;
+        }
+        self.mode.validate()
     }
 
     pub fn matches_channel(&self, channel: MidiChannel) -> bool {
@@ -606,6 +855,23 @@ impl MidiSourceRegistry {
             .map(|source| (source.key, &source.descriptor))
     }
 
+    /// Resolves the source a controller driver names, by its port or by
+    /// another port of the same device. A driver opens the port it talks
+    /// to the device on -- a KeyLab's DAW port, for its display -- while the
+    /// host listens on the device's performance port, where its keys and
+    /// faders arrive. Matched by name alone, the controller was left with no
+    /// source, and the player's map of it never reached the engine.
+    pub fn resolve_device(&self, name: &str) -> Option<(MidiSourceKey, &MidiSourceDescriptor)> {
+        if let Some(exact) = self.resolve_name(name) {
+            return Some(exact);
+        }
+        let device = alsa_device_of(name)?;
+        self.sources
+            .iter()
+            .find(|source| alsa_device_of(&source.descriptor.name) == Some(device))
+            .map(|source| (source.key, &source.descriptor))
+    }
+
     pub fn descriptors(&self) -> impl Iterator<Item = &MidiSourceDescriptor> {
         self.sources.iter().map(|source| &source.descriptor)
     }
@@ -623,6 +889,96 @@ impl MidiSourceRegistry {
             .find(|source| source.descriptor.primary)
             .map(|source| source.key)
             .ok_or(MidiRoutingError::MissingPrimarySource)
+    }
+
+    /// The first key after every one registered.
+    pub fn next_key(&self) -> MidiSourceKey {
+        MidiSourceKey::new(
+            self.sources
+                .iter()
+                .map(|source| source.key.get() + 1)
+                .max()
+                .unwrap_or(0),
+        )
+    }
+}
+
+/// The MIDI source registry a running host shares between the thread that
+/// finds keyboards and the ones that route and name them. A keyboard plugged
+/// in while the host runs is registered here and heard at once: it is not
+/// left out until a restart.
+///
+/// Readers get copies, never references into the lock, so none of them can
+/// hold it across other work. `generation` counts registrations, for readers
+/// that compile something against the sources and must compile again.
+#[derive(Clone, Debug, Default)]
+pub struct SharedMidiSourceRegistry {
+    inner: std::sync::Arc<std::sync::RwLock<MidiSourceRegistry>>,
+    generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl SharedMidiSourceRegistry {
+    pub fn new(registry: MidiSourceRegistry) -> Self {
+        Self {
+            inner: std::sync::Arc::new(std::sync::RwLock::new(registry)),
+            generation: std::sync::Arc::default(),
+        }
+    }
+
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, MidiSourceRegistry> {
+        // A writer that panicked left a registry that was valid before and
+        // after each push: reading it stays safe.
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// A copy of the registry as it stands.
+    pub fn snapshot(&self) -> MidiSourceRegistry {
+        self.read().clone()
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Registers a source under the next free key and answers the key; a
+    /// source already registered keeps the key it has.
+    pub fn adopt(
+        &self,
+        descriptor: MidiSourceDescriptor,
+    ) -> Result<MidiSourceKey, MidiRoutingError> {
+        let mut registry = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(key) = registry.resolve_optional(&descriptor.id) {
+            return Ok(key);
+        }
+        let key = registry.next_key();
+        registry.register(key, descriptor)?;
+        drop(registry);
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Ok(key)
+    }
+
+    pub fn resolve_optional(&self, id: &MidiSourceId) -> Option<MidiSourceKey> {
+        self.read().resolve_optional(id)
+    }
+
+    pub fn resolve_device(&self, name: &str) -> Option<(MidiSourceKey, MidiSourceDescriptor)> {
+        self.read()
+            .resolve_device(name)
+            .map(|(key, descriptor)| (key, descriptor.clone()))
+    }
+
+    pub fn descriptor(&self, key: MidiSourceKey) -> Option<MidiSourceDescriptor> {
+        self.read().descriptor(key).cloned()
+    }
+
+    pub fn descriptors(&self) -> Vec<MidiSourceDescriptor> {
+        self.read().descriptors().cloned().collect()
     }
 }
 
@@ -673,6 +1029,27 @@ impl MidiPacket {
             data,
             wide: None,
         })
+    }
+
+    /// MIDI Start, Continue or Stop, which some keyboards' transport buttons
+    /// send. Only a reserved controller button reads one: it never reaches a
+    /// route or an instrument. Every other system message is still refused.
+    pub fn transport_realtime(frame: u32, message: &[u8]) -> Option<Self> {
+        let [status @ 0xfa..=0xfc] = message else {
+            return None;
+        };
+        Some(Self {
+            frame,
+            length: 1,
+            data: [*status, 0, 0],
+            wide: None,
+        })
+    }
+
+    /// Whether this is a Start, Continue or Stop rather than a channel
+    /// message.
+    pub fn is_transport_realtime(&self) -> bool {
+        self.length == 1 && matches!(self.data[0], 0xfa..=0xfc)
     }
 
     /// A channel-voice message at MIDI 2.0 width, with its byte projection
@@ -883,6 +1260,10 @@ pub enum MidiRoutingError {
     InvalidParameterLinkInstance,
     #[error("parameter link message number must be in 0..=127")]
     InvalidParameterLinkNumber,
+    #[error("invalid parameter link mode: {0}")]
+    InvalidParameterLinkMode(&'static str),
+    #[error("invalid controller map: {0}")]
+    InvalidControllerMap(String),
 }
 
 fn validate_identifier(value: &str) -> Result<(), MidiRoutingError> {
@@ -899,6 +1280,29 @@ fn validate_identifier(value: &str) -> Result<(), MidiRoutingError> {
     Ok(())
 }
 
+/// A relative encoder sends a control change, and turns a parameter across
+/// its range or a part of it: it has no press to act on, and no position to
+/// fall into a zone.
+pub fn validate_relative(
+    message: ParameterLinkMessage,
+    mode: &ParameterLinkMode,
+) -> Result<(), MidiRoutingError> {
+    if !matches!(message, ParameterLinkMessage::ControlChange { .. }) {
+        return Err(MidiRoutingError::InvalidParameterLinkMode(
+            "a relative encoder sends a control change",
+        ));
+    }
+    if !matches!(
+        mode,
+        ParameterLinkMode::Direct | ParameterLinkMode::Range { .. }
+    ) {
+        return Err(MidiRoutingError::InvalidParameterLinkMode(
+            "a relative encoder turns a parameter directly or over a range",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_midi_range(kind: &'static str, low: u8, high: u8) -> Result<(), MidiRoutingError> {
     if low > 127 || high > 127 || low > high {
         return Err(MidiRoutingError::InvalidRange { kind, low, high });
@@ -906,8 +1310,69 @@ fn validate_midi_range(kind: &'static str, low: u8, high: u8) -> Result<(), Midi
     Ok(())
 }
 
+/// The device an ALSA sequencer port belongs to: its client name and client
+/// number. ALSA names a port `Client:Port Name 28:0`, and every port of one
+/// device shares `Client` and `28`; a second unit of the same model has
+/// another number. `None` for a name that is not shaped that way, so no other
+/// backend's names are ever matched loosely.
+fn alsa_device_of(name: &str) -> Option<(&str, &str)> {
+    let (client, _) = name.split_once(':')?;
+    let (_, address) = name.rsplit_once(' ')?;
+    let (client_number, port_number) = address.split_once(':')?;
+    let numeric = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    (!client.is_empty() && numeric(client_number) && numeric(port_number))
+        .then_some((client, client_number))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_driver_naming_one_port_of_a_device_finds_the_port_the_host_listens_on() {
+        use super::{MidiSourceDescriptor, MidiSourceId, MidiSourceKey, MidiSourceRegistry};
+        let mut registry = MidiSourceRegistry::default();
+        for (index, name) in [
+            "Scarlett Solo USB:Scarlett Solo USB MIDI 1 24:0",
+            "KL Essential 61 mk3:KL Essential 61 mk3 MIDI 28:0",
+            "KL Essential 61 mk3:KL Essential 61 mk3 MIDI 32:0",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            registry
+                .register(
+                    MidiSourceKey::new(index as u32),
+                    MidiSourceDescriptor {
+                        id: MidiSourceId::new(format!("alsa.port-{index}")).unwrap(),
+                        name: name.into(),
+                        primary: index == 0,
+                    },
+                )
+                .unwrap();
+        }
+        let key = |name: &str| registry.resolve_device(name).map(|(key, _)| key.get());
+        assert_eq!(
+            key("KL Essential 61 mk3:KL Essential 61 mk3 MIDI 28:0"),
+            Some(1)
+        );
+        // The display's port of the same unit.
+        assert_eq!(
+            key("KL Essential 61 mk3:KL Essential 61 mk3 DAW 28:1"),
+            Some(1)
+        );
+        // The second unit of the same model is its own device.
+        assert_eq!(
+            key("KL Essential 61 mk3:KL Essential 61 mk3 DAW 32:1"),
+            Some(2)
+        );
+        assert_eq!(
+            key("KL Essential 61 mk3:KL Essential 61 mk3 DAW 40:1"),
+            None
+        );
+        // Names from other backends are matched exactly or not at all.
+        assert_eq!(key("KL Essential 61 mk3 DAW"), None);
+        assert_eq!(key("MIDIIN2 (KL Essential 61 mk3 MIDI)"), None);
+    }
+
     /// The bytes of a wide packet are its top bits, and a note-on never
     /// projects to the byte that would make it a note-off.
     #[test]
@@ -969,6 +1434,31 @@ mod tests {
             )
             .unwrap();
         registry
+    }
+
+    /// A keyboard plugged in while the host runs is registered under a key
+    /// no other source has, once, and its readers learn that the sources
+    /// changed.
+    #[test]
+    fn a_shared_registry_adopts_a_keyboard_plugged_in_later() {
+        let shared = SharedMidiSourceRegistry::new(registry());
+        assert_eq!(shared.generation(), 0);
+        let launchkey = source("alsa.launchkey", "Launchkey MK4 25 MIDI", false);
+        let key = shared.adopt(launchkey.clone()).unwrap();
+        assert_eq!(key, MidiSourceKey::new(21));
+        assert_eq!(shared.generation(), 1);
+        // Found again: same key, nothing new.
+        assert_eq!(shared.adopt(launchkey.clone()).unwrap(), key);
+        assert_eq!(shared.generation(), 1);
+        assert_eq!(shared.resolve_optional(&launchkey.id), Some(key));
+        assert_eq!(
+            shared.descriptor(key).unwrap().name,
+            "Launchkey MK4 25 MIDI"
+        );
+        assert_eq!(shared.descriptors().len(), 3);
+        // Another handle sees the same registry.
+        let reader = shared.clone();
+        assert_eq!(reader.snapshot().next_key(), MidiSourceKey::new(22));
     }
 
     fn route() -> MidiRoute {
@@ -1197,5 +1687,34 @@ mod tests {
         assert!(MidiPacket::new(0, &[0x90, 60]).is_err());
         assert!(MidiPacket::new(0, &[0xf8]).is_err());
         assert!(MidiPacket::new(0, &[0x90, 60, 255]).is_err());
+    }
+
+    /// A keyboard's Play sends MIDI Start: it enters, as its own kind of
+    /// packet, while the clock and every other system message stay out.
+    #[test]
+    fn transport_real_time_messages_enter_and_nothing_else_does() {
+        for status in [0xfa, 0xfb, 0xfc] {
+            let packet = MidiPacket::transport_realtime(0, &[status]).unwrap();
+            assert!(packet.is_transport_realtime());
+            assert_eq!((packet.length, packet.data), (1, [status, 0, 0]));
+        }
+        for message in [
+            &[0xf8][..],
+            &[0xfe],
+            &[0xff],
+            &[0xfa, 0],
+            &[0x90, 60, 100],
+            &[],
+        ] {
+            assert!(
+                MidiPacket::transport_realtime(0, message).is_none(),
+                "{message:02x?}"
+            );
+        }
+        assert!(
+            !MidiPacket::new(0, &[0xb0, 1, 2])
+                .unwrap()
+                .is_transport_realtime()
+        );
     }
 }

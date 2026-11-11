@@ -12,3 +12,13 @@
 # memory, so this is eight megabytes of memory and no more.
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "target-feature=+simd128", "-C", "link-arg=-zstack-size=8388608"]
+
+# And the same eight megabytes for the NATIVE test harness, which is the
+# other place the processor is built by value. Its threads get two by
+# default, and the instrument crossed what two allows the moment the halos
+# were given a home of their own: every test died at once with a stack
+# overflow rather than a failure, which reads like a broken build and is a
+# struct that grew. The instrument is the same size on both targets, so the
+# number is the same on both.
+[env]
+RUST_MIN_STACK = "8388608"

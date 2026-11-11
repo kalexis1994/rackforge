@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRackPluginInstances,
+  isRackSlotStub,
   rackPluginRole,
   rackPluginsOfRole,
 } from "./rackPluginSelection";
@@ -51,6 +52,20 @@ describe("Rack plugin selection", () => {
     ]);
     expect(choices[0]).toBe(activePlay);
     expect(choices[1].instance_id).toBe("rack-slot.org.rackforge.rf-106");
+  });
+
+  it("marks a plugin the host is not running, whose programs are asked for", () => {
+    const [running, standIn] = buildRackPluginInstances(
+      [activePlay],
+      [
+        plugin("org.rackforge.piano", "Concert Grand"),
+        plugin("org.rackforge.rf-106", "RF-106"),
+      ],
+    );
+
+    expect(isRackSlotStub(running)).toBe(false);
+    expect(isRackSlotStub(standIn)).toBe(true);
+    expect(standIn.sounds).toEqual([]);
   });
 
   it("offers effects, which a Slot can own as readily as an instrument", () => {

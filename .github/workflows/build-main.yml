@@ -19,6 +19,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: 1.98.0
+  # The pinned release download fallback needs its own API quota.
+  GITHUB_TOKEN: ${{ github.token }}
 
 jobs:
   quality:
@@ -54,7 +56,7 @@ jobs:
           rustup component add rustfmt clippy
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rackforge-quality
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -66,7 +68,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -144,7 +146,6 @@ jobs:
             -p rackforge-core \
             -p rackforge-browser \
             -p rackforge-web \
-            -p rackforge-concert-grand \
             -p rackforge-demo-synth \
             -p rackforge-parallel-demo-synth \
             -p rackforge-roland-scva \
@@ -152,10 +153,27 @@ jobs:
             -p rackforge-gain-portable \
             -p rackforge-vst3
 
-      # Keep the native driver harness in its own Cargo graph. On Windows GNU,
-      # feature unification with the full plugin-validation graph can produce
-      # an invalid test executable before the harness starts; the driver itself
-      # has no dependency on that graph.
+      # The two equivalence tests that hold a REAL packaged instrument to
+      # its sequential fallback need their component built for wasm32, so
+      # they are `#[ignore]`d: a test that cannot find its plugin has to
+      # fail loudly when asked, never pass quietly. Nothing was asking, so
+      # neither had ever run here -- and the width bug they exist to catch
+      # reached an appliance twice, found by ear both times.
+      - name: Test packaged instruments across the render paths
+        shell: bash
+        env:
+          RUST_MIN_STACK: "16777216"
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo build --locked --release --target wasm32-unknown-unknown -p rackforge-parallel-demo-synth
+          # The Rust cache can restore the previous pinned instrument.
+          rm -rf -- target/test-plugins/concert-grand
+          python3 tools/fetch-official-plugins.py --plugin-id org.rackforge.concert-grand --output-directory target/test-packages/official --extract-directory target/test-plugins
+          # The example instrument's native build, held to its component.
+          cargo build --locked -p rackforge-parallel-demo-synth
+          # `--ignored` runs ONLY these, which is the whole point of the step.
+          cargo test --locked -p rackforge-core --test parallel_render -- --ignored
+
       - name: Test bundled controller driver
         shell: bash
         run: cargo test --locked -p rackforge-controller-arturia-keylab-essential-mk3
@@ -178,7 +196,7 @@ jobs:
           rustup component add clippy
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rackforge-windows-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -190,7 +208,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -206,22 +224,6 @@ jobs:
         shell: pwsh
         run: cargo clippy --locked -p rackforge-desktop -p rackforge-vst3 --all-targets --all-features -- -D warnings
 
-      # The bundled instrument is developed in this repository, so it is
-      # packaged from the same commit that builds the host: no fetch, no
-      # version skew, no checksum ceremony for code the tree already controls.
-      - name: Package the bundled Concert Grand
-        shell: pwsh
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-          New-Item -ItemType Directory -Force dist/bundled-plugins | Out-Null
-          cargo run --release -p rackforge-store -- pack-wasm `
-            plugins/concert-grand/package `
-            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-            dist/bundled-plugins/RF-Concert-Grand.rfplugin
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Concert-Grand.rfplugin'
-          "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
-
       - name: Build RackForge Desktop Standard
         shell: pwsh
         run: >-
@@ -229,13 +231,6 @@ jobs:
           -Edition Standard
           -OutputDirectory dist/windows-x86_64/standard
           -RunTests
-
-      - name: Build RackForge Desktop Minimal
-        shell: pwsh
-        run: >-
-          ./tools/build-windows-desktop.ps1
-          -Edition Minimal
-          -OutputDirectory dist/windows-x86_64/minimal
 
       - name: Build RackForge VST3 Standard
         shell: pwsh
@@ -245,32 +240,19 @@ jobs:
           -OutputDirectory dist/windows-x86_64/vst3-standard
           -RunTests
 
-      - name: Build RackForge VST3 Minimal
-        shell: pwsh
-        run: >-
-          ./tools/build-windows-vst3.ps1
-          -Edition Minimal
-          -OutputDirectory dist/windows-x86_64/vst3-minimal
-
       - name: Verify Windows edition contents
         shell: pwsh
         run: |
           python tools/verify-release-edition.py --edition standard `
             --manifest dist/windows-x86_64/standard/bundled-plugins.txt `
-            --expect-plugin RF-Concert-Grand.rfplugin `
             --expect-official
-          python tools/verify-release-edition.py --edition minimal `
-            --manifest dist/windows-x86_64/minimal/bundled-plugins.txt
           python tools/verify-release-edition.py --edition standard `
             --manifest dist/windows-x86_64/vst3-standard/bundled-plugins.txt `
-            --expect-plugin RF-Concert-Grand.rfplugin `
             --expect-official
-          python tools/verify-release-edition.py --edition minimal `
-            --manifest dist/windows-x86_64/vst3-minimal/bundled-plugins.txt
 
       - name: Upload Windows Standard executable
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: RackForge-Windows-x86_64-${{ github.sha }}
           path: |
@@ -281,22 +263,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload Windows Minimal executable
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: RackForge-Windows-x86_64-Minimal-${{ github.sha }}
-          path: |
-            dist/windows-x86_64/minimal/rackforge.exe
-            dist/windows-x86_64/minimal/build-info.txt
-            dist/windows-x86_64/minimal/bundled-plugins.txt
-            dist/windows-x86_64/minimal/THIRD_PARTY_NOTICES.md
-          if-no-files-found: error
-          retention-days: 14
-
       - name: Upload Windows VST3 Standard
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: RackForge-VST3-Windows-x86_64-${{ github.sha }}
           path: |
@@ -305,20 +274,6 @@ jobs:
             dist/windows-x86_64/vst3-standard/build-info.txt
             dist/windows-x86_64/vst3-standard/bundled-plugins.txt
             dist/windows-x86_64/vst3-standard/THIRD_PARTY_NOTICES.md
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload Windows VST3 Minimal
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: RackForge-VST3-Windows-x86_64-Minimal-${{ github.sha }}
-          path: |
-            dist/windows-x86_64/vst3-minimal/rackforge-vst3.dll
-            dist/windows-x86_64/vst3-minimal/RackForge.vst3
-            dist/windows-x86_64/vst3-minimal/build-info.txt
-            dist/windows-x86_64/vst3-minimal/bundled-plugins.txt
-            dist/windows-x86_64/vst3-minimal/THIRD_PARTY_NOTICES.md
           if-no-files-found: error
           retention-days: 14
 
@@ -349,7 +304,7 @@ jobs:
           rustup component add rustfmt
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rackforge-linux-x86-64-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -361,24 +316,11 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Package the bundled Concert Grand
-        shell: bash
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-          mkdir -p dist/bundled-plugins
-          cargo run --release -p rackforge-store -- pack-wasm \
-            plugins/concert-grand/package \
-            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm \
-            dist/bundled-plugins/RF-Concert-Grand.rfplugin
-          printf 'RACKFORGE_BUNDLED_PLUGIN=%s/dist/bundled-plugins/RF-Concert-Grand.rfplugin\n' \
-            "$GITHUB_WORKSPACE" >>"$GITHUB_ENV"
 
       - name: Build Linux x86-64 Standard bundle
         shell: bash
@@ -386,39 +328,92 @@ jobs:
           env RACKFORGE_EDITION=standard
           bash tools/build-linux-x86_64.sh dist/linux-x86_64/standard
 
-      - name: Build Linux x86-64 Minimal bundle
-        shell: bash
-        run: >-
-          env RACKFORGE_EDITION=minimal
-          bash tools/build-linux-x86_64.sh dist/linux-x86_64/minimal
-
       - name: Verify Linux edition contents
         shell: bash
         run: |
           python3 tools/verify-release-edition.py \
             --edition standard \
             --archive dist/linux-x86_64/standard/RackForge-Linux-x86_64.tar.gz \
-            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
-          python3 tools/verify-release-edition.py \
-            --edition minimal \
-            --archive dist/linux-x86_64/minimal/RackForge-Linux-x86_64.tar.gz
 
       - name: Upload Linux x86-64 Standard bundle
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: RackForge-Linux-x86_64-${{ github.sha }}
           path: dist/linux-x86_64/standard/RackForge-Linux-x86_64.tar.gz
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload Linux x86-64 Minimal bundle
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+  flatpak:
+    name: Linux Flatpak
+    runs-on: ubuntu-24.04
+    # The GNOME SDK and the Rust extension are downloaded on every run, and
+    # the desktop is compiled from nothing inside the sandbox.
+    timeout-minutes: 90
+    steps:
+      - name: Check out RackForge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: RackForge-Linux-x86_64-Minimal-${{ github.sha }}
-          path: dist/linux-x86_64/minimal/RackForge-Linux-x86_64.tar.gz
+          persist-credentials: false
+
+      - name: Install Flatpak tooling
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak dbus
+          # Ubuntu 24.04 keeps unprivileged user namespaces from processes
+          # without an AppArmor profile, and flatpak-builder's bubblewrap
+          # needs one for its sandbox.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          # The builder from Flathub, which the build script falls back to
+          # and the bundle was first made with. Ubuntu's own flatpak-builder
+          # composes the AppStream metadata with Ubuntu's older appstreamcli,
+          # which fails on this app's metainfo, and lacks eu-strip besides.
+          flatpak install --user --noninteractive flathub org.flatpak.Builder
+
+      - name: Set up Rust
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.9.0 --activate
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      # The Flathub builder runs inside a sandbox and reaches the host's
+      # flatpak over the session bus, to install the SDK; a runner has no
+      # desktop session, so the build gets a bus of its own.
+      - name: Build Linux Flatpak Standard bundle
+        shell: bash
+        run: dbus-run-session -- bash tools/build-linux-flatpak.sh dist/linux-flatpak/standard
+
+      - name: Verify Flatpak edition contents
+        shell: bash
+        run: |
+          python3 tools/verify-release-edition.py \
+            --edition standard \
+            --manifest dist/linux-flatpak/standard/bundled-plugins.txt \
+            --expect-official
+
+      - name: Upload Linux Flatpak Standard bundle
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: RackForge-Linux-x86_64-Flatpak-${{ github.sha }}
+          path: dist/linux-flatpak/standard/RackForge-Linux-x86_64.flatpak
           if-no-files-found: error
           retention-days: 14
 
@@ -426,6 +421,9 @@ jobs:
     name: Android ARM64
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      RACKFORGE_ANDROID_PREVIEW: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+      RACKFORGE_REVISION: ${{ github.sha }}
     steps:
       - name: Check out RackForge
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -433,7 +431,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Java
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: 17
@@ -449,7 +447,7 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -463,7 +461,7 @@ jobs:
           rustup target add aarch64-linux-android
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rackforge-android-arm64-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -491,33 +489,11 @@ jobs:
             "ndk;27.0.12077973"
           test -x "$sdk_root/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
 
-      # The bundled instrument is developed in this repository, so it is
-      # packaged from the same commit that builds the host: no fetch, no
-      # version skew, no checksum ceremony for code the tree already controls.
-      - name: Package the bundled Concert Grand
-        shell: pwsh
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-          New-Item -ItemType Directory -Force dist/bundled-plugins | Out-Null
-          cargo run --release -p rackforge-store -- pack-wasm `
-            plugins/concert-grand/package `
-            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-            dist/bundled-plugins/RF-Concert-Grand.rfplugin
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Concert-Grand.rfplugin'
-          "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
-
       - name: Build Android Standard APK
         shell: bash
         run: >-
           env RACKFORGE_EDITION=standard
           bash tools/build-android.sh dist/android/standard
-
-      - name: Build Android Minimal APK
-        shell: bash
-        run: >-
-          env RACKFORGE_EDITION=minimal
-          bash tools/build-android.sh dist/android/minimal
 
       - name: Verify Android edition contents
         shell: bash
@@ -525,31 +501,30 @@ jobs:
           python3 tools/verify-release-edition.py \
             --edition standard \
             --archive dist/android/standard/RackForge-debug.apk \
-            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
-          python3 tools/verify-release-edition.py \
-            --edition minimal \
-            --archive dist/android/minimal/RackForge-debug.apk
+
+      - name: Verify Android application ID
+        shell: bash
+        run: |
+          expected="org.rackforge.android"
+          if [[ "$RACKFORGE_ANDROID_PREVIEW" == "1" ]]; then
+            expected="$expected.preview"
+          fi
+          actual="$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging \
+            dist/android/standard/RackForge-debug.apk \
+            | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          if [[ "$actual" != "$expected" ]]; then
+            printf 'Expected Android application ID %s, got %s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
 
       - name: Upload Android Standard APK
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: RackForge-Android-arm64-${{ github.sha }}
           path: |
             dist/android/standard/RackForge-debug.apk
             dist/android/standard/build-info.txt
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload Android Minimal APK
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: RackForge-Android-arm64-Minimal-${{ github.sha }}
-          path: |
-            dist/android/minimal/RackForge-debug.apk
-            dist/android/minimal/build-info.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -579,7 +554,7 @@ jobs:
           rustup default "$RUST_VERSION"
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: rackforge-raspberry-pi-arm64-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -601,27 +576,11 @@ jobs:
           corepack prepare pnpm@11.9.0 --activate
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-
-      # The bundled instrument is developed in this repository, so it is
-      # packaged from the same commit that builds the host: no fetch, no
-      # version skew, no checksum ceremony for code the tree already controls.
-      - name: Package the bundled Concert Grand
-        shell: pwsh
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo build --release --target wasm32-unknown-unknown -p rackforge-concert-grand
-          New-Item -ItemType Directory -Force dist/bundled-plugins | Out-Null
-          cargo run --release -p rackforge-store -- pack-wasm `
-            plugins/concert-grand/package `
-            target/wasm32-unknown-unknown/release/rackforge_concert_grand.wasm `
-            dist/bundled-plugins/RF-Concert-Grand.rfplugin
-          $plugin = Join-Path $PWD 'dist/bundled-plugins/RF-Concert-Grand.rfplugin'
-          "RACKFORGE_BUNDLED_PLUGIN=$plugin" >> $env:GITHUB_ENV
 
       - name: Build Raspberry Pi Standard bundle
         shell: bash
@@ -629,38 +588,19 @@ jobs:
           env RACKFORGE_EDITION=standard
           bash tools/build-raspberry-pi.sh dist/raspberry-pi/standard
 
-      - name: Build Raspberry Pi Minimal bundle
-        shell: bash
-        run: >-
-          env RACKFORGE_EDITION=minimal
-          bash tools/build-raspberry-pi.sh dist/raspberry-pi/minimal
-
       - name: Verify Raspberry Pi edition contents
         shell: bash
         run: |
           python3 tools/verify-release-edition.py \
             --edition standard \
             --archive dist/raspberry-pi/standard/RackForge-RaspberryPi-arm64.tar.gz \
-            --expect-plugin RF-Concert-Grand.rfplugin \
             --expect-official
-          python3 tools/verify-release-edition.py \
-            --edition minimal \
-            --archive dist/raspberry-pi/minimal/RackForge-RaspberryPi-arm64.tar.gz
 
       - name: Upload Raspberry Pi Standard bundle
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: RackForge-RaspberryPi-arm64-${{ github.sha }}
           path: dist/raspberry-pi/standard/RackForge-RaspberryPi-arm64.tar.gz
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload Raspberry Pi Minimal bundle
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: RackForge-RaspberryPi-arm64-Minimal-${{ github.sha }}
-          path: dist/raspberry-pi/minimal/RackForge-RaspberryPi-arm64.tar.gz
           if-no-files-found: error
           retention-days: 14

@@ -93,6 +93,20 @@ describe("the PLAY chain", () => {
     expect(sameChain(chain, withoutEffect(chain, "fx-2"))).toBe(false);
   });
 
+  it("counts an effect's program as part of how the chain sounds", () => {
+    const chain = withEffect(withEffect(emptyChain("p"), "a"), "b");
+    const onProgram = (program_id: string | null | undefined) => ({
+      ...chain,
+      effects: chain.effects.map((effect, index) =>
+        index === 0 ? { ...effect, program_id } : effect,
+      ),
+    });
+    expect(sameChain(onProgram("glue"), onProgram("glue"))).toBe(true);
+    expect(sameChain(onProgram("glue"), onProgram("punch"))).toBe(false);
+    // No program and a program the session reports as null are the same.
+    expect(sameChain(onProgram(undefined), onProgram(null))).toBe(true);
+  });
+
   it("offers only the installed, enabled effects the host has loaded, by name", () => {
     const plugins = [
       descriptor("org.rackforge.zeta", "effect"),
@@ -109,6 +123,17 @@ describe("the PLAY chain", () => {
     expect(effectPlugins(plugins).map((plugin) => plugin.plugin_id)).toContain(
       "org.rackforge.unloaded",
     );
+  });
+
+  it("offers a pedalboard after an instrument, but never after itself", () => {
+    const rig = { ...descriptor("org.rackforge.rig", "effect"), play_source: true };
+    const plugins = [rig, descriptor("org.rackforge.eq", "effect")];
+    // After a piano, keys through a pedalboard.
+    expect(effectPlugins(plugins, undefined, "org.rackforge.piano").map((p) => p.plugin_id))
+      .toEqual(["org.rackforge.eq", "org.rackforge.rig"]);
+    // With the pedalboard itself on stage, only what follows it.
+    expect(effectPlugins(plugins, undefined, "org.rackforge.rig").map((p) => p.plugin_id))
+      .toEqual(["org.rackforge.eq"]);
   });
 
   it("offers an effect a host builds on demand, loaded or not", () => {

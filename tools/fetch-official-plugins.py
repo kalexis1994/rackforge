@@ -25,14 +25,34 @@ MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 
 OFFICIAL_PLUGINS = (
     {
+        "filename": "RF-Concert-Grand.rfplugin",
+        "plugin_id": "org.rackforge.concert-grand",
+        "version": "0.171.39",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-concert-grand/"
+            "releases/download/v0.171.39/RF-Concert-Grand.rfplugin"
+        ),
+        "sha256": "9e8c5b6c9bc35e39d9c951ac02cd92dfb1fcde0c3c02ba82c9ea426014462d84",
+        # The startup instrument is carried separately by native hosts.
+        # Its source and release lifecycle are owned by the plugin repository.
+        "default": True,
+        "extract_directory": "concert-grand",
+        "required": (
+            "rackforge-plugin.toml", "component.wasm", "LICENSE", "NOTICE.md",
+            "metadata/runtime.json", "metadata/parameters.json", "metadata/presets.json",
+            "branding/icon.png", "branding/banner.png", "branding/splash.png", "web/play.html",
+            "native/linux-aarch64/librackforge_concert_grand.so",
+        ),
+    },
+    {
         "filename": "RF-106.rfplugin",
         "plugin_id": "org.rackforge.rf-106",
-        "version": "0.2.19",
+        "version": "0.2.21",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-106/"
-            "releases/download/v0.2.19/RF-106.rfplugin"
+            "releases/download/v0.2.21/RF-106.rfplugin"
         ),
-        "sha256": "6428a8240c5f982e34d231db68140ea760f4a912e2cd422ecee09327f5d0dbfd",
+        "sha256": "8f2cd0b97579abeb3941a5eb47f8a9c2926603a6b67fed025752c13552799295",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -50,12 +70,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-5.rfplugin",
         "plugin_id": "org.rackforge.rf-5",
-        "version": "0.1.15",
+        "version": "0.1.22",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-5/"
-            "releases/download/v0.1.15/RF-5.rfplugin"
+            "releases/download/v0.1.22/RF-5.rfplugin"
         ),
-        "sha256": "fc5d70134b76c8a136b5f41eb5bf996b203da8db8bc6518fa36acb008a366409",
+        "sha256": "a0e4d02cb87e91b9f68d04c0d938de8ff7787fa15437ba927924cadbf443a5d3",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -68,6 +88,7 @@ OFFICIAL_PLUGINS = (
             "branding/banner.png",
             "branding/splash.png",
             "web/play.html",
+            "web/config.html",
             "web/app.js",
             "web/app_bg.wasm",
             "web/styles.css",
@@ -76,9 +97,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-7.rfplugin",
         "plugin_id": "org.rackforge.rf7",
-        "version": "0.5.1",
-        "url": "https://github.com/kalexis1994/RF-7/releases/download/v0.5.1/RF-7.rfplugin",
-        "sha256": "d8cfdbce57004cdf2b1e2a7dbdce702e523717f481d0e6aa9642c5de7fead0ca",
+        "version": "0.5.4",
+        "url": (
+            "https://github.com/kalexis1994/RF-7/"
+            "releases/download/v0.5.4/RF-7.rfplugin"
+        ),
+        "sha256": "42097dafd6b6cd8eee71684c6522fa84a65333304f64f8193300e72fdef3dd18",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -98,14 +122,130 @@ OFFICIAL_PLUGINS = (
         ),
     },
     {
+        "filename": "RF-Organ.rfplugin",
+        "plugin_id": "org.rackforge.organ",
+        "version": "0.53.1",
+        "url": (
+            "https://github.com/kalexis1994/RF-Organ/"
+            "releases/download/v0.53.1/RF-Organ.rfplugin"
+        ),
+        "sha256": "b8a08c563cbf0b161cff1879870f57a2927313776e854d2535f96886cf8e0e42",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/bootstrap.js",
+            "web/app.js",
+            "web/app_bg.wasm",
+            "web/style.css",
+            "web/fonts/oswald.woff2",
+            "web/fonts/playfair.woff2",
+            "web/fonts/OFL.txt",
+        ),
+    },
+    {
+        "filename": "RF-Tines.rfplugin",
+        "plugin_id": "org.rackforge.rftines",
+        "version": "0.2.11",
+        "url": (
+            "https://github.com/kalexis1994/RF-Tines/"
+            "releases/download/v0.2.11/RF-Tines.rfplugin"
+        ),
+        "sha256": "d7c51d892b82bd61d3579154f4bd9a25b4bac70a699c35ddb142059fb8211e71",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/config.html",
+            "web/app.js",
+            "web/app_bg.wasm",
+            "web/config.css",
+            "web/config.mjs",
+            "web/play-programs.mjs",
+            "web/rftines-format.mjs",
+            "web/style.css",
+        ),
+    },
+    {
+        "filename": "RF-EPiano.rfplugin",
+        "plugin_id": "org.rackforge.rf-epiano",
+        "version": "0.1.5",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-epiano/"
+            "releases/download/v0.1.5/RF-EPiano.rfplugin"
+        ),
+        "sha256": "30e0fefc76991de8b25c099f1a8577d2473965a1509bd4272397a1f233009333",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/play.js",
+            "web/play.css",
+            "notices/NOTICE.txt",
+            "notices/OpenWurli-GPL-3.0.txt",
+        ),
+    },
+    {
+        "filename": "RF-Musette.rfplugin",
+        "plugin_id": "org.rackforge.musette",
+        "version": "0.13.26",
+        "url": (
+            "https://github.com/kalexis1994/RF-Musette/"
+            "releases/download/v0.13.26/RF-Musette.rfplugin"
+        ),
+        "sha256": "0e54b3f7fcd4b5cc74f658d2a643b2b7c04659688c28b79babd5866ea2627e76",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "LICENSE",
+            "NOTICE.md",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "metadata/control-layout.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/config.html",
+            "web/app.js",
+            "web/app_bg.wasm",
+            "web/styles.css",
+            "web/fonts/OFL-GrandHotel.txt",
+            "web/fonts/OFL-JosefinSans.txt",
+        ),
+    },
+    {
         "filename": "RF-Limiter.rfplugin",
         "plugin_id": "org.rackforge.rf-limiter",
-        "version": "0.1.0",
+        "version": "0.2.1",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-limiter/"
-            "releases/download/v0.1.0/RF-Limiter.rfplugin"
+            "releases/download/v0.2.1/RF-Limiter.rfplugin"
         ),
-        "sha256": "185a498e9e748f435322927a770a581e5e8c6afd14e813fd3a1583e839899fd7",
+        "sha256": "6a897c0b102071358fde3bcfb854c75d1616ed27f80ec4a63c6effa08f3c1b38",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -124,12 +264,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-EQ.rfplugin",
         "plugin_id": "org.rackforge.rf-eq",
-        "version": "0.1.0",
+        "version": "0.2.1",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-eq/"
-            "releases/download/v0.1.0/RF-EQ.rfplugin"
+            "releases/download/v0.2.1/RF-EQ.rfplugin"
         ),
-        "sha256": "8bd974d71dd8f2955173dde1a3cebca8e8a281fdf790fa66c296e7e16c4891c7",
+        "sha256": "0e685ff712255f397f60c263fa8d51450a74d370bbe9a1ba5bd6728cc7541231",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -148,12 +288,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Comp.rfplugin",
         "plugin_id": "org.rackforge.rf-comp",
-        "version": "0.1.0",
+        "version": "0.2.1",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-comp/"
-            "releases/download/v0.1.0/RF-Comp.rfplugin"
+            "releases/download/v0.2.1/RF-Comp.rfplugin"
         ),
-        "sha256": "4a41650ca5155d7b9fedaf197320558c1fbeb816a915793007901e8b94060c4b",
+        "sha256": "b0cb348660111bdfcc6600feed409da025f789ee25c4e9b5efe925fd5ffbc439",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -182,12 +322,15 @@ def sha256(path: Path) -> str:
 
 def download(url: str, destination: Path) -> None:
     last_error: Exception | None = None
-    for attempt in range(3):
+    for attempt in range(4):
         try:
-            request = urllib.request.Request(
-                url,
-                headers={"User-Agent": "RackForge-build/1"},
-            )
+            if attempt == 3:
+                print(f"OFFICIAL_PLUGIN_API_FALLBACK url={url}", flush=True)
+                request = release_asset_request(url)
+            else:
+                request = urllib.request.Request(
+                    url, headers={"User-Agent": "RackForge-build/1"}
+                )
             with urllib.request.urlopen(request, timeout=30) as response:
                 length = response.headers.get("Content-Length")
                 if length is not None and int(length) > MAX_ARCHIVE_BYTES:
@@ -276,7 +419,10 @@ def fetch(output: Path, plugin: dict[str, object]) -> None:
 
 def extract(output: Path, destination_root: Path, plugin: dict[str, object]) -> None:
     archive_path = output / str(plugin["filename"])
-    destination = destination_root / str(plugin["plugin_id"])
+    directory = str(plugin.get("extract_directory", plugin["plugin_id"]))
+    if PurePosixPath(directory).name != directory or directory in ("", ".", "..") or "\\" in directory:
+        raise RuntimeError(f"invalid plugin extraction directory: {directory}")
+    destination = destination_root / directory
     if destination.exists():
         raise RuntimeError(f"official plugin destination already exists: {destination}")
     destination.mkdir(parents=True)
@@ -301,19 +447,37 @@ def upstream_repository(url: str) -> tuple[str, str]:
     return match.group(1), match.group(2)
 
 
-def latest_release(owner: str, repository: str) -> dict[str, object]:
-    """What the upstream repository calls its newest release."""
+def github_api_request(url: str, accept: str) -> urllib.request.Request:
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{owner}/{repository}/releases/latest",
-        headers={
-            "User-Agent": "RackForge-build/1",
-            "Accept": "application/vnd.github+json",
-        },
+        url, headers={"User-Agent": "RackForge-build/1", "Accept": accept}
     )
     token = os.environ.get("GITHUB_TOKEN")
     if token:
-        # Anonymous requests are rate limited hard enough to fail a busy day.
-        request.add_header("Authorization", f"Bearer {token}")
+        # The asset endpoint can redirect to a separate CDN origin.
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    return request
+
+
+def release_asset_request(url: str) -> urllib.request.Request:
+    owner, repository = upstream_repository(url)
+    tag = url.split("/releases/download/", 1)[1].split("/", 1)[0]
+    releases = f"https://api.github.com/repos/{owner}/{repository}/releases"
+    request = github_api_request(f"{releases}/tags/{tag}", "application/vnd.github+json")
+    with urllib.request.urlopen(request, timeout=30) as response:
+        release = json.load(response)
+    for asset in release["assets"]:
+        if asset["browser_download_url"] == url:
+            asset_id = int(asset["id"])
+            return github_api_request(f"{releases}/assets/{asset_id}", "application/octet-stream")
+    raise RuntimeError(f"the release does not list {url}")
+
+
+def latest_release(owner: str, repository: str) -> dict[str, object]:
+    """What the upstream repository calls its newest release."""
+    request = github_api_request(
+        f"https://api.github.com/repos/{owner}/{repository}/releases/latest",
+        "application/vnd.github+json",
+    )
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)
 
@@ -381,12 +545,17 @@ def rewrite_pin(
         )
     else:
         wrapped = '"url": (\n' f'            "{url}"\n' "        )"
-    updated = re.sub(
-        r'"url": \(\s*\n(?:\s*"[^"]*"\s*\n)+\s*\)',
+    # The URL may be wrapped in parentheses or sit on one line; RF-7's did,
+    # and a pattern for the wrapped form alone moved its version and digest
+    # and left the URL on the old release.
+    updated, urls = re.subn(
+        r'"url": (?:\(\s*\n(?:\s*"[^"]*"\s*\n)+\s*\)|"[^"]*")',
         lambda _: wrapped,
         updated,
         count=1,
     )
+    if urls != 1:
+        raise RuntimeError(f"could not find the URL in the pin for {plugin['plugin_id']}")
     updated = re.sub(r'"sha256": "[^"]+"', f'"sha256": "{digest}"', updated, count=1)
     if updated == block:
         raise RuntimeError(f"could not rewrite the pin for {plugin['plugin_id']}")
@@ -436,6 +605,8 @@ def main() -> None:
         default=Path("dist/bundled-plugins/official"),
     )
     parser.add_argument("--extract-directory", type=Path)
+    parser.add_argument("--plugin-id", action="append", default=[],
+                        help="fetch only these pinned plugin IDs (repeatable)")
     parser.add_argument(
         "--check-latest",
         action="store_true",
@@ -447,6 +618,9 @@ def main() -> None:
         help="move every pin to the newest published release, verifying it first",
     )
     arguments = parser.parse_args()
+    unknown = set(arguments.plugin_id) - {str(p["plugin_id"]) for p in OFFICIAL_PLUGINS}
+    if unknown:
+        parser.error("unknown pinned plugin IDs: " + ", ".join(sorted(unknown)))
     if arguments.check_latest:
         raise SystemExit(1 if check_latest() else 0)
     if arguments.update:
@@ -455,9 +629,14 @@ def main() -> None:
     output = arguments.output_directory.resolve()
     output.mkdir(parents=True, exist_ok=True)
     for plugin in OFFICIAL_PLUGINS:
-        fetch(output, plugin)
+        if arguments.plugin_id and plugin["plugin_id"] not in arguments.plugin_id:
+            continue
+        # Keep the default package outside the other official packages:
+        # existing hosts embed one default plus this directory exactly once.
+        package_output = output.parent if plugin.get("default") else output
+        fetch(package_output, plugin)
         if arguments.extract_directory is not None:
-            extract(output, arguments.extract_directory.resolve(), plugin)
+            extract(package_output, arguments.extract_directory.resolve(), plugin)
 
 
 if __name__ == "__main__":

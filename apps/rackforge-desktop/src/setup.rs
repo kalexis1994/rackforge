@@ -35,7 +35,7 @@ impl SetupState {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(desktop_host)]
     fn browse(&mut self) {
         let mut dialog = rfd::FileDialog::new().set_title("Choose RackForge data folder");
         if !self.custom_root.trim().is_empty() {
@@ -47,7 +47,7 @@ impl SetupState {
         }
     }
 
-    #[cfg(not(windows))]
+    #[cfg(not(desktop_host))]
     fn browse(&mut self) {}
 
     fn location_card(

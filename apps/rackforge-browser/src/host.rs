@@ -29,6 +29,8 @@ use rackforge_control_api::{
     VirtualMidiMessage,
 };
 use rackforge_controller_package::ControllerPackageManifest;
+use rackforge_core::controller_layouts::{control_layouts, factory_maps, slotted_controllers};
+use rackforge_core::parameter_link::{ControllerMapLinkContext, compile_controller_map_links};
 use rackforge_core::performance::PerformanceRepository;
 use rackforge_core::session::SessionStore;
 use rackforge_core::session_checkpoint::SessionCheckpointStore;
@@ -37,17 +39,23 @@ use rackforge_core::{
     PluginInstance, PluginPackage, PluginStateStore, PluginStorage, SemanticParameterLinkContext,
     compile_semantic_parameter_links, validate_state_reference,
 };
+use rackforge_midi_api::controller_map::ControllerMap;
 use rackforge_midi_api::{
-    IngressMidiEvent, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
+    IngressMidiEvent, MapLayer, MidiPacket, MidiSourceDescriptor, MidiSourceId, MidiSourceKey,
     ParameterLinkPassThrough,
 };
 use rackforge_performance_api::{
-    LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceSnapshot,
+    LibraryRevision, PERFORMANCE_SNAPSHOT_SCHEMA_VERSION, PerformanceEdit, PerformanceLibrary,
+    PerformanceSnapshot, RackDefinition, RackGraphNodeKind, RackSlot,
 };
 use rackforge_plugin_api::abi::MidiEventV1;
 use rackforge_plugin_api::{
     Capability, HostPresetSummary, PluginKind, PluginManifest, PluginStateReference, PresetCatalog,
-    ResourceKind,
+    PresetDescriptor, ResourceKind,
+};
+use rackforge_program_api::{
+    PreparedProgram, ProgramDocument, ProgramEditRequest, ProgramEditorView,
+    ProgramFieldEditRequest,
 };
 use rackforge_repository::{
     LocalPackageInspection, PluginUserDataRemovalOptions, inspect_local_archive,
@@ -55,9 +63,10 @@ use rackforge_repository::{
     uninstall_plugin,
 };
 use rackforge_session_api::{
-    BankSummary, ClientId, CommandEnvelope, CommandRef, EventEnvelope, InstanceId, MasterLevel,
-    MasterPan, PluginInstanceState, Revision, SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent,
-    SessionId, SessionState, SoundSummary, SurfaceMode,
+    AuditionEndReason, BankSummary, ClientId, CommandEnvelope, CommandRef, EventEnvelope,
+    InstanceId, MasterLevel, MasterPan, PluginInstanceState, ProgramDraftState, Revision,
+    SESSION_SCHEMA_VERSION, SessionCommand, SessionEvent, SessionId, SessionState, SoundSummary,
+    SurfaceMode,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -113,6 +122,36 @@ struct ChainVoice {
     enabled: bool,
 }
 
+/// The page can render one instrument, but a Song Part may keep its Slots in
+/// reusable child Racks rather than in the Part's own flat Slot list.
+fn browser_voice_slots(library: &PerformanceLibrary, rack: &RackDefinition) -> Vec<RackSlot> {
+    fn visit(
+        library: &PerformanceLibrary,
+        rack: &RackDefinition,
+        path: &mut BTreeSet<String>,
+        slots: &mut Vec<RackSlot>,
+    ) {
+        if !path.insert(rack.id.as_str().to_owned()) {
+            return;
+        }
+        slots.extend(rack.slots.iter().filter(|slot| slot.enabled).cloned());
+        if let Some(graph) = &rack.graph {
+            for node in &graph.nodes {
+                if let RackGraphNodeKind::Rack { rack_id } = &node.kind
+                    && let Some(child) = library.rack(rack_id)
+                {
+                    visit(library, child, path, slots);
+                }
+            }
+        }
+        path.remove(rack.id.as_str());
+    }
+
+    let mut slots = Vec::new();
+    visit(library, rack, &mut BTreeSet::new(), &mut slots);
+    slots
+}
+
 pub struct BrowserHost {
     /// How the page opened its output, kept so plugins loaded later can be
     /// activated the same way the first ones were.
@@ -141,7 +180,16 @@ pub struct BrowserHost {
     /// MIDI itself stays in the page; this owns no browser handle.
     controller: BrowserKeyLabController,
     controller_command_id: u64,
+    next_audition_lease_id: u64,
+    next_program_draft_id: u64,
     parameter_links: Vec<CompiledParameterLink>,
+    /// RackForge's factory map for every controller it ships: the installed
+    /// plugins' layouts on each controller's slots, as the native hosts offer
+    /// them. The browser keeps no map of the player's, so these are the maps
+    /// it shows, and the KeyLab's is the one it plays.
+    controller_maps: Vec<ControllerMap>,
+    /// The KeyLab's factory map, compiled for every loaded instrument.
+    controller_map_links: Vec<CompiledParameterLink>,
     live_parameter_store: LiveParameterStateStore,
     live_parameter_dirty_at: Option<Instant>,
     storage_revision: u32,
@@ -305,7 +353,11 @@ impl BrowserHost {
             virtual_notes: BTreeMap::new(),
             controller: BrowserKeyLabController::default(),
             controller_command_id: 1,
+            next_audition_lease_id: 1,
+            next_program_draft_id: 1,
             parameter_links: Vec::new(),
+            controller_maps: browser_factory_maps(&data_root),
+            controller_map_links: Vec::new(),
             live_parameter_store,
             live_parameter_dirty_at: None,
             storage_revision: 0,
@@ -546,10 +598,36 @@ impl BrowserHost {
             ControlRequest::OutputMeter => Ok(ControlResponse::OutputMeter {
                 meter: self.audio.take_output_meter(),
             }),
+            // A page cannot reach an audio interface's inputs; the Rack
+            // editor says so instead of routing a silence.
+            ControlRequest::AudioInput => Ok(ControlResponse::AudioInput {
+                input: rackforge_control_api::AudioInputStatus {
+                    availability: rackforge_control_api::AudioInputAvailability::Unsupported,
+                    ..Default::default()
+                },
+            }),
             ControlRequest::ApplyAudioOutput { .. } => Err(Failure::new(
                 ControlErrorCode::Unavailable,
                 "the browser host plays through the page's audio output, which it cannot reconfigure",
             )),
+            // RackForge's factory maps, untouched: the browser keeps none of
+            // the player's, so what each controller does in each plugin is
+            // what RackForge offers it.
+            ControlRequest::ControllerMaps => Ok(ControlResponse::ControllerMaps {
+                controllers: Vec::new(),
+                maps: self.controller_maps.clone(),
+                takeover: Default::default(),
+                factory_untouched: self
+                    .controller_maps
+                    .iter()
+                    .map(|map| map.controller_id.clone())
+                    .collect(),
+                fn_open: Vec::new(),
+            }),
+            ControlRequest::MidiActivity { .. } => Ok(ControlResponse::MidiActivity {
+                cursor: 0,
+                events: Vec::new(),
+            }),
             ControlRequest::VirtualMidi {
                 client_id, message, ..
             } => self.virtual_midi(client_id, message),
@@ -1131,68 +1209,49 @@ impl BrowserHost {
                         "LIVE targets can only be activated while LIVE is active",
                     ));
                 }
-                let (rack_id, part_commands, sounding, unsounded_slots) = {
+                // Every saved Rack loads, as on the other hosts: `enabled`
+                // stays in the data, unused.
+                let (rack, part_commands) = {
                     let library = self.performance.library();
                     let rack = library.resolve_playable(&location).map_err(|error| {
                         Failure::new(ControlErrorCode::NotFound, error.to_string())
                     })?;
-                    if !rack.enabled {
-                        return Err(Failure::new(
-                            ControlErrorCode::Rejected,
-                            "the selected Rack is disabled",
-                        ));
-                    }
                     let commands = library
                         .resolve_part(&location)
                         .map(|part| {
                             rackforge_core::sequencer::part_launch_commands(part, &library.patterns)
                         })
                         .unwrap_or_default();
-                    // The page renders one voice at a time, so a Rack sounds
-                    // through its first enabled Slot. Mixing several Slots is
-                    // the appliance's, and the Slot order is the Rack's own.
-                    let mut enabled = rack.slots.iter().filter(|slot| slot.enabled).peekable();
-                    let first = enabled
-                        .next()
-                        .map(|slot| (slot.plugin_id.clone(), slot.state.clone()));
-                    let remaining = enabled.count();
-                    (rack.id.clone(), commands, first, remaining)
+                    (rack, commands)
                 };
-                // A binding that fails must never fail the activation.
+                // The page renders one voice: a Rack sounds through its first
+                // instrument Slot. The render pool that mixes several Slots on
+                // every other host has no threads to run on in a page.
+                let (plugin_id, state, unsounded_slots) = self.first_instrument_slot(&rack)?;
+                preceding.extend(self.sound_rack_slot(
+                    &plugin_id,
+                    state,
+                    unsounded_slots,
+                    command_ref,
+                )?);
+                // The Part's patterns go out once the Rack sounds. A binding
+                // that fails must never fail the activation.
                 for command in &part_commands {
                     if let Err(reason) = self.sequencer.apply(command) {
                         eprintln!("SEQUENCER_PART_QUEUE_REJECTED reason={reason}");
                     }
                 }
-                // Until here the activation only moved LIVE's state, which is
-                // how a Rack could stand on stage while PLAY's instrument kept
-                // sounding: nobody ever pointed the voice at the Rack the
-                // performer chose.
-                if let Some((plugin_id, state)) = sounding {
-                    preceding.extend(self.sound_rack_slot(
-                        &plugin_id,
-                        state,
-                        unsounded_slots,
-                        command_ref,
-                    )?);
+                SessionEvent::LiveTargetActivated {
+                    location,
+                    rack_id: rack.id.clone(),
                 }
-                SessionEvent::LiveTargetActivated { location, rack_id }
             }
             SessionCommand::PreviewRack { rack } => {
                 // An unsaved draft is auditioned exactly the way an activated
                 // Rack sounds, so what a performer hears while building one is
                 // what they will hear on stage. The persisted LIVE target is
                 // deliberately untouched.
-                let mut enabled = rack.slots.iter().filter(|slot| slot.enabled).peekable();
-                let Some(slot) = enabled.next() else {
-                    return Err(Failure::new(
-                        ControlErrorCode::Rejected,
-                        "the Rack has no enabled instrument to audition",
-                    ));
-                };
-                let plugin_id = slot.plugin_id.clone();
-                let state = slot.state.clone();
-                let unsounded_slots = enabled.count();
+                let (plugin_id, state, unsounded_slots) = self.first_instrument_slot(&rack)?;
                 preceding.extend(self.sound_rack_slot(
                     &plugin_id,
                     state,
@@ -1269,6 +1328,364 @@ impl BrowserHost {
                         sound_id,
                     }
                 }
+            }
+            SessionCommand::BeginProgramEdit {
+                instance_id,
+                program_id,
+            } => {
+                if self.store.state().active_instance_id.as_ref() != Some(&instance_id) {
+                    return Err(Failure::new(
+                        ControlErrorCode::Conflict,
+                        "program editing requires the active instrument",
+                    ));
+                }
+                if self.store.state().audition.is_some()
+                    || self.store.state().program_draft.is_some()
+                {
+                    return Err(Failure::new(
+                        ControlErrorCode::Conflict,
+                        "another audition or program edit is already active",
+                    ));
+                }
+                let previous_sound_id = self
+                    .store
+                    .state()
+                    .instance(&instance_id)
+                    .and_then(|instance| instance.selected_sound_id.clone());
+                let request = ProgramEditRequest::new(program_id.clone());
+                let plugin = self.plugin_mut(&instance_id)?;
+                let prepared = plugin
+                    .instance
+                    .begin_program_edit(&request)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                if prepared.document.plugin_id != plugin.plugin_id {
+                    return Err(Failure::new(
+                        ControlErrorCode::Internal,
+                        "plugin prepared a program for a different plugin",
+                    ));
+                }
+                let editor = plugin
+                    .instance
+                    .program_editor_view(&prepared.document)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                plugin.instance.reset().map_err(|error| {
+                    Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                })?;
+                preview_prepared_program(plugin, &prepared)?;
+                let lease_id = self.next_audition_lease_id;
+                self.next_audition_lease_id = self.next_audition_lease_id.wrapping_add(1).max(1);
+                let draft_id = self.next_program_draft_id;
+                self.next_program_draft_id = self.next_program_draft_id.wrapping_add(1).max(1);
+                let draft = program_draft_state(
+                    draft_id,
+                    instance_id.clone(),
+                    program_id,
+                    &prepared,
+                    editor,
+                    false,
+                )?;
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::AuditionStarted {
+                            lease_id,
+                            instance_id,
+                            previous_sound_id,
+                        },
+                        SessionEvent::ProgramEditStarted { draft },
+                    ],
+                );
+            }
+            SessionCommand::KeepAuditionAlive { lease_id } => {
+                validate_audition_lease(
+                    self.store
+                        .state()
+                        .audition
+                        .as_ref()
+                        .map(|audition| audition.lease_id),
+                    lease_id,
+                )?;
+                return Ok(Vec::new());
+            }
+            SessionCommand::ReplaceProgramDraft {
+                draft_id,
+                document_json,
+            } => {
+                let draft = self.program_draft(draft_id)?;
+                self.require_program_audition(&draft)?;
+                let document: ProgramDocument =
+                    serde_json::from_str(&document_json).map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::InvalidRequest,
+                            format!("invalid program document JSON: {error}"),
+                        )
+                    })?;
+                let previous: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                if document.id != previous.id || document.plugin_id != previous.plugin_id {
+                    return Err(Failure::new(
+                        ControlErrorCode::Rejected,
+                        "program identity cannot change while editing",
+                    ));
+                }
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                let prepared =
+                    plugin
+                        .instance
+                        .prepare_program_save(&document)
+                        .map_err(|error| {
+                            Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                        })?;
+                let editor = plugin
+                    .instance
+                    .program_editor_view(&prepared.document)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                preview_prepared_program(plugin, &prepared)?;
+                let updated = program_draft_state(
+                    draft_id,
+                    draft.instance_id.clone(),
+                    draft.original_program_id,
+                    &prepared,
+                    editor,
+                    true,
+                )?;
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::ProgramDraftUpdated {
+                            draft: updated.clone(),
+                        },
+                        SessionEvent::SoundSelected {
+                            instance_id: updated.instance_id.clone(),
+                            sound_id: updated.preview_sound_id,
+                        },
+                    ],
+                );
+            }
+            SessionCommand::PreviewProgramDraft {
+                draft_id,
+                document_json,
+            } => {
+                let draft = self.program_draft(draft_id)?;
+                self.require_program_audition(&draft)?;
+                let document: ProgramDocument =
+                    serde_json::from_str(&document_json).map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::InvalidRequest,
+                            format!("invalid preview program document JSON: {error}"),
+                        )
+                    })?;
+                let confirmed: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                if document.id != confirmed.id || document.plugin_id != confirmed.plugin_id {
+                    return Err(Failure::new(
+                        ControlErrorCode::Rejected,
+                        "program identity cannot change during preview",
+                    ));
+                }
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                let prepared =
+                    plugin
+                        .instance
+                        .prepare_program_save(&document)
+                        .map_err(|error| {
+                            Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                        })?;
+                preview_prepared_program(plugin, &prepared)?;
+                return Ok(Vec::new());
+            }
+            SessionCommand::EditProgramDraftField {
+                draft_id,
+                field_id,
+                value,
+                preview,
+            } => {
+                let draft = self.program_draft(draft_id)?;
+                self.require_program_audition(&draft)?;
+                let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                let request = ProgramFieldEditRequest {
+                    schema_version: rackforge_plugin_api::PROGRAM_EDITOR_SCHEMA_VERSION,
+                    document,
+                    field_id,
+                    value,
+                };
+                request.validate().map_err(|error| {
+                    Failure::new(ControlErrorCode::InvalidRequest, error.to_string())
+                })?;
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                let prepared = plugin
+                    .instance
+                    .apply_program_edit(&request)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                let editor = plugin
+                    .instance
+                    .program_editor_view(&prepared.document)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                preview_prepared_program(plugin, &prepared)?;
+                if preview {
+                    return Ok(Vec::new());
+                }
+                let updated = program_draft_state(
+                    draft_id,
+                    draft.instance_id,
+                    draft.original_program_id,
+                    &prepared,
+                    editor,
+                    true,
+                )?;
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::ProgramDraftUpdated {
+                            draft: updated.clone(),
+                        },
+                        SessionEvent::SoundSelected {
+                            instance_id: updated.instance_id.clone(),
+                            sound_id: updated.preview_sound_id,
+                        },
+                    ],
+                );
+            }
+            SessionCommand::RestoreProgramDraftPreview { draft_id } => {
+                let draft = self.program_draft(draft_id)?;
+                self.require_program_audition(&draft)?;
+                let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                let prepared =
+                    plugin
+                        .instance
+                        .prepare_program_save(&document)
+                        .map_err(|error| {
+                            Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                        })?;
+                preview_prepared_program(plugin, &prepared)?;
+                return Ok(Vec::new());
+            }
+            SessionCommand::SaveProgramDraft { draft_id } => {
+                let draft = self.program_draft(draft_id)?;
+                let audition = self.require_program_audition(&draft)?;
+                let document: ProgramDocument = serde_json::from_str(&draft.document_json)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            format!("stored program draft is invalid: {error}"),
+                        )
+                    })?;
+                let prepared = PreparedProgram {
+                    schema_version: rackforge_plugin_api::PROGRAM_EDIT_SCHEMA_VERSION,
+                    storage_path: draft.storage_path.clone(),
+                    preview_sound_id: draft.preview_sound_id,
+                    document,
+                    artifacts: draft.artifacts,
+                };
+                prepared.validate().map_err(|error| {
+                    Failure::new(
+                        ControlErrorCode::Internal,
+                        format!("stored prepared program is invalid: {error}"),
+                    )
+                })?;
+                PluginStorage::new(Path::new(DATA_ROOT))
+                    .save_prepared_program(&prepared)
+                    .map_err(|error| {
+                        Failure::new(
+                            ControlErrorCode::Rejected,
+                            format!("saving program: {error:#}"),
+                        )
+                    })?;
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                plugin
+                    .instance
+                    .install_program(&prepared)
+                    .map_err(|error| {
+                        Failure::new(ControlErrorCode::Rejected, format!("{error:#}"))
+                    })?;
+                let catalog = plugin.instance.preset_catalog().map_err(|error| {
+                    Failure::new(ControlErrorCode::Internal, format!("{error:#}"))
+                })?;
+                let preset_id = format!("custom.{}", prepared.document.id);
+                let preset = catalog
+                    .presets
+                    .iter()
+                    .find(|preset| preset.id == preset_id)
+                    .ok_or_else(|| {
+                        Failure::new(
+                            ControlErrorCode::Internal,
+                            "installed program is missing from the plugin catalog",
+                        )
+                    })?
+                    .clone();
+                plugin.presets = catalog;
+                restore_program_selection(plugin, audition.previous_sound_id.as_deref())?;
+                let sound = sound_summary(&preset);
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::ProgramSaved {
+                            draft_id,
+                            instance_id: draft.instance_id.clone(),
+                            sound,
+                        },
+                        SessionEvent::AuditionEnded {
+                            lease_id: audition.lease_id,
+                            instance_id: draft.instance_id,
+                            restored_sound_id: audition.previous_sound_id,
+                            reason: AuditionEndReason::Released,
+                        },
+                    ],
+                );
+            }
+            SessionCommand::CancelProgramEdit { draft_id } => {
+                let draft = self.program_draft(draft_id)?;
+                let audition = self.require_program_audition(&draft)?;
+                let plugin = self.plugin_mut(&draft.instance_id)?;
+                restore_program_selection(plugin, audition.previous_sound_id.as_deref())?;
+                return self.record_events(
+                    command_ref,
+                    vec![
+                        SessionEvent::ProgramEditCancelled {
+                            draft_id,
+                            instance_id: draft.instance_id.clone(),
+                        },
+                        SessionEvent::AuditionEnded {
+                            lease_id: audition.lease_id,
+                            instance_id: draft.instance_id,
+                            restored_sound_id: audition.previous_sound_id,
+                            reason: AuditionEndReason::Cancelled,
+                        },
+                    ],
+                );
             }
             SessionCommand::SetPlayChain {
                 instrument_id,
@@ -1564,6 +1981,40 @@ impl BrowserHost {
 
     /// Points the voice at a Rack Slot's instrument and gives it the Slot's
     /// sound, remembering what PLAY was holding on the way through.
+    /// The Slot a Rack sounds through on this one-voice host: its first
+    /// enabled Slot whose plugin is an installed instrument -- an effect
+    /// cannot be the voice, nothing would play into it -- and how many other
+    /// enabled Slots stay silent.
+    fn first_instrument_slot(
+        &self,
+        rack: &RackDefinition,
+    ) -> Result<(String, Option<PluginStateReference>, usize), Failure> {
+        let enabled = browser_voice_slots(self.performance.library(), rack);
+        let slot = enabled
+            .iter()
+            .find(|slot| {
+                self.plugins.iter().any(|plugin| {
+                    plugin.plugin_id == slot.plugin_id
+                        && plugin.runtime.manifest().kind == PluginKind::Instrument
+                })
+            })
+            .ok_or_else(|| {
+                Failure::new(
+                    ControlErrorCode::Rejected,
+                    if enabled.is_empty() {
+                        format!("{} has no enabled Slots", rack.name)
+                    } else {
+                        format!("{} has no instrument installed here", rack.name)
+                    },
+                )
+            })?;
+        Ok((
+            slot.plugin_id.clone(),
+            slot.state.clone(),
+            enabled.len().saturating_sub(1),
+        ))
+    }
+
     fn sound_rack_slot(
         &mut self,
         plugin_id: &str,
@@ -1693,6 +2144,52 @@ impl BrowserHost {
                     format!("could not load the Slot's sound: {error:#}"),
                 )
             })
+    }
+
+    fn program_draft(&self, draft_id: u64) -> Result<ProgramDraftState, Failure> {
+        self.store
+            .state()
+            .program_draft
+            .as_ref()
+            .filter(|draft| draft.draft_id == draft_id)
+            .cloned()
+            .ok_or_else(|| {
+                Failure::new(
+                    ControlErrorCode::NotFound,
+                    "program draft is missing or no longer valid",
+                )
+            })
+    }
+
+    fn require_program_audition(
+        &self,
+        draft: &ProgramDraftState,
+    ) -> Result<rackforge_session_api::AuditionState, Failure> {
+        self.store
+            .state()
+            .audition
+            .as_ref()
+            .filter(|audition| audition.instance_id == draft.instance_id)
+            .cloned()
+            .ok_or_else(|| {
+                Failure::new(
+                    ControlErrorCode::Internal,
+                    "program draft lost its audition lease",
+                )
+            })
+    }
+
+    fn record_events(
+        &mut self,
+        command_ref: &CommandRef,
+        events: Vec<SessionEvent>,
+    ) -> Result<Vec<EventEnvelope>, Failure> {
+        let recorded = self
+            .store
+            .record_many(Some(command_ref.clone()), events)
+            .map_err(|error| Failure::new(ControlErrorCode::Internal, format!("{error:#}")))?;
+        self.save_checkpoint();
+        Ok(recorded)
     }
 
     fn plugin_mut(&mut self, instance_id: &InstanceId) -> Result<&mut HostedPlugin, Failure> {
@@ -2036,6 +2533,8 @@ impl BrowserHost {
         self.audio.silence();
         self.plugins = plugins;
         self.store = SessionStore::new(session)?;
+        // A plugin installed or removed brings or takes its layout.
+        self.controller_maps = browser_factory_maps(&data_root);
         self.rebuild_parameter_links()?;
         self.sync_controller();
         self.save_checkpoint();
@@ -2092,11 +2591,23 @@ impl BrowserHost {
                 packet,
             };
             let active_instance_id = self.store.state().active_instance_id.clone();
-            for link in self.parameter_links.iter_mut().filter(|link| {
-                active_instance_id
-                    .as_ref()
-                    .is_some_and(|instance_id| link.link.instance_id == instance_id.as_str())
-            }) {
+            // A button the KeyLab's own screen and transport answer is
+            // theirs: the map does not also move a parameter with it.
+            let map_links: &mut [CompiledParameterLink] = if outcome.consumed {
+                &mut []
+            } else {
+                &mut self.controller_map_links
+            };
+            for link in self
+                .parameter_links
+                .iter_mut()
+                .chain(map_links)
+                .filter(|link| {
+                    active_instance_id
+                        .as_ref()
+                        .is_some_and(|instance_id| link.link.instance_id == instance_id.as_str())
+                })
+            {
                 // The browser demo cannot yet read a parameter from here, so
                 // a control takes over at once, as before.
                 let Some(mapped) = link.apply(ingress, |_| None) else {
@@ -2143,29 +2654,7 @@ impl BrowserHost {
     }
 
     pub fn controller_catalog(&self) -> serde_json::Value {
-        let manifest: ControllerPackageManifest =
-            toml::from_str(keylab_essential_mk3::controller::PACKAGE_MANIFEST)
-                .expect("the bundled Arturia controller manifest is validated at build time");
-        serde_json::json!({
-            "controllers": [{
-                "id": manifest.id,
-                "name": manifest.name,
-                "version": manifest.version,
-                "enabled": true,
-                "trust": "official",
-                "runtime": "Browser",
-                "devices": manifest.devices.len(),
-                "settings": manifest.settings.into_iter().map(|setting| serde_json::json!({
-                    "id": setting.id,
-                    "name": setting.name,
-                    "kind": match setting.kind {
-                        rackforge_controller_package::ControllerSettingKind::Color => "color",
-                    },
-                    "default": setting.default,
-                    "page": setting.page,
-                })).collect::<Vec<_>>(),
-            }]
-        })
+        browser_controller_catalog()
     }
 
     fn sync_controller(&mut self) {
@@ -2209,12 +2698,42 @@ impl BrowserHost {
         let controller = keylab_essential_mk3::controller::package_profile();
         let Some(profile) = controller.semantic_profile.as_ref() else {
             self.parameter_links.clear();
+            self.controller_map_links.clear();
             return Ok(());
         };
         let source_id = MidiSourceId::new(profile.source_id.clone()).map_err(anyhow::Error::msg)?;
         let explicit = &self.store.state().parameter_links;
+        let map = self
+            .controller_maps
+            .iter()
+            .find(|map| map.controller_id == controller.driver_id);
         let mut compiled = Vec::new();
+        let mut map_links = Vec::new();
         for plugin in &self.plugins {
+            // The factory map sits between the session's own links and the
+            // package's semantic defaults, as on the native hosts. The
+            // browser has no Fn layer yet, so only the base layer plays.
+            let mut beneath_semantics = explicit.clone();
+            if let Some(map) = map {
+                let mapped = compile_controller_map_links(ControllerMapLinkContext {
+                    map,
+                    plugin_id: &plugin.plugin_id,
+                    runtime_source_id: &source_id,
+                    source_name: controller.name.as_str(),
+                    source_key: BROWSER_KEYLAB_SOURCE_KEY,
+                    instance_id: plugin.instance_id.as_str(),
+                    schema: plugin.runtime.parameters(),
+                    explicit_links: explicit,
+                });
+                for link in mapped
+                    .links
+                    .into_iter()
+                    .filter(|link| link.layer() == MapLayer::Base)
+                {
+                    beneath_semantics.push(link.link.clone());
+                    map_links.push(link);
+                }
+            }
             compiled.extend(compile_semantic_parameter_links(
                 SemanticParameterLinkContext {
                     controller_id: controller.driver_id.as_str(),
@@ -2224,7 +2743,7 @@ impl BrowserHost {
                     source_key: BROWSER_KEYLAB_SOURCE_KEY,
                     instance_id: plugin.instance_id.as_str(),
                     schema: plugin.runtime.parameters(),
-                    explicit_links: explicit,
+                    explicit_links: &beneath_semantics,
                 },
             )?);
             for link in explicit.iter().filter(|link| {
@@ -2239,6 +2758,7 @@ impl BrowserHost {
             }
         }
         self.parameter_links = compiled;
+        self.controller_map_links = map_links;
         Ok(())
     }
 
@@ -2467,6 +2987,11 @@ impl BrowserHost {
         };
         let plugin = &mut self.plugins[index];
         // The instrument, then the effects that are on, in order.
+        let trim = if self.store.state().active_mode == SurfaceMode::Play {
+            rackforge_core::play_output::PlayOutputTrim::for_instrument(&plugin.plugin_id)
+        } else {
+            rackforge_core::play_output::PlayOutputTrim::UNITY
+        };
         let mut chain: Vec<&mut PluginInstance<'static>> = self
             .chain
             .iter_mut()
@@ -2474,7 +2999,7 @@ impl BrowserHost {
             .map(|effect| &mut effect.instance)
             .collect();
         self.audio
-            .render_through(request, &mut plugin.instance, &mut chain)
+            .render_through(request, &mut plugin.instance, &mut chain, trim)
     }
 
     fn flush_live_parameters(&mut self, force: bool) {
@@ -2490,6 +3015,96 @@ impl BrowserHost {
         }
         self.live_parameter_dirty_at = None;
         self.storage_revision = self.storage_revision.wrapping_add(1);
+    }
+}
+
+fn program_draft_state(
+    draft_id: u64,
+    instance_id: InstanceId,
+    original_program_id: Option<String>,
+    prepared: &PreparedProgram,
+    editor: ProgramEditorView,
+    dirty: bool,
+) -> Result<ProgramDraftState, Failure> {
+    prepared.validate().map_err(|error| {
+        Failure::new(
+            ControlErrorCode::Internal,
+            format!("plugin returned an invalid prepared program: {error}"),
+        )
+    })?;
+    editor.validate().map_err(|error| {
+        Failure::new(
+            ControlErrorCode::Internal,
+            format!("plugin returned an invalid program editor: {error}"),
+        )
+    })?;
+    let document_json = serde_json::to_string(&prepared.document).map_err(|error| {
+        Failure::new(
+            ControlErrorCode::Internal,
+            format!("serializing prepared program document: {error}"),
+        )
+    })?;
+    Ok(ProgramDraftState {
+        draft_id,
+        instance_id,
+        original_program_id,
+        name: prepared.document.name.clone(),
+        preview_sound_id: prepared.preview_sound_id.clone(),
+        storage_path: prepared.storage_path.clone(),
+        artifacts: prepared.artifacts.clone(),
+        document_json,
+        editor,
+        dirty,
+    })
+}
+
+fn preview_prepared_program(
+    plugin: &mut HostedPlugin,
+    prepared: &PreparedProgram,
+) -> Result<(), Failure> {
+    let previewed = plugin
+        .instance
+        .preview_program(prepared)
+        .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+    if !previewed {
+        plugin
+            .instance
+            .load_preset(&prepared.preview_sound_id)
+            .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+    }
+    Ok(())
+}
+
+fn restore_program_selection(
+    plugin: &mut HostedPlugin,
+    previous_sound_id: Option<&str>,
+) -> Result<(), Failure> {
+    plugin
+        .instance
+        .reset()
+        .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+    if let Some(previous) = previous_sound_id {
+        plugin
+            .instance
+            .load_preset(previous)
+            .map_err(|error| Failure::new(ControlErrorCode::Rejected, format!("{error:#}")))?;
+    }
+    plugin.selected_sound_id = previous_sound_id.map(str::to_owned);
+    Ok(())
+}
+
+fn sound_summary(preset: &PresetDescriptor) -> SoundSummary {
+    SoundSummary {
+        id: preset.id.clone(),
+        name: preset.name.clone(),
+        bank: preset.bank.clone(),
+        detail: preset
+            .description
+            .clone()
+            .or_else(|| preset.category.clone()),
+        category: None,
+        tags: Vec::new(),
+        editable: preset.editable,
     }
 }
 
@@ -2558,19 +3173,39 @@ fn request_name(request: &ControlRequest) -> &'static str {
 /// is the only way a person can upgrade a bundled instrument, and two
 /// instances of one plugin id would collide in the session.
 fn prefer_installed(plugins: &mut Vec<HostedPlugin>) {
+    let keep = preferred_versions(plugins.iter().map(|plugin| {
+        (
+            plugin.plugin_id.as_str(),
+            plugin.managed,
+            plugin.runtime.manifest().version.as_str(),
+        )
+    }));
     let mut index = 0;
-    while index < plugins.len() {
-        let duplicate = plugins.iter().enumerate().any(|(other, plugin)| {
-            other != index
-                && plugin.plugin_id == plugins[index].plugin_id
-                && (plugin.managed && !plugins[index].managed)
-        });
-        if duplicate {
-            plugins.remove(index);
-        } else {
-            index += 1;
+    plugins.retain(|_| {
+        let selected = keep.contains(&index);
+        index += 1;
+        selected
+    });
+}
+
+/// Match the catalog's package precedence. Multiple installed versions have
+/// the same instance ID; retaining both makes parameter/audio lookup resolve
+/// the older instance while the UI is served from the newer package.
+fn preferred_versions<'a>(entries: impl Iterator<Item = (&'a str, bool, &'a str)>) -> Vec<usize> {
+    let mut chosen = BTreeMap::<&str, (bool, semver::Version, usize)>::new();
+    for (index, (id, managed, version)) in entries.enumerate() {
+        let version = semver::Version::parse(version).expect("validated package version");
+        if chosen
+            .get(id)
+            .is_none_or(|(previous_managed, previous_version, _)| {
+                (managed && !previous_managed)
+                    || (managed == *previous_managed && version >= *previous_version)
+            })
+        {
+            chosen.insert(id, (managed, version, index));
         }
     }
+    chosen.into_values().map(|(_, _, index)| index).collect()
 }
 
 fn store_root() -> PathBuf {
@@ -2647,6 +3282,26 @@ fn all_package_roots(data_root: &Path) -> Result<Vec<PathBuf>> {
     Ok(roots)
 }
 
+/// RackForge's factory map for every controller it ships, made as the native
+/// hosts make theirs: each installed plugin's layout -- its package's own, or
+/// the one RackForge carries for it -- on the slots each controller names.
+fn browser_factory_maps(data_root: &Path) -> Vec<ControllerMap> {
+    let packages = package_roots(data_root)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|root| {
+            let package = PluginPackage::open(&root).ok()?;
+            Some((package.manifest().id.clone(), root))
+        })
+        .collect::<Vec<_>>();
+    let layouts = control_layouts(
+        packages
+            .iter()
+            .map(|(plugin_id, root)| (plugin_id.as_str(), root.as_path())),
+    );
+    factory_maps(&slotted_controllers(None), &layouts)
+}
+
 fn plugin_catalog_entry(
     manifest: &PluginManifest,
     package_root: &Path,
@@ -2690,6 +3345,7 @@ fn plugin_catalog_entry(
                 "preset": entry.preset,
             })
         }).collect::<Vec<_>>(),
+        "play_source": manifest.play_source,
         "resources": manifest.resources.iter().map(|resource| {
             serde_json::json!({
                 "id": resource.id,
@@ -2896,6 +3552,20 @@ fn fixed_range(value: u32) -> AudioValueRange {
     AudioValueRange::new(value.max(1), value.max(1)).expect("a non-zero fixed range is valid")
 }
 
+fn validate_audition_lease(
+    active_lease_id: Option<u64>,
+    requested_lease_id: u64,
+) -> Result<(), Failure> {
+    if active_lease_id == Some(requested_lease_id) {
+        Ok(())
+    } else {
+        Err(Failure::new(
+            ControlErrorCode::NotFound,
+            "audition lease is missing or no longer valid",
+        ))
+    }
+}
+
 /// Convenience for the ABI layer: turn a queued MIDI byte triple into the
 /// event shape plugins consume.
 pub fn midi_event(frame: u32, data: [u8; 3], length: u8) -> MidiEventV1 {
@@ -2906,10 +3576,162 @@ pub fn midi_event(frame: u32, data: [u8; 3], length: u8) -> MidiEventV1 {
     }
 }
 
+/// Every shipped controller can be inspected in the browser, although only
+/// the KeyLab Essential mk3 has a browser-side MIDI driver at present.
+fn browser_controller_catalog() -> serde_json::Value {
+    let manifests = std::iter::once((keylab_essential_mk3::controller::PACKAGE_MANIFEST, true))
+        .chain(
+            rackforge_controller_catalog::BUNDLED
+                .iter()
+                .map(|bundled| (bundled.manifest, false)),
+        );
+    let controllers: Vec<_> = manifests
+        .map(|(source, browser_driver)| {
+            let manifest: ControllerPackageManifest =
+                toml::from_str(source).expect("a bundled controller manifest is valid");
+            let editor = manifest.editor_inputs();
+            serde_json::json!({
+                "id": manifest.id,
+                "name": manifest.name,
+                "vendor": manifest.vendor,
+                "schema_version": manifest.schema_version,
+                "version": manifest.version,
+                "enabled": true,
+                "trust": "official",
+                "runtime": if browser_driver { "Browser" } else { "DeclarativeV1" },
+                "devices": manifest.devices.len(),
+                "inputs": editor.inputs,
+                "roles": editor.roles,
+                "actions": editor.actions,
+                "settings": manifest.settings.into_iter().map(|setting| serde_json::json!({
+                    "id": setting.id,
+                    "name": setting.name,
+                    "kind": match setting.kind {
+                        rackforge_controller_package::ControllerSettingKind::Color => "color",
+                    },
+                    "default": setting.default,
+                    "page": setting.page,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    serde_json::json!({ "controllers": controllers })
+}
+
 #[cfg(test)]
 mod package_preview_tests {
     use super::*;
     use rackforge_repository::LocalPackageBrandingPreview;
+
+    #[test]
+    fn song_part_can_sound_an_instrument_in_a_child_rack() {
+        let child: RackDefinition = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "id": "rack.piano",
+            "name": "Piano",
+            "slots": [
+                { "id": "slot.piano", "plugin_id": "org.rackforge.piano", "enabled": true },
+                { "id": "slot.muted", "plugin_id": "org.rackforge.muted", "enabled": false }
+            ]
+        }))
+        .unwrap();
+        let part: RackDefinition = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "id": "part.intro",
+            "name": "Intro",
+            "slots": [],
+            "graph": {
+                "schema_version": 2,
+                "nodes": [{ "id": "rack.01", "kind": { "kind": "rack", "rack_id": "rack.piano" } }],
+                "edges": []
+            }
+        }))
+        .unwrap();
+        let mut library = PerformanceLibrary::empty();
+        library.racks.push(child);
+
+        let slots = browser_voice_slots(&library, &part);
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].plugin_id, "org.rackforge.piano");
+    }
+
+    #[test]
+    fn browser_catalog_lists_keylab_and_all_declarative_models() {
+        let catalog = browser_controller_catalog();
+        let controllers = catalog["controllers"].as_array().unwrap();
+        assert_eq!(
+            controllers.len(),
+            rackforge_controller_catalog::BUNDLED.len() + 1
+        );
+        assert_eq!(controllers[0]["runtime"], "Browser");
+        assert!(
+            controllers[0]["id"]
+                .as_str()
+                .unwrap()
+                .contains("keylab-essential-mk3")
+        );
+        assert!(controllers[1..].iter().all(|controller| {
+            controller["runtime"] == "DeclarativeV1"
+                && controller["enabled"] == true
+                && controller["inputs"].is_array()
+        }));
+    }
+
+    /// Every controller the browser lists has the factory map a native host
+    /// offers it, under the id the list names it by, and the KeyLab's plays
+    /// RackForge's instruments as its layouts say.
+    #[test]
+    fn every_listed_controller_has_its_factory_map() {
+        let maps = browser_factory_maps(Path::new("/no-packages-here"));
+        let catalog = browser_controller_catalog();
+        for controller in catalog["controllers"].as_array().unwrap() {
+            let id = controller["id"].as_str().unwrap();
+            assert!(
+                maps.iter().any(|map| map.controller_id == id),
+                "{id} has no factory map"
+            );
+        }
+        let keylab = keylab_essential_mk3::controller::package_profile();
+        let map = maps
+            .iter()
+            .find(|map| map.controller_id == keylab.driver_id)
+            .unwrap();
+        let rf5 = map.plugin("org.rackforge.rf-5").unwrap();
+        for parameter in ["filter-cutoff", "filter-attack", "oscillator-b-detune"] {
+            assert!(
+                rf5.mappings
+                    .iter()
+                    .any(|mapping| mapping.parameter_id == parameter),
+                "the KeyLab does not reach RF-5's {parameter}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_keeps_one_semantically_newest_managed_version_per_plugin() {
+        let entries = [
+            ("piano", false, "9.0.0"),
+            ("piano", true, "0.1.6"),
+            ("piano", true, "0.1.10"),
+            ("piano", true, "0.1.9"),
+            ("effect", false, "1.0.0"),
+        ];
+        assert_eq!(preferred_versions(entries.into_iter()), vec![4, 2]);
+    }
+
+    #[test]
+    fn runtime_version_selection_handles_reverse_order_prereleases_and_ties() {
+        let entries = [
+            ("piano", true, "0.1.7"),
+            ("piano", true, "0.1.6"),
+            ("piano", true, "0.1.8-beta.1"),
+            ("piano", true, "0.1.8"),
+            ("piano", true, "0.1.8"),
+            ("piano", false, "2.0.0"),
+        ];
+        assert_eq!(preferred_versions(entries.into_iter()), vec![4]);
+        assert!(preferred_versions(std::iter::empty()).is_empty());
+    }
 
     #[test]
     fn browser_preview_preserves_validated_branding() {
@@ -2941,5 +3763,12 @@ mod package_preview_tests {
                 .unwrap()
                 .starts_with("data:image/png;base64,")
         );
+    }
+
+    #[test]
+    fn browser_renews_only_the_active_audition_lease() {
+        assert!(validate_audition_lease(Some(41), 41).is_ok());
+        assert!(validate_audition_lease(Some(41), 42).is_err());
+        assert!(validate_audition_lease(None, 41).is_err());
     }
 }

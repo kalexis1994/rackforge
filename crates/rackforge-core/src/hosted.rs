@@ -42,13 +42,19 @@ enum LoadedBackend {
 }
 
 impl LoadedPlugin {
-    /// Loads either the legacy trusted native ABI or the sandboxed portable
-    /// ABI selected by the package manifest.
+    /// Loads either the legacy trusted native ABI or the portable ABI
+    /// selected by the package manifest.
+    ///
+    /// A portable package runs its component in the sandbox, or -- when the
+    /// store's record says the release's official set laid it down, and it
+    /// carries a native build for this platform -- that build in its place
+    /// (see `native_build`).
     ///
     /// # Safety
     ///
-    /// Native packages execute code in the host process. Portable packages do
-    /// not require caller trust, but share this entry point so callers cannot
+    /// Native packages, and the native builds of official portable packages,
+    /// execute code in the host process. Other portable packages do not
+    /// require caller trust, but share this entry point so callers cannot
     /// accidentally bypass the package's declared runtime.
     pub unsafe fn load(
         package: &PluginPackage,
@@ -65,6 +71,7 @@ impl LoadedPlugin {
                     package,
                     resource_overrides,
                     data_root,
+                    Choice::Policy,
                 )?),
             })
         } else {
@@ -80,6 +87,35 @@ impl LoadedPlugin {
                 }),
             })
         }
+    }
+
+    /// Loads one named form of a portable package, whatever the store's
+    /// record says: for tools that hold a native build to its component.
+    ///
+    /// # Safety
+    ///
+    /// [`PortableForm::NativeBuild`] runs the library at its path in this
+    /// process, unsandboxed: the caller vouches for it.
+    pub unsafe fn load_portable_form(
+        package: &PluginPackage,
+        data_root: Option<&Path>,
+        form: PortableForm<'_>,
+    ) -> Result<Self> {
+        if package.manifest().portable_component().is_none() {
+            bail!("only a portable package has a component and native builds to compare");
+        }
+        let choice = match form {
+            PortableForm::Component => Choice::Component,
+            PortableForm::NativeBuild(path) => Choice::NativeBuild(path),
+        };
+        Ok(Self {
+            backend: LoadedBackend::Portable(PortableLoadedPlugin::load(
+                package,
+                &BTreeMap::new(),
+                data_root,
+                choice,
+            )?),
+        })
     }
 
     pub fn manifest(&self) -> &PluginManifest {
@@ -107,6 +143,15 @@ impl LoadedPlugin {
         match &self.backend {
             LoadedBackend::Native(plugin) => plugin.presets(),
             LoadedBackend::Portable(plugin) => &plugin.presets,
+        }
+    }
+
+    /// Whether this plugin runs a native build of its portable processor
+    /// rather than its component.
+    pub fn runs_native_build(&self) -> bool {
+        match &self.backend {
+            LoadedBackend::Native(_) => false,
+            LoadedBackend::Portable(plugin) => plugin.module.is_native_build(),
         }
     }
 
@@ -268,6 +313,106 @@ impl LoadedPlugin {
     }
 }
 
+/// A form of a portable package, named by a tool rather than chosen by the
+/// store's record (see [`LoadedPlugin::load_portable_form`]).
+pub enum PortableForm<'a> {
+    /// The `wasm-v1` component, in the sandbox.
+    Component,
+    /// The native build at this path.
+    NativeBuild(&'a Path),
+}
+
+/// Which form `PortableLoadedPlugin::load` runs.
+enum Choice<'a> {
+    /// What the store's record allows: see `native_build`.
+    Policy,
+    Component,
+    NativeBuild(&'a Path),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_named_native_build(path: &Path) -> Result<PortableModule> {
+    // SAFETY: forwarded from `LoadedPlugin::load_portable_form`.
+    unsafe { PortableModule::load_native_build(path) }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_named_native_build(_path: &Path) -> Result<PortableModule> {
+    bail!("the browser host runs no native builds")
+}
+
+/// Set to `off` to run every portable package's component, native builds or
+/// not: for comparing the two, and as a way out if a native build misbehaves
+/// on a machine.
+pub const NATIVE_BUILDS_ENV: &str = "RACKFORGE_NATIVE_BUILDS";
+
+/// The native build of a portable package this host may run in place of its
+/// component, loaded; `None` runs the component.
+///
+/// Only an official package's (`rackforge_plugin_api::install`): a native
+/// build runs unsandboxed, with the host's own rights, so it is trusted no
+/// further than the release that carried it. A package that renders in
+/// parallel is scheduled the same way in either form. And a build that
+/// will not load -- a library this system cannot link, a table from another
+/// SDK -- is reported and passed over for the component, which runs
+/// everywhere: a package never fails to load for carrying one.
+#[cfg(not(target_arch = "wasm32"))]
+fn native_build(package: &PluginPackage) -> Option<PortableModule> {
+    let manifest = package.manifest();
+    let relative = manifest.host_binary()?;
+    if std::env::var(NATIVE_BUILDS_ENV).is_ok_and(|value| value == "off") {
+        return None;
+    }
+    let official = rackforge_plugin_api::installation_record_for(
+        package.root(),
+        &manifest.id,
+        &manifest.version,
+    )
+    .is_some_and(|record| record.is_official());
+    if !official {
+        return None;
+    }
+    let loaded = (|| -> Result<PortableModule> {
+        let root = package
+            .root()
+            .canonicalize()
+            .context("resolving the package")?;
+        let path = root
+            .join(relative)
+            .canonicalize()
+            .with_context(|| format!("resolving native build {relative:?}"))?;
+        if !path.starts_with(&root) || !path.is_file() {
+            bail!("native build {relative:?} is missing or escaped the package");
+        }
+        // SAFETY: an official package, laid down from the release's pinned
+        // set; see above.
+        unsafe { PortableModule::load_native_build(&path) }
+    })();
+    match loaded {
+        Ok(module) => {
+            eprintln!(
+                "PLUGIN_NATIVE_BUILD id={} version={} platform={}",
+                manifest.id,
+                manifest.version,
+                rackforge_plugin_api::host_platform_key()
+            );
+            Some(module)
+        }
+        Err(error) => {
+            eprintln!(
+                "PLUGIN_NATIVE_BUILD_FAILED id={} version={} fallback=component error={error:#}",
+                manifest.id, manifest.version
+            );
+            None
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn native_build(_package: &PluginPackage) -> Option<PortableModule> {
+    None
+}
+
 pub struct PortableLoadedPlugin {
     manifest: PluginManifest,
     descriptor: RuntimeDescriptor,
@@ -284,6 +429,7 @@ impl PortableLoadedPlugin {
         package: &PluginPackage,
         resource_overrides: &BTreeMap<String, PathBuf>,
         data_root: Option<&Path>,
+        choice: Choice<'_>,
     ) -> Result<Self> {
         let component = package
             .manifest()
@@ -337,25 +483,38 @@ impl PortableLoadedPlugin {
             resources.insert(id, path);
         }
 
-        let component_path = package
-            .component_path()?
-            .context("portable component path is unavailable")?;
-        let component_bytes = fs::read(&component_path)
-            .with_context(|| format!("reading {}", component_path.display()))?;
-        let requested_memory = component
-            .memory_limit_mib
-            .unwrap_or(64)
-            .checked_mul(1024 * 1024)
-            .context("portable memory request overflow")? as usize;
-        let limits = RuntimeLimits {
-            maximum_memory_bytes: requested_memory,
-            ..RuntimeLimits::default()
+        let native = match choice {
+            Choice::Policy => native_build(package),
+            Choice::Component => None,
+            Choice::NativeBuild(path) => Some(load_named_native_build(path)?),
         };
-        let engine = match data_root {
-            Some(root) => PortableEngine::with_cache(limits, root.join(".cache/portable-code"))?,
-            None => PortableEngine::new(limits)?,
+        let module = match native {
+            Some(module) => module,
+            None => {
+                let component_path = package
+                    .component_path()?
+                    .context("portable component path is unavailable")?;
+                let component_bytes = fs::read(&component_path)
+                    .with_context(|| format!("reading {}", component_path.display()))?;
+                let requested_memory = component
+                    .memory_limit_mib
+                    .unwrap_or(64)
+                    .checked_mul(1024 * 1024)
+                    .context("portable memory request overflow")?
+                    as usize;
+                let limits = RuntimeLimits {
+                    maximum_memory_bytes: requested_memory,
+                    ..RuntimeLimits::default()
+                };
+                let engine = match data_root {
+                    Some(root) => {
+                        PortableEngine::with_cache(limits, root.join(".cache/portable-code"))?
+                    }
+                    None => PortableEngine::new(limits)?,
+                };
+                engine.compile(&component_bytes)?
+            }
         };
-        let module = engine.compile(&component_bytes)?;
         // The manifest and the component must agree on the parallel-render
         // extension, exactly as they must agree on presets: a host decides
         // its scheduling strategy from the manifest before any instance
@@ -708,6 +867,17 @@ impl PluginInstance<'_> {
         }
     }
 
+    /// Processing latency introduced by this instance at its current
+    /// prepared sample rate. Native ABI v1 plugins predate this optional
+    /// portable contract and therefore report zero until their extension is
+    /// introduced.
+    pub fn latency_frames(&mut self) -> Result<u32> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => Ok(0),
+            PluginInstanceBackend::Portable(instance) => instance.instance.latency_frames(),
+        }
+    }
+
     pub fn save_state(&mut self) -> Result<Vec<u8>> {
         match &mut self.backend {
             PluginInstanceBackend::Native(instance) => instance.save_state(),
@@ -1006,6 +1176,36 @@ impl PluginInstance<'_> {
 
     /// Deposits one finished unit's audio in the coordinator's mix region.
     #[cfg(not(target_arch = "wasm32"))]
+    /// Reads what a worker had to say about one unit this block.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_read_report(&self, unit: u32, report: &mut [u8]) -> Result<()> {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_read_report(unit, report)
+            }
+        }
+    }
+
+    /// Deposits one unit's report into the coordinator, beside its audio.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn parallel_write_report(&mut self, unit: u32, report: &[u8]) -> Result<()> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {
+                bail!("native plugins do not expose parallel render")
+            }
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.parallel_write_report(unit, report)
+            }
+        }
+    }
+
+    /// Deposits one unit's audio into its mix slot on the coordinator. Units
+    /// are distributed only on hosts with worker threads; the browser engine
+    /// renders every instrument whole.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn parallel_write_mix_slot(&mut self, unit: u32, samples: &[f32]) -> Result<()> {
         match &mut self.backend {
             PluginInstanceBackend::Native(_) => {
@@ -1033,14 +1233,50 @@ impl PluginInstance<'_> {
         }
     }
 
+    /// Whether this plugin scales itself to the machine it was given.
+    pub fn accepts_realtime_budget(&self) -> bool {
+        match &self.backend {
+            PluginInstanceBackend::Native(_) => false,
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.accepts_realtime_budget()
+            }
+        }
+    }
+
+    /// Hands the plugin the fuel it may spend on one real-time call.
+    ///
+    /// Native plugins are outside the sandbox that meters fuel, so there is no
+    /// budget to state in units they share; they are told nothing and keep
+    /// what their author calibrated.
+    pub fn set_realtime_budget(&mut self, fuel: u64) -> Result<bool> {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => Ok(false),
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.set_realtime_budget(fuel)
+            }
+        }
+    }
+
     /// Reports the fuel consumed by the most recent portable process call.
     /// Native plugins are not metered by the WebAssembly sandbox.
+    /// Adds fuel burned outside this instance to this block's total.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn add_realtime_fuel(&mut self, fuel: u64) {
+        match &mut self.backend {
+            PluginInstanceBackend::Native(_) => {}
+            PluginInstanceBackend::Portable(instance) => {
+                instance.instance.add_realtime_fuel(fuel);
+            }
+        }
+    }
+
     pub fn last_realtime_fuel_consumed(&self) -> Option<u64> {
         match &self.backend {
             PluginInstanceBackend::Native(_) => None,
-            PluginInstanceBackend::Portable(instance) => {
+            PluginInstanceBackend::Portable(instance) if instance.instance.is_metered() => {
                 Some(instance.instance.last_realtime_fuel_consumed())
             }
+            PluginInstanceBackend::Portable(_) => None,
         }
     }
 }

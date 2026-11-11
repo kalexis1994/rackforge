@@ -7,7 +7,14 @@ import {
   snapshotReceived,
   store,
 } from "./store";
-import { isVstHost, openSessionChannel, type SessionChannel } from "./host";
+import {
+  IS_BROWSER_HOST,
+  isDesktopHost,
+  isVstHost,
+  openSessionChannel,
+  type SessionChannel,
+} from "./host";
+import { type ParameterTouchReport } from "./parameterTouch";
 import { randomIdToken } from "./ids";
 import { invalidatePluginCatalog } from "./pluginCatalog";
 import { serializeSessionCommand } from "./sessionCommandProtocol";
@@ -25,15 +32,23 @@ import type {
   PerformanceEdit,
   PerformanceSnapshot,
   PerformanceSnapshotMessage,
+  PluginInstance,
   PluginParameterSnapshot,
   PluginStateParameterResult,
   PluginStateParameterSnapshot,
   PluginStateReference,
   MidiLearnCandidate,
   MidiSourceStatus,
+  AudioHealthMessage,
+  AudioHealthSnapshot,
+  AudioInputStatus,
   OutputMeterMessage,
   OutputMeterSnapshot,
   ParameterLink,
+  ControllerMap,
+  MidiActivityEvent,
+  RegisteredController,
+  RfMapFile,
   SessionSnapshot,
   SessionCommand,
 } from "./types";
@@ -50,6 +65,9 @@ const OUTPUT_METER_REFRESH_MS = 50;
 // Ten frames a second reads as a moving clock without competing with audio.
 const SEQUENCER_STATUS_REFRESH_MS = 100;
 const COMMAND_TIMEOUT_MS = 8_000;
+/** Long enough for a phone to load a Slot's plugin for the first time and
+ *  make its state; a save is never waited on for ever. */
+const PERFORMANCE_EDIT_TIMEOUT_MS = 45_000;
 
 let socket: SessionChannel | null = null;
 let sessionConnected = false;
@@ -64,6 +82,24 @@ let sequencerStatusInFlight = false;
 let gatewayGeneration = 0;
 let performanceSnapshotInFlight = false;
 let outputMeterInFlight = false;
+/// When the outstanding poll was sent. A latch that is only cleared by a
+/// matching reply stops the poller for good if that reply never arrives, so
+/// a latch older than this is treated as lost and the poll is reissued. The
+/// requests are idempotent reads, so reissuing one costs nothing.
+let outputMeterSentAt = 0;
+let audioHealthInFlight = false;
+let audioHealthSentAt = 0;
+let sequencerStatusSentAt = 0;
+/// The LIVE library is the one poll whose latch also holds back a queued
+/// Save: a lost reply froze LIVE on the last library and kept the Save
+/// waiting until it timed out. It is a larger read, so it gets longer.
+let performanceSnapshotSentAt = 0;
+const POLL_LATCH_STALE_MS = 2000;
+const PERFORMANCE_LATCH_STALE_MS = 5000;
+
+function latchIsStale(sentAt: number, staleMs = POLL_LATCH_STALE_MS) {
+  return sentAt !== 0 && Date.now() - sentAt > staleMs;
+}
 let intentionallyStopped = false;
 let pendingPerformanceEdit:
   | {
@@ -102,6 +138,24 @@ const pendingSnapshotRefreshes = new Set<{
   timeout: number;
 }>();
 const outputMeterListeners = new Set<(meter: OutputMeterSnapshot) => void>();
+/*
+ * MIDI activity for the Controllers editor: polled beside the output meter,
+ * with a latch of its own, never through the one-at-a-time request queue --
+ * a slow import there must not freeze the lights. `null` means the next ask
+ * only learns where the host's log stands, so messages the host kept from
+ * before anyone watched do not light anything.
+ */
+const midiActivityListeners = new Set<(events: MidiActivityEvent[]) => void>();
+let midiActivityCursor: number | null = null;
+let midiActivityInFlight = false;
+let midiActivitySentAt = 0;
+/** Where the engine's parameter touches stand; null until the first answer,
+ * which only learns it, so an old touch is never shown. */
+let parameterTouchCursor: number | null = null;
+let parameterTouchInFlight = false;
+let parameterTouchSentAt = 0;
+const parameterTouchListeners = new Set<(touch: ParameterTouchReport) => void>();
+const audioHealthListeners = new Set<(health: AudioHealthSnapshot) => void>();
 const sequencerStatusListeners = new Set<(status: SequencerStatus) => void>();
 const connectionOutage = new DeferredConnectionOutage(
   CONNECTION_NOTICE_DELAY_MS,
@@ -205,20 +259,33 @@ function sendPerformanceSnapshotRequest() {
     socket &&
     sessionConnected &&
     coreReady &&
-    !performanceSnapshotInFlight &&
+    !performanceSnapshotLatched() &&
     !pendingPerformanceEdit &&
     !store.getState().rackforge.performancePending
   ) {
     performanceSnapshotInFlight = true;
+    performanceSnapshotSentAt = Date.now();
     socket.send(JSON.stringify({ op: "performance_snapshot" }));
   }
+}
+
+/** Whether a snapshot reply is still expected; a lost one stops counting. */
+function performanceSnapshotLatched() {
+  if (
+    performanceSnapshotInFlight &&
+    latchIsStale(performanceSnapshotSentAt, PERFORMANCE_LATCH_STALE_MS)
+  ) {
+    performanceSnapshotInFlight = false;
+    performanceSnapshotSentAt = 0;
+  }
+  return performanceSnapshotInFlight;
 }
 
 function sendPendingPerformanceEdit() {
   if (
     !socket ||
     !sessionConnected ||
-    performanceSnapshotInFlight ||
+    performanceSnapshotLatched() ||
     !pendingPerformanceEdit?.request
   ) return;
   const request = pendingPerformanceEdit.request;
@@ -245,12 +312,26 @@ export function connectGateway() {
       void invalidatePluginCatalog().catch(() => undefined);
       if (performanceTimer !== null) window.clearInterval(performanceTimer);
       performanceTimer = window.setInterval(
-        sendPerformanceSnapshotRequest,
+        () => {
+          // A Save queued behind a snapshot whose reply was lost goes out
+          // once that latch turns stale, not only when a reply arrives.
+          sendPendingPerformanceEdit();
+          sendPerformanceSnapshotRequest();
+        },
         PERFORMANCE_REFRESH_MS,
       );
       if (outputMeterTimer !== null) window.clearInterval(outputMeterTimer);
+      midiActivityInFlight = false;
+      midiActivityCursor = null;
+      parameterTouchInFlight = false;
+      parameterTouchCursor = null;
       outputMeterTimer = window.setInterval(
-        sendOutputMeterRequest,
+        () => {
+          sendOutputMeterRequest();
+          sendAudioHealthRequest();
+          sendMidiActivityRequest();
+          sendParameterTouchRequest();
+        },
         OUTPUT_METER_REFRESH_MS,
       );
       if (sequencerStatusTimer !== null) window.clearInterval(sequencerStatusTimer);
@@ -291,12 +372,37 @@ export function connectGateway() {
           store.dispatch(hostIdleReceived());
         } else if (message.status === "sequencer_status" && "sequencer" in message) {
           sequencerStatusInFlight = false;
+          sequencerStatusSentAt = 0;
           const status = (message as unknown as { sequencer: SequencerStatus }).sequencer;
           for (const listener of sequencerStatusListeners) listener(status);
+        } else if (message.status === "audio_health" && "health" in message) {
+          audioHealthInFlight = false;
+          audioHealthSentAt = 0;
+          const healthMessage = message as unknown as AudioHealthMessage;
+          for (const listener of audioHealthListeners) listener(healthMessage.health);
         } else if (message.status === "output_meter" && "meter" in message) {
           outputMeterInFlight = false;
+          outputMeterSentAt = 0;
           const meterMessage = message as unknown as OutputMeterMessage;
           for (const listener of outputMeterListeners) listener(meterMessage.meter);
+        } else if (message.status === "midi_activity" && "cursor" in message) {
+          midiActivityInFlight = false;
+          midiActivitySentAt = 0;
+          const baseline = midiActivityCursor === null;
+          midiActivityCursor = Number(message.cursor) || 0;
+          const events = (message.events ?? []) as MidiActivityEvent[];
+          if (!baseline && events.length > 0) {
+            for (const listener of midiActivityListeners) listener(events);
+          }
+        } else if (message.status === "parameter_touched" && "sequence" in message) {
+          parameterTouchInFlight = false;
+          parameterTouchSentAt = 0;
+          const baseline = parameterTouchCursor === null;
+          parameterTouchCursor = Number(message.sequence) || 0;
+          const touch = message.touch as ParameterTouchReport | undefined;
+          if (!baseline && touch) {
+            for (const listener of parameterTouchListeners) listener(touch);
+          }
         } else if (message.status === "core_restarting") {
           coreReady = false;
           store.dispatch(connectionChanged("connecting"));
@@ -321,6 +427,7 @@ export function connectGateway() {
             message as unknown as PerformanceSnapshotMessage;
           if (message.status === "performance_snapshot") {
             performanceSnapshotInFlight = false;
+            performanceSnapshotSentAt = 0;
           }
           store.dispatch(
             performanceReceived({
@@ -343,7 +450,24 @@ export function connectGateway() {
           rejectPendingCommands(new Error(errorMessage.message));
           pendingPerformanceEdit?.reject(new Error(errorMessage.message));
           pendingPerformanceEdit = null;
+          // Every poller's in-flight latch has to clear here, not just the
+          // performance snapshot's. The Desktop answers a request it could
+          // not serve with {"status":"error"}, which matches none of the
+          // per-poller branches above, so a latch left set here never clears
+          // and that poller stops for the rest of the session. The output
+          // meter latching was visible as the OUT bar freezing after a
+          // hiccup and never moving again.
           performanceSnapshotInFlight = false;
+          outputMeterInFlight = false;
+          outputMeterSentAt = 0;
+          audioHealthInFlight = false;
+          audioHealthSentAt = 0;
+          sequencerStatusInFlight = false;
+          sequencerStatusSentAt = 0;
+          midiActivityInFlight = false;
+          midiActivitySentAt = 0;
+          parameterTouchInFlight = false;
+          parameterTouchSentAt = 0;
           if (pendingPresetRequest?.timeout !== undefined) {
             window.clearTimeout(pendingPresetRequest.timeout);
           }
@@ -419,6 +543,24 @@ export function materializePluginState(
     },
     "plugin_state_materialized",
     (message) => message.state as PluginStateReference,
+  );
+}
+
+/**
+ * The banks and programs of a plugin that is not running, for a Rack Slot
+ * that holds it. A host that runs one plugin at a time (Android) answers
+ * this; the others carry every plugin's programs in the session already.
+ */
+export function requestPluginCatalog(
+  pluginId: string,
+): Promise<Required<Pick<PluginInstance, "banks" | "sounds">>> {
+  return requestPresetOperation(
+    { op: "plugin_catalog", plugin_id: pluginId },
+    "plugin_catalog",
+    (message) => ({
+      banks: (message.banks ?? []) as NonNullable<PluginInstance["banks"]>,
+      sounds: (message.sounds ?? []) as PluginInstance["sounds"],
+    }),
   );
 }
 
@@ -655,7 +797,7 @@ export function dispatchPerformanceEdit(
   }
   store.dispatch(performanceEditStarted());
   return new Promise((resolve, reject) => {
-    pendingPerformanceEdit = {
+    const pending = {
       resolve,
       reject,
       request: {
@@ -663,6 +805,16 @@ export function dispatchPerformanceEdit(
         edit,
       },
     };
+    pendingPerformanceEdit = pending;
+    // A host that never answers must not leave Save spinning for ever. An
+    // answer that comes after this still updates the library it describes.
+    window.setTimeout(() => {
+      if (pendingPerformanceEdit !== pending) return;
+      pendingPerformanceEdit = null;
+      const message = "RackForge did not confirm the save in time. Check the library and try again.";
+      store.dispatch(errorReceived(message));
+      reject(new Error(message));
+    }, PERFORMANCE_EDIT_TIMEOUT_MS);
     sendPendingPerformanceEdit();
   });
 }
@@ -686,11 +838,107 @@ function commandPayload(id: number, command: SessionCommand) {
   return serializeSessionCommand(CLIENT_ID, id, command);
 }
 
+function sendAudioHealthRequest() {
+  // Only the desktop measures its audio driver. The browser host and the Pi
+  // answer audio_health as unavailable, and Android not at all. Session
+  // errors carry no request id, so that answer rejected whatever command
+  // was waiting beside it -- switching instrument in the browser failed with
+  // "does not implement this request" though the switch had worked -- and on
+  // the Pi it was shown above PLAY on every poll.
+  if (
+    isDesktopHost()
+    && socket
+    && sessionConnected
+    && coreReady
+    && (!audioHealthInFlight || latchIsStale(audioHealthSentAt))
+    && audioHealthListeners.size > 0
+  ) {
+    audioHealthInFlight = true;
+    audioHealthSentAt = Date.now();
+    socket.send(JSON.stringify({ op: "audio_health" }));
+  }
+}
+
 function sendOutputMeterRequest() {
-  if (!isVstHost() && socket && sessionConnected && coreReady && !outputMeterInFlight) {
+  if (
+    !isVstHost()
+    && socket
+    && sessionConnected
+    && coreReady
+    && (!outputMeterInFlight || latchIsStale(outputMeterSentAt))
+  ) {
     outputMeterInFlight = true;
+    outputMeterSentAt = Date.now();
     socket.send(JSON.stringify({ op: "output_meter" }));
   }
+}
+
+function sendMidiActivityRequest() {
+  if (
+    !isVstHost()
+    && socket
+    && sessionConnected
+    && coreReady
+    && midiActivityListeners.size > 0
+    && (!midiActivityInFlight || latchIsStale(midiActivitySentAt))
+  ) {
+    midiActivityInFlight = true;
+    midiActivitySentAt = Date.now();
+    socket.send(JSON.stringify({
+      op: "midi_activity",
+      // The first ask only finds where the log stands.
+      after: midiActivityCursor ?? Number.MAX_SAFE_INTEGER,
+    }));
+  }
+}
+
+/**
+ * Every channel message the host receives from now on, in batches as they
+ * are polled. Watching starts afresh: what the host kept from before is not
+ * delivered.
+ */
+export function subscribeMidiActivity(listener: (events: MidiActivityEvent[]) => void) {
+  if (midiActivityListeners.size === 0) midiActivityCursor = null;
+  midiActivityListeners.add(listener);
+  return () => {
+    midiActivityListeners.delete(listener);
+  };
+}
+
+function sendParameterTouchRequest() {
+  if (
+    !isVstHost()
+    && !IS_BROWSER_HOST
+    && socket
+    && sessionConnected
+    && coreReady
+    && parameterTouchListeners.size > 0
+    && (!parameterTouchInFlight || latchIsStale(parameterTouchSentAt))
+  ) {
+    parameterTouchInFlight = true;
+    parameterTouchSentAt = Date.now();
+    // Zero only learns where the touches stand. Once that is known it is
+    // asked from at least 1: an engine that has not been touched yet stands
+    // at 0, and asking from 0 again would only learn again, and miss the
+    // first touch.
+    socket.send(JSON.stringify({
+      op: "parameter_touch",
+      after: parameterTouchCursor === null ? 0 : Math.max(parameterTouchCursor, 1),
+    }));
+  }
+}
+
+/**
+ * What a control -- a knob, a fader, a pad -- does to a plugin parameter
+ * from now on: the parameter and its value, as LITTLE's header names them.
+ * The browser demo and the VST host have no controller links to report.
+ */
+export function subscribeParameterTouches(listener: (touch: ParameterTouchReport) => void) {
+  if (parameterTouchListeners.size === 0) parameterTouchCursor = null;
+  parameterTouchListeners.add(listener);
+  return () => {
+    parameterTouchListeners.delete(listener);
+  };
 }
 
 function sendSequencerStatusRequest() {
@@ -699,10 +947,11 @@ function sendSequencerStatusRequest() {
     && socket
     && sessionConnected
     && coreReady
-    && !sequencerStatusInFlight
+    && (!sequencerStatusInFlight || latchIsStale(sequencerStatusSentAt))
     && sequencerStatusListeners.size > 0
   ) {
     sequencerStatusInFlight = true;
+    sequencerStatusSentAt = Date.now();
     socket.send(JSON.stringify({ op: "sequencer_status" }));
   }
 }
@@ -719,6 +968,13 @@ export function subscribeSequencerStatus(listener: (status: SequencerStatus) => 
   sequencerStatusListeners.add(listener);
   return () => {
     sequencerStatusListeners.delete(listener);
+  };
+}
+
+export function subscribeAudioHealth(listener: (health: AudioHealthSnapshot) => void) {
+  audioHealthListeners.add(listener);
+  return () => {
+    audioHealthListeners.delete(listener);
   };
 }
 
@@ -814,6 +1070,49 @@ export function importLiveShow(
   );
 }
 
+export interface OutputCapture {
+  /** Where the host saved it, on the host's own disk. */
+  path: string;
+  seconds: number;
+  midi_messages: number;
+}
+
+/** Saves the host's flight recorder -- the last seconds of what went to the
+    audio device and the MIDI that played them -- for a click heard once. */
+export function saveOutputCapture(): Promise<OutputCapture> {
+  return requestPresetOperation(
+    { op: "save_output_capture" },
+    "output_capture_saved",
+    (message) => ({
+      path: String(message.path ?? ""),
+      seconds: Number(message.seconds ?? 0),
+      midi_messages: Number(message.midi_messages ?? 0),
+    }),
+  );
+}
+
+/** Asks the host to show the audio driver's settings window. Resolves as
+    soon as the host has accepted: the window may be modal, and what is
+    changed in it comes back as the driver reopening, not as this reply. */
+export function openAudioDriverPanel(): Promise<void> {
+  return requestPresetOperation(
+    { op: "open_audio_driver_panel" },
+    "audio_driver_panel_opening",
+    () => undefined,
+  );
+}
+
+/** What the host captures, and the peaks of those inputs since the last
+ *  request. A host that predates the question answers with an error, which
+ *  is the caller's to treat as "unknown". */
+export function requestAudioInput(): Promise<AudioInputStatus> {
+  return requestPresetOperation(
+    { op: "audio_input" },
+    "audio_input",
+    (message) => message.input as AudioInputStatus,
+  );
+}
+
 export function requestMidiSources(): Promise<MidiSourceStatus[]> {
   return requestPresetOperation(
     { op: "midi_sources" },
@@ -848,6 +1147,90 @@ export function cancelMidiLearn(learnId: number): Promise<void> {
   );
 }
 
+export function requestControllerMaps(): Promise<{
+  controllers: RegisteredController[];
+  maps: ControllerMap[];
+  takeover: ControlTakeover;
+  /** Controllers whose map is still RackForge's factory map, as offered. */
+  factoryUntouched: string[];
+  /** Controllers whose Fn layer is open now, held or latched. */
+  fnOpen: string[];
+}> {
+  return requestPresetOperation(
+    { op: "controller_maps" },
+    "controller_maps",
+    (message) => ({
+      controllers: (message.controllers ?? []) as RegisteredController[],
+      maps: (message.maps ?? []) as ControllerMap[],
+      takeover: controlTakeover(message.takeover),
+      factoryUntouched: (message.factory_untouched ?? []) as string[],
+      fnOpen: (message.fn_open ?? []) as string[],
+    }),
+  );
+}
+
+/** How a knob or fader takes over a parameter standing elsewhere:
+ * nothing moves until it gets there, it jumps, or it scales its way there. */
+export type ControlTakeover = "pickup" | "jump" | "scale";
+
+function controlTakeover(value: unknown): ControlTakeover {
+  return value === "jump" || value === "scale" ? value : "pickup";
+}
+
+/** Sets how every knob and fader takes a parameter over; the host applies it at once. */
+export function setControllerTakeover(takeover: ControlTakeover): Promise<ControlTakeover> {
+  return requestPresetOperation(
+    { op: "set_controller_takeover", takeover },
+    "controller_takeover_set",
+    (message) => controlTakeover(message.takeover),
+  );
+}
+
+/** Replaces one controller's whole map; the host applies it at once. */
+export function saveControllerMap(map: ControllerMap): Promise<ControllerMap> {
+  return requestPresetOperation(
+    { op: "save_controller_map", map },
+    "controller_map_saved",
+    (message) => message.map as ControllerMap,
+  );
+}
+
+/** Makes, or saves again, a controller package from the controls a player named. */
+export function saveUserController(controller: {
+  controller_id?: string;
+  name: string;
+  vendor?: string;
+  endpoint_name: string;
+  inputs: unknown[];
+}): Promise<{ controller_id: string; version: string }> {
+  return requestPresetOperation(
+    { op: "save_user_controller", controller },
+    "user_controller_saved",
+    (message) => ({ controller_id: String(message.controller_id), version: String(message.version) }),
+  );
+}
+
+export function exportControllerMap(
+  controllerId: string,
+): Promise<{ file_name: string; file: RfMapFile }> {
+  return requestPresetOperation(
+    { op: "export_controller_map", controller_id: controllerId },
+    "controller_map_exported",
+    (message) => ({
+      file_name: String(message.file_name),
+      file: message.file as RfMapFile,
+    }),
+  );
+}
+
+export function importControllerMap(file: RfMapFile): Promise<ControllerMap> {
+  return requestPresetOperation(
+    { op: "import_controller_map", file },
+    "controller_map_imported",
+    (message) => message.map as ControllerMap,
+  );
+}
+
 export async function upsertParameterLink(link: ParameterLink): Promise<void> {
   await dispatchCommandAwait({ type: "upsert_parameter_link", link });
 }
@@ -858,6 +1241,7 @@ export async function removeParameterLink(linkId: string): Promise<void> {
 
 export function dispatchCommandAwait(
   command: SessionCommand,
+  options: { timeoutMs?: number } = {},
 ): Promise<CoreCommandAppliedMessage> {
   if (!socket || !sessionConnected) {
     return Promise.reject(new Error("RackForge Core is not connected."));
@@ -868,7 +1252,7 @@ export function dispatchCommandAwait(
     const timeout = window.setTimeout(() => {
       pendingCommands.delete(id);
       reject(new Error("RackForge Core did not confirm the command in time."));
-    }, COMMAND_TIMEOUT_MS);
+    }, options.timeoutMs ?? COMMAND_TIMEOUT_MS);
     pendingCommands.set(id, { resolve, reject, timeout });
     try {
       socket!.send(commandPayload(id, command));

@@ -261,7 +261,7 @@ impl PerformanceRepository {
     }
 
     pub fn initial_live_state(&self) -> LivePerformanceState {
-        let Some(rack) = self.library.racks.iter().find(|rack| rack.enabled) else {
+        let Some(rack) = self.library.racks.first() else {
             return LivePerformanceState::default();
         };
         let location = LiveLocation::Rack {

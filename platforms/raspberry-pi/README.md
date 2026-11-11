@@ -23,12 +23,6 @@ The default deployment root is `$HOME/rackforge`, and the active release lives
 in its `current` directory. The installer resolves the actual user and home
 directory and never depends on a hardcoded username.
 
-## Build
-
-From Windows or another development machine, use the repository CI or the
-platform scripts. The release pipeline publishes
-`RackForge-RaspberryPi-arm64.tar.gz`.
-
 ## Install
 
 The public release can be installed or updated in one command. Run it as the
@@ -40,11 +34,14 @@ bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/kalexis1994/ra
 
 The release installer checks the ARM64 architecture, verifies the archive
 against the published SHA-256 digest, and restores the previous runtime if an
-update fails. It installs RF-Soundfonts with the YDP Grand Piano when the
-plugin store is empty, then installs and enables the systemd services.
+update fails. It installs the Standard bundle and enables the systemd services.
+Open the printed Web address on a device on the same network and activate an
+instrument to start audio. The output profile is stored in
+`$RACKFORGE_ROOT/config/audio.toml`.
 
-For a manual installation, download and verify
-`RackForge-RaspberryPi-arm64.tar.gz` from the GitHub release, then run:
+For a manual installation, download the archive and verify its SHA-256
+against the release checksums.
+[`RackForge-RaspberryPi-arm64.tar.gz`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-RaspberryPi-arm64.tar.gz) · [SHA256SUMS.txt](https://github.com/kalexis1994/rackforge/releases/latest/download/SHA256SUMS.txt)
 
 ```bash
 mkdir -p "$HOME/rackforge/current"
@@ -64,7 +61,8 @@ prints a clear error and exits before opening MIDI, plugins, or ALSA. The
 kernel releases this lock automatically when the owning process exits or
 crashes; the persistent lock file is not a stale PID-file gate.
 
-Concert Grand and every officially pinned instrument — today RF-106, RF-5,
-RF-7, RF-Organ, RF-Tines and RF-Musette — are included in a Standard build. RF-Soundfonts
-and other plugins are installed separately as `.rfplugin` packages.
-Proprietary banks and ROMs are never bundled with RackForge.
+The release notes list every instrument and effect in the Standard bundle.
+Install additional `.rfplugin` packages through **Plugin Manager**.
+[Latest release](https://github.com/kalexis1994/rackforge/releases/latest)
+
+[Build for Raspberry Pi](../../docs/RUNTIME.md#building-from-source)

@@ -20,6 +20,45 @@ pipelines.
 Plugin development and packaging are described in
 [`PLUGIN_DEVELOPMENT.md`](PLUGIN_DEVELOPMENT.md).
 
+## Building from source
+
+Run the build scripts from the repository root.
+
+| Target | Build command | Default output directory |
+| --- | --- | --- |
+| Windows x86-64 | `powershell -ExecutionPolicy Bypass -File tools/build-windows-desktop.ps1` | `dist/windows-x86_64` |
+| Android from Windows | `powershell -ExecutionPolicy Bypass -File tools/build-android.ps1` | `dist/android` |
+| Android from Linux | `bash tools/build-android.sh` | `dist/android` |
+| Linux x86-64 | `bash tools/build-linux-x86_64.sh` | `dist/linux-x86_64` |
+| Linux Flatpak | `bash tools/build-linux-flatpak.sh` | `dist/linux-flatpak` |
+| Raspberry Pi ARM64 | `bash tools/build-raspberry-pi.sh` | `dist/raspberry-pi` |
+
+The Windows Desktop build uses the MSVC Rust target and Visual Studio Build
+Tools. It writes `rackforge.exe` for both the default Release configuration
+and `-Configuration Debug`. The Android scripts write
+`dist/android/RackForge-debug.apk` with the default output directory.
+
+The Flatpak script builds the shared Web interface and compiles Desktop with
+the GNOME 49 SDK. It needs Flatpak with `org.flatpak.Builder`, Cargo, pnpm,
+Python and Git. [Flatpak manifest](../platforms/linux-flatpak/io.github.kalexis1994.RackForge.yml)
+
+GitHub Actions checks the shared contracts and builds the supported artifacts.
+[Build workflow](../.github/workflows/build-main.yml) · [Release contents](RELEASE_EDITIONS.md)
+
+## Checking documentation
+
+CI checks substantial prose in RackForge's tracked Markdown for English.
+The check ignores code, short labels and vendor documentation. Keep an
+original quotation with its translation in the same blockquote. Start the
+translation line with `> English translation:`.
+
+To run the check locally, use a Python environment with the detector installed.
+
+```text
+python -m pip install langdetect==1.0.9 six==1.17.0
+python tools/check-doc-language.py
+```
+
 ## Contract principles
 
 - No Rust `String`, `Vec`, trait object, or allocator crosses the native ABI.

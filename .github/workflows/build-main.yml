@@ -82,9 +82,15 @@ jobs:
         shell: bash
         run: pnpm --dir web test
 
-      - name: Test Android qualification harness
+      - name: Check documentation and test repository tools
         shell: bash
-        run: python3 -m unittest discover -s tools/tests -p 'test_*.py'
+        env:
+          DOC_CHECK_ENV: ${{ runner.temp }}/rackforge-doc-check
+        run: |
+          python3 -m venv "$DOC_CHECK_ENV"
+          "$DOC_CHECK_ENV/bin/python" -m pip install langdetect==1.0.9 six==1.17.0
+          "$DOC_CHECK_ENV/bin/python" tools/check-doc-language.py
+          "$DOC_CHECK_ENV/bin/python" -m unittest discover -s tools/tests -p 'test_*.py'
 
       - name: Lint Web workspace
         shell: bash

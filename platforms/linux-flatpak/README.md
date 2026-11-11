@@ -9,12 +9,12 @@ machine given over to RackForge (systemd services, ALSA held exclusively).
 
 ## Installing
 
-Distributions without Flatpak install it once (Debian, Ubuntu:
-`sudo apt install flatpak`) and add Flathub, which provides the GNOME
-runtime the app runs on:
+Download the Flatpak bundle. Install Flatpak if your distribution does not
+already provide it, then add Flathub for the GNOME runtime.
+[`RackForge-Linux-x86_64.flatpak`](https://github.com/kalexis1994/rackforge/releases/latest/download/RackForge-Linux-x86_64.flatpak)
 
 ```bash
-flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 ```
 
 Then the bundle installs for the current user:
@@ -38,13 +38,4 @@ io.github.kalexis1994.RackForge` starts it too. Its data lives in
 - **File dialogs** go through the desktop portal; message boxes are GTK's.
 - **Data** follows the XDG directories, with no first-start choice of folder.
 
-## Building
-
-`tools/build-linux-flatpak.sh` builds the Web interface and fetches the
-officially pinned plugins, then has `flatpak-builder` compile the app in the
-GNOME 49 SDK (`io.github.kalexis1994.RackForge.yml`) and writes
-`dist/linux-flatpak/RackForge-Linux-x86_64.flatpak`. It needs `flatpak` with
-`org.flatpak.Builder`, `cargo`, `pnpm`, `python3` and `git`.
-
-Cargo fetches crates during the build (`--share=network`). A Flathub
-submission needs them vendored, which is still to do.
+[Build the Flatpak from source](../../docs/RUNTIME.md#building-from-source)

@@ -1558,8 +1558,9 @@ fn extract_archive_cancellable(
                 "symbolic links are forbidden in plugin packages".into(),
             ));
         }
+        let entry_size = entry.size();
         expanded = expanded
-            .checked_add(entry.size())
+            .checked_add(entry_size)
             .ok_or_else(|| RepositoryError::UnsafeArchive("expanded size overflow".into()))?;
         if expanded > MAX_EXPANDED_PACKAGE_BYTES {
             return Err(RepositoryError::UnsafeArchive(
@@ -1579,14 +1580,28 @@ fn extract_archive_cancellable(
             .create_new(true)
             .write(true)
             .open(&target)?;
+        // The browser's WASI filesystem otherwise reallocates and copies the
+        // entire file on every write that extends it.
+        #[cfg(target_os = "wasi")]
+        output.set_len(entry_size)?;
+
         let mut buffer = [0_u8; 64 * 1024];
+        let mut remaining = entry_size;
         loop {
             ensure_installation_not_cancelled(cancelled)?;
             let read = entry.read(&mut buffer)?;
             if read == 0 {
                 break;
             }
+            remaining = remaining.checked_sub(read as u64).ok_or_else(|| {
+                RepositoryError::UnsafeArchive("entry exceeds its declared size".into())
+            })?;
             output.write_all(&buffer[..read])?;
+        }
+        if remaining != 0 {
+            return Err(RepositoryError::UnsafeArchive(
+                "entry is smaller than its declared size".into(),
+            ));
         }
         output.sync_all()?;
     }

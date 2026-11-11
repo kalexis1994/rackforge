@@ -6910,17 +6910,10 @@ mod tests {
         );
     }
 
-    // Program drafts, pinned.
-    //
-    // The six draft commands are about five hundred lines of this file and had
-    // no behavioural coverage: the sixteen tests above never open one, and the
-    // only draft test anywhere else checks that the commands serialise. They
-    // are about to be lifted out so one state machine can serve the VST3 too,
-    // and a move is only checkable against a record of what the thing did.
-    //
-    // These are characterisation tests. They assert what the code does today,
-    // refusals included, and each says why its refusal matters rather than
-    // only that it happens.
+    // Exercise program draft commands and audition state through the control
+    // dispatcher. Bound the mock audio waits so a missing command fails the
+    // test even when the dispatcher reports success.
+    const DRAFT_TEST_AUDIO_TIMEOUT: Duration = Duration::from_secs(5);
 
     fn draft_document(name: &str) -> ProgramDocument {
         ProgramDocument {
@@ -7015,14 +7008,16 @@ mod tests {
 
     /// Answers one `BeginProgramEdit` on the audio channel and returns.
     fn answer_one_begin(receiver: Receiver<AudioControlCommand>) -> thread::JoinHandle<()> {
-        thread::spawn(move || match receiver.recv().unwrap() {
-            AudioControlCommand::BeginProgramEdit { reply, .. } => {
-                reply
-                    .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
-                    .unwrap();
-            }
-            _ => panic!("expected a program edit to reach audio"),
-        })
+        thread::spawn(
+            move || match receiver.recv_timeout(DRAFT_TEST_AUDIO_TIMEOUT).unwrap() {
+                AudioControlCommand::BeginProgramEdit { reply, .. } => {
+                    reply
+                        .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
+                        .unwrap();
+                }
+                _ => panic!("expected a program edit to reach audio"),
+            },
+        )
     }
 
     /// Editing begins only after the instrument prepares the program, and what
@@ -7030,26 +7025,29 @@ mod tests {
     #[test]
     fn beginning_a_program_edit_records_what_the_instrument_prepared() {
         let (context, receiver) = context();
-        let worker = thread::spawn(move || match receiver.recv().unwrap() {
-            AudioControlCommand::BeginProgramEdit {
-                instance_id,
-                request,
-                previous_sound_id,
-                reply,
-            } => {
-                assert_eq!(instance_id.as_str(), DEFAULT_LIVE_INSTANCE_ID);
-                assert_eq!(request.program_id.as_deref(), Some("piano"));
-                assert_eq!(
-                    previous_sound_id.as_deref(),
-                    Some("piano"),
-                    "the sound to come back to is remembered before the audition"
-                );
-                reply
-                    .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
-                    .unwrap();
-            }
-            _ => panic!("expected a program edit to reach audio"),
-        });
+        let worker =
+            thread::spawn(
+                move || match receiver.recv_timeout(DRAFT_TEST_AUDIO_TIMEOUT).unwrap() {
+                    AudioControlCommand::BeginProgramEdit {
+                        instance_id,
+                        request,
+                        previous_sound_id,
+                        reply,
+                    } => {
+                        assert_eq!(instance_id.as_str(), DEFAULT_LIVE_INSTANCE_ID);
+                        assert_eq!(request.program_id.as_deref(), Some("piano"));
+                        assert_eq!(
+                            previous_sound_id.as_deref(),
+                            Some("piano"),
+                            "the sound to come back to is remembered before the audition"
+                        );
+                        reply
+                            .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
+                            .unwrap();
+                    }
+                    _ => panic!("expected a program edit to reach audio"),
+                },
+            );
 
         let response = begin_edit(&context, 1);
         worker.join().unwrap();
@@ -7177,10 +7175,13 @@ mod tests {
         );
 
         match response {
-            ControlResponse::Error { message, .. } => assert!(
-                message.contains("storage"),
-                "the refusal is about storage, before anything is installed: {message}"
-            ),
+            ControlResponse::Error { code, message, .. } => {
+                assert_eq!(code, ControlErrorCode::Unavailable);
+                assert!(
+                    message.contains("storage"),
+                    "the refusal is about storage, before anything is installed: {message}"
+                );
+            }
             other => panic!("a save with nowhere to write must be refused: {other:?}"),
         }
         assert!(
@@ -7205,7 +7206,7 @@ mod tests {
     fn cancelling_a_program_edit_releases_the_audition_and_the_draft() {
         let (context, receiver) = context();
         let worker = thread::spawn(move || {
-            match receiver.recv().unwrap() {
+            match receiver.recv_timeout(DRAFT_TEST_AUDIO_TIMEOUT).unwrap() {
                 AudioControlCommand::BeginProgramEdit { reply, .. } => {
                     reply
                         .send(Ok((7, prepared_draft("Edited"), smallest_editor())))
@@ -7213,8 +7214,9 @@ mod tests {
                 }
                 _ => panic!("expected a program edit"),
             }
-            match receiver.recv().unwrap() {
-                AudioControlCommand::EndAudition { reply, .. } => {
+            match receiver.recv_timeout(DRAFT_TEST_AUDIO_TIMEOUT).unwrap() {
+                AudioControlCommand::EndAudition { lease_id, reply } => {
+                    assert_eq!(lease_id, 7);
                     reply.send(Ok(())).unwrap();
                 }
                 _ => panic!("expected the audition to end"),

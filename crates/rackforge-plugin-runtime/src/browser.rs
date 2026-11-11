@@ -30,6 +30,8 @@ use crate::{
     RuntimeLimits,
 };
 use anyhow::{Context, Result, bail};
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -657,13 +659,30 @@ impl PortableInstance {
         self._module.0
     }
 
-    /// Rejected in the browser: the page has no filesystem to read from, so
-    /// resources arrive through [`PortableInstance::load_resource`].
-    pub fn load_resource_file(&mut self, _id: &str, path: impl AsRef<Path>) -> Result<()> {
-        bail!(
-            "the browser host cannot read portable resource {} from a filesystem",
-            path.as_ref().display()
-        )
+    /// Reads a resource from the host's WASI filesystem and delivers it over
+    /// the same bounded transfer buffer used for resources already in memory.
+    pub fn load_resource_file(&mut self, id: &str, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        let mut file = File::open(path)
+            .with_context(|| format!("opening portable resource {}", path.display()))?;
+        let total_bytes = file
+            .metadata()
+            .with_context(|| format!("reading portable resource metadata {}", path.display()))?
+            .len();
+        self.begin_resource(id, total_bytes)?;
+        let mut chunk = vec![0_u8; self.capacity_transfer_bytes.min(64 * 1024)];
+        let mut offset = 0_u64;
+        loop {
+            let read = file
+                .read(&mut chunk)
+                .with_context(|| format!("reading portable resource {}", path.display()))?;
+            if read == 0 {
+                break;
+            }
+            self.write_resource(offset, &chunk[..read])?;
+            offset += read as u64;
+        }
+        self.end_resource()
     }
 
     pub fn prepare(

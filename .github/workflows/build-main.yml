@@ -221,6 +221,24 @@ jobs:
           pnpm --dir web install --frozen-lockfile
           pnpm --dir web build
 
+      - name: Prepare the ASIO SDK
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'rackforge-asio-sdk.zip'
+          $destination = Join-Path $env:RUNNER_TEMP 'rackforge-asio-sdk'
+          $url = 'https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip'
+          $expected = 'D5EBF0C20DD2C5F43771FD0C1418F4B361BF52434EE670097CFA6B3A335E2ECA'
+          Invoke-WebRequest -Uri $url -OutFile $archive -MaximumRetryCount 3
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expected) {
+            throw 'The ASIO SDK archive does not match the pinned SHA-256.'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          $sdk = Join-Path $destination 'ASIOSDK'
+          if (-not (Test-Path -LiteralPath (Join-Path $sdk 'host/pc/asiolist.cpp'))) {
+            throw 'The ASIO SDK archive does not contain the expected host sources.'
+          }
+          "CPAL_ASIO_DIR=$sdk" >> $env:GITHUB_ENV
+
       - name: Lint Windows Rust applications
         shell: pwsh
         run: cargo clippy --locked -p rackforge-desktop -p rackforge-vst3 --all-targets --all-features -- -D warnings

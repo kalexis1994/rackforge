@@ -649,6 +649,28 @@ for (const capability of declared.capabilities ?? []) {
   check(`${capability.id} does what it claims`, failure === null, failure ?? undefined);
 }
 
+const rfD = sessionInstances.find((instance) => instance.plugin_id === "org.rackforge.lab.rf-d-voice");
+check("the bundle loads RF-D", Boolean(rfD));
+if (rfD) {
+  const selected = dispatch({ type: "select_plugin", instance_id: rfD.instance_id });
+  check("it selects RF-D", selected.status === "command_applied", selected.message);
+  const note = request({
+    op: "virtual_midi",
+    client_id: "check.browser-host",
+    message: { status: 0x90, data1: 60, data2: 100 },
+  });
+  let rfDPeak = 0;
+  for (let block = 0; block < 20; block += 1) {
+    rfDPeak = Math.max(rfDPeak, peak(128));
+  }
+  check(
+    "RF-D sounds with its external input silent",
+    selected.status === "command_applied" && note.status === "virtual_midi_accepted" && rfDPeak > 0.001,
+    `peak ${rfDPeak}`,
+  );
+  request({ op: "release_virtual_midi", client_id: "check.browser-host" });
+}
+
 trail("every probe returned");
 
 process.exit(failures.length === 0 ? 0 : 1);

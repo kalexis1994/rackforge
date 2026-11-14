@@ -107,6 +107,7 @@ struct HostedPlugin {
     /// hold pointers into the loaded plugin for its whole lifetime.
     runtime: &'static LoadedPlugin,
     instance: PluginInstance<'static>,
+    input_channels: u32,
     presets: PresetCatalog,
     selected_sound_id: Option<String>,
     /// True when the package was installed into the page's plugin store, as
@@ -2977,15 +2978,21 @@ impl BrowserHost {
         }
         self.sequencer_events = sequenced;
         let active = self.store.state().active_instance_id.clone();
-        let request = RenderRequest { frames };
         let Some(index) = active.and_then(|id| {
             self.plugins
                 .iter()
                 .position(|plugin| plugin.instance_id == id)
         }) else {
-            return self.audio.render_silence(request);
+            return self.audio.render_silence(RenderRequest {
+                frames,
+                input_channels: 0,
+            });
         };
         let plugin = &mut self.plugins[index];
+        let request = RenderRequest {
+            frames,
+            input_channels: plugin.input_channels,
+        };
         // The instrument, then the effects that are on, in order.
         let trim = if self.store.state().active_mode == SurfaceMode::Play {
             rackforge_core::play_output::PlayOutputTrim::for_instrument(&plugin.plugin_id)
@@ -3419,14 +3426,11 @@ fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<Ho
             .load_preset(id)
             .with_context(|| format!("loading initial program {id:?}"))?;
     }
-    // With the channels the package declares, not none: an instrument takes
-    // no audio in, an effect takes a stereo pair, and activating one with
-    // nothing to read failed the load and left it out of the catalog.
-    let audio = loaded.manifest().resolved_audio_contract();
+    let input_channels = loaded.manifest().resolved_audio_contract().input_channels();
     instance.activate(
         stream.sample_rate_hz,
         stream.maximum_frames,
-        audio.input_channels(),
+        input_channels,
         stream.channels,
     )?;
 
@@ -3435,6 +3439,7 @@ fn load_plugin(root: &Path, data_root: &Path, stream: StreamFormat) -> Result<Ho
         plugin_id: package.manifest().id.clone(),
         runtime: loaded,
         instance,
+        input_channels,
         presets,
         selected_sound_id,
         managed,

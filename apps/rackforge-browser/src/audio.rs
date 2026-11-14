@@ -9,6 +9,7 @@
 use rackforge_audio_api::{OutputMeter, OutputMeterSnapshot};
 use rackforge_core::PluginInstance;
 use rackforge_core::play_output::PlayOutputTrim;
+use rackforge_plugin_api::MAX_PLUGIN_AUDIO_CHANNELS;
 use rackforge_plugin_api::abi::{MidiEventV1, ParameterEventV1};
 use rackforge_session_api::{MasterLevel, MasterPan};
 
@@ -23,6 +24,7 @@ const PARAMETER_QUEUE_CAPACITY: usize = 512;
 #[derive(Clone, Copy)]
 pub struct RenderRequest {
     pub frames: u32,
+    pub input_channels: u32,
 }
 
 /// One smoothed control value, ramped per frame towards its target.
@@ -64,7 +66,7 @@ impl Smoothed {
 pub struct AudioEngine {
     maximum_frames: u32,
     channels: u32,
-    /// Silence handed to instruments, which take no audio input.
+    /// Silence for instrument input buses in the output-only browser host.
     input: Vec<f32>,
     output: Vec<f32>,
     /// What the stage before an effect wrote, so each one reads a whole
@@ -91,7 +93,7 @@ impl AudioEngine {
         Self {
             maximum_frames,
             channels,
-            input: Vec::new(),
+            input: vec![0.0; maximum_frames as usize * usize::from(MAX_PLUGIN_AUDIO_CHANNELS)],
             output: vec![0.0; samples],
             chain_scratch: vec![0.0; samples],
             midi: Vec::with_capacity(MIDI_QUEUE_CAPACITY),
@@ -175,11 +177,12 @@ impl AudioEngine {
         self.parameters.sort_by_key(|event| event.frame);
         self.parameters.retain(|event| event.frame < frames);
 
+        let input_samples = frames as usize * request.input_channels as usize;
         let rendered = instance.process_interleaved(
-            &self.input,
+            &self.input[..input_samples],
             &mut self.output[..samples],
             frames,
-            0,
+            request.input_channels,
             self.channels,
             &self.midi,
             &self.parameters,

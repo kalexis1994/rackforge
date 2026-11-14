@@ -238,6 +238,33 @@ OFFICIAL_PLUGINS = (
         ),
     },
     {
+        "filename": "RF-D.rfplugin",
+        "plugin_id": "org.rackforge.lab.rf-d-voice",
+        "version": "0.8.7",
+        "url": (
+            "https://github.com/kalexis1994/rackforge-plugin-rf-d/"
+            "releases/download/v0.8.7/RF-D.rfplugin"
+        ),
+        "sha256": "4a50cac37b1df517df8a6fe6c8aba174e2f51290a5f821a8cda9513884d591a0",
+        "required": (
+            "rackforge-plugin.toml",
+            "component.wasm",
+            "metadata/control-layout.json",
+            "metadata/runtime.json",
+            "metadata/parameters.json",
+            "metadata/presets.json",
+            "branding/icon.png",
+            "branding/banner.png",
+            "branding/splash.png",
+            "web/play.html",
+            "web/config.html",
+            "web/panel.js",
+            "web/programs.js",
+            "web/panel.css",
+            "web/voice.css",
+        ),
+    },
+    {
         "filename": "RF-Soundfonts.rfplugin",
         "plugin_id": "org.rackforge.rf-soundfonts",
         "version": "0.7.0",

@@ -112,6 +112,8 @@ Standard builds include:
   and RackForge parameter mapping.
 - **RF-5**, a five-voice programmable polyphonic synthesizer.
 - **RF-7**, a six-operator FM instrument with a voice editor and cartridge reader.
+- **RF-D**, a virtual-analog synthesizer inspired by the Minimoog Model D,
+  with three oscillators, mono and poly modes, and 40 factory programs.
 - **RF-Organ**, a physically modelled tonewheel organ: two drawbar manuals and
   a pedal clavier played from one MIDI bus, percussion, scanner vibrato and an
   integrated rotary speaker.
@@ -141,6 +143,7 @@ Instrument repositories and guides:
 - [RF-106 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-106)
 - [RF-5 source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-5)
 - [RF-7 source and releases](https://github.com/kalexis1994/RF-7)
+- [RF-D source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-d)
 - [RF-Organ source and releases](https://github.com/kalexis1994/RF-Organ)
 - [RF-Tines source and releases](https://github.com/kalexis1994/RF-Tines)
 - [RF-EPiano source and releases](https://github.com/kalexis1994/rackforge-plugin-rf-epiano)

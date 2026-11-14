@@ -1,9 +1,9 @@
 # Third-Party Notices
 
 RackForge Standard builds include the officially pinned plugins as separately
-packaged portable instruments and effects. Each `.rfplugin` archive retains its
-own license and notice files, and each plugin remains a software component
-separate from RackForge. The pinned versions are listed in
+packaged portable instruments and effects. Each `.rfplugin` archive retains any
+license and notice files provided by its publisher. Each plugin remains a
+software component separate from RackForge. The pinned versions are listed in
 `tools/fetch-official-plugins.py`, which is the one place they are recorded.
 
 ## Officially pinned plugins
@@ -14,6 +14,7 @@ separate from RackForge. The pinned versions are listed in
 | `RF-106.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-106> | GPL-3.0-only |
 | `RF-5.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-5> | GPL-3.0-only |
 | `RF-7.rfplugin` | <https://github.com/kalexis1994/RF-7> | GPL-3.0-only |
+| `RF-D.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-d> | No license declared upstream |
 | `RF-Organ.rfplugin` | <https://github.com/kalexis1994/RF-Organ> | GPL-2.0-or-later |
 | `RF-Tines.rfplugin` | <https://github.com/kalexis1994/RF-Tines> | Proprietary, all rights reserved |
 | `RF-EPiano.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-epiano> | GPL-3.0-or-later |
@@ -23,9 +24,8 @@ separate from RackForge. The pinned versions are listed in
 | `RF-EQ.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-eq> | GPL-3.0-only |
 | `RF-Comp.rfplugin` | <https://github.com/kalexis1994/rackforge-plugin-rf-comp> | GPL-3.0-only |
 
-The complete license and notices of each plugin are distributed inside its own
-package. RF-Tines is redistributed by permission of the copyright holder and is
-not covered by RackForge's own license.
+RF-Tines is redistributed by permission of the copyright holder and is not
+covered by RackForge's own license.
 
 The [RF-EPiano release](https://github.com/kalexis1994/rackforge-plugin-rf-epiano/releases/tag/v0.1.5)
 includes the corresponding source archive with the OpenWurli DSP, RackForge

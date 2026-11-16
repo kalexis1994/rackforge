@@ -27,12 +27,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Concert-Grand.rfplugin",
         "plugin_id": "org.rackforge.concert-grand",
-        "version": "0.171.39",
+        "version": "0.171.40",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-concert-grand/"
-            "releases/download/v0.171.39/RF-Concert-Grand.rfplugin"
+            "releases/download/v0.171.40/RF-Concert-Grand.rfplugin"
         ),
-        "sha256": "9e8c5b6c9bc35e39d9c951ac02cd92dfb1fcde0c3c02ba82c9ea426014462d84",
+        "sha256": "ed3677b8b26e04287c2f6a6a25a2e9a0b70919f0f2f60479fd731e431306bd2b",
         # The startup instrument is carried separately by native hosts.
         # Its source and release lifecycle are owned by the plugin repository.
         "default": True,
@@ -47,12 +47,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-106.rfplugin",
         "plugin_id": "org.rackforge.rf-106",
-        "version": "0.2.21",
+        "version": "0.2.22",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-106/"
-            "releases/download/v0.2.21/RF-106.rfplugin"
+            "releases/download/v0.2.22/RF-106.rfplugin"
         ),
-        "sha256": "8f2cd0b97579abeb3941a5eb47f8a9c2926603a6b67fed025752c13552799295",
+        "sha256": "24fb1f852e29e5cf5109cb8c67da5c843201ae3eafadda78bcd31687e0549abf",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -97,12 +97,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-7.rfplugin",
         "plugin_id": "org.rackforge.rf7",
-        "version": "0.5.4",
+        "version": "0.5.5",
         "url": (
             "https://github.com/kalexis1994/RF-7/"
-            "releases/download/v0.5.4/RF-7.rfplugin"
+            "releases/download/v0.5.5/RF-7.rfplugin"
         ),
-        "sha256": "42097dafd6b6cd8eee71684c6522fa84a65333304f64f8193300e72fdef3dd18",
+        "sha256": "2467933ffd5ffca0679c893db960156204274a81725aa0b7070a6b22af69da99",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -124,12 +124,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Organ.rfplugin",
         "plugin_id": "org.rackforge.organ",
-        "version": "0.53.1",
+        "version": "0.53.2",
         "url": (
             "https://github.com/kalexis1994/RF-Organ/"
-            "releases/download/v0.53.1/RF-Organ.rfplugin"
+            "releases/download/v0.53.2/RF-Organ.rfplugin"
         ),
-        "sha256": "b8a08c563cbf0b161cff1879870f57a2927313776e854d2535f96886cf8e0e42",
+        "sha256": "a89148866f6535e88c038a42d82de1793358d4239015e609a05794c34f0b5b89",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -185,12 +185,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-EPiano.rfplugin",
         "plugin_id": "org.rackforge.rf-epiano",
-        "version": "0.1.5",
+        "version": "0.1.6",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-epiano/"
-            "releases/download/v0.1.5/RF-EPiano.rfplugin"
+            "releases/download/v0.1.6/RF-EPiano.rfplugin"
         ),
-        "sha256": "30e0fefc76991de8b25c099f1a8577d2473965a1509bd4272397a1f233009333",
+        "sha256": "ff68d191c6053ea47c8a5a79405f59c372a9ba5f96cf1cc89abc49ad07b8fdab",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -267,12 +267,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Soundfonts.rfplugin",
         "plugin_id": "org.rackforge.rf-soundfonts",
-        "version": "0.7.0",
+        "version": "0.7.1",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-soundfonts/"
-            "releases/download/v0.7.0/RF-Soundfonts.rfplugin"
+            "releases/download/v0.7.1/RF-Soundfonts.rfplugin"
         ),
-        "sha256": "21c6f40c01f18b9a8f5cdda70a37cd15ef128440d5359d7e2c8efe42c9609c5b",
+        "sha256": "75d3554f81e907b93a6e50e8e6e6b5704259e4932b19143d55dda8849e805332",
         # The demo downloads its extracted packages at startup. The factory
         # SoundFont expands to 118 MB and can be installed separately.
         "browser_demo": False,

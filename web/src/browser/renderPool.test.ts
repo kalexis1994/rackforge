@@ -60,11 +60,11 @@ describe("worker policy", () => {
     expect(deviceIsMobile()).toBe(true);
   });
 
-  it("keeps every browser sequential until workers preserve per-instance state", () => {
+  it("enables isolated desktop pools and retains the mobile fallback", () => {
     expect(parallelPoolAllowed(false, false)).toBe(false);
     expect(parallelPoolAllowed(false, true)).toBe(false);
     expect(parallelPoolAllowed(true, true)).toBe(false);
-    expect(parallelPoolAllowed(true, false)).toBe(false);
+    expect(parallelPoolAllowed(true, false)).toBe(true);
   });
 
   it("reserves cores for the audio and main threads and caps at four", () => {

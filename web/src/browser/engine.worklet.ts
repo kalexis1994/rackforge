@@ -181,6 +181,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
   #channels = 2;
   #frames = 128;
   #ready = false;
+  #bootStatus: { ok: boolean; error?: string; warnings: string[] } | null = null;
   #failed = false;
   #sessionRevision = 0;
   #storageRevision = 0;
@@ -229,6 +230,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
         } else {
           this.#post({ kind: "response", id: command.id, response });
         }
+        this.#parallel.flushRequests();
         this.#publishControllerOutput();
         break;
       }
@@ -261,6 +263,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
           } else {
             this.#post({ kind: "response", id: command.id, response });
           }
+          this.#parallel.flushRequests();
           this.#publishControllerOutput();
           break;
         }
@@ -272,6 +275,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
       case "controller_midi": {
         const [status, data1, data2] = command.data;
         this.#host?.rf_push_controller_midi(status, data1, data2, command.length);
+        this.#parallel.flushRequests();
         this.#publishControllerOutput();
         this.#publishRevisionIfChanged();
         break;
@@ -282,10 +286,12 @@ class RackForgeEngine extends AudioWorkletProcessor {
         } else {
           this.#host?.rf_controller_disconnect();
         }
+        this.#parallel.flushRequests();
         this.#publishControllerOutput();
         break;
       case "controller_setting":
         this.#host?.rf_controller_set_color(...command.color);
+        this.#parallel.flushRequests();
         this.#publishControllerOutput();
         break;
       case "controller_catalog":
@@ -296,7 +302,10 @@ class RackForgeEngine extends AudioWorkletProcessor {
         });
         break;
       case "pool_attach":
-        this.#parallel.adopt(command.buffer, command.workerCount, command.epoch);
+        this.#parallel.adopt(command.instance, command.buffer, command.workerCount, command.epoch);
+        break;
+      case "pool_unavailable":
+        this.#parallel.unavailable(command.instance, command.epoch);
         break;
       case "controller_restore_plan":
         this.#post({
@@ -343,6 +352,8 @@ class RackForgeEngine extends AudioWorkletProcessor {
     this.#parallel.configure(
       (request) => this.#post(request),
       (module) => this.#pluginHost.componentBytes(module),
+      (instance) => this.#pluginHost.stateBytes(instance),
+      (instance, epoch) => this.#post({ kind: "pool_release", instance, epoch }),
     );
     // The clock is replaced before the module can read it; see workletClock.
     const clock = { memory: null as WebAssembly.Memory | null };
@@ -351,6 +362,10 @@ class RackForgeEngine extends AudioWorkletProcessor {
       rackforge_plugin_host: {
         ...this.#pluginHost.imports,
         ...this.#parallel.imports,
+        rf_instance_release: (handle: number) => {
+          this.#parallel.release(handle);
+          this.#pluginHost.imports.rf_instance_release(handle);
+        },
       },
     });
     clock.memory = (instance.exports as unknown as HostExports).memory;
@@ -375,13 +390,11 @@ class RackForgeEngine extends AudioWorkletProcessor {
     if (!status.ok) {
       this.#host = null;
       this.#failed = true;
+      this.#post({ kind: "booted", ok: false, error: status.error, warnings: status.warnings ?? [] });
+      return;
     }
-    this.#post({
-      kind: "booted",
-      ok: status.ok,
-      error: status.error,
-      warnings: status.warnings ?? [],
-    });
+    this.#bootStatus = { ok: status.ok, error: status.error, warnings: status.warnings ?? [] };
+    this.#parallel.flushRequests();
   }
 
   #request(request: string): string {
@@ -504,7 +517,11 @@ class RackForgeEngine extends AudioWorkletProcessor {
     if (!output || output.length === 0) {
       return !this.#failed;
     }
-    if (!host) {
+    if (this.#bootStatus && this.#parallel.initialized) {
+      this.#post({ kind: "booted", ...this.#bootStatus });
+      this.#bootStatus = null;
+    }
+    if (!host || this.#bootStatus) {
       for (const channel of output) {
         channel.fill(0);
       }
@@ -514,6 +531,7 @@ class RackForgeEngine extends AudioWorkletProcessor {
     const frames = Math.min(output[0].length, this.#frames);
     const pointer = host.rf_render(frames);
     this.#publishStorageIfChanged();
+    this.#parallel.flushRequests();
     this.#publishControllerOutput();
     this.#publishRevisionIfChanged();
     if (pointer === 0) {

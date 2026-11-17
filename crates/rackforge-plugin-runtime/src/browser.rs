@@ -140,31 +140,51 @@ pub mod host {
         // The browser render pool: parallel_render_v1 units on Web Workers,
         // coordinated over a SharedArrayBuffer the page attaches. Every one of
         // these is a cheap no-op until a pool exists.
-        pub fn rf_par_ready() -> i32;
+        pub fn rf_par_ready(instance: i32) -> i32;
         #[allow(clippy::too_many_arguments)]
         pub fn rf_par_request(
+            instance: i32,
             module: i32,
             max_units: i32,
             dispatch_stride: i32,
             mix_slot_samples: i32,
             shared_capacity: i32,
+            report_stride: i32,
             sample_rate: i32,
             maximum_frames: i32,
             input_channels: i32,
             output_channels: i32,
         );
         pub fn rf_par_begin(
+            instance: i32,
             frames: i32,
             active: i32,
             shared_len: i32,
             shared_ptr: *const u8,
         ) -> i32;
-        pub fn rf_par_entry(slot: i32, unit: i32, payload_len: i32, payload_ptr: *const u8) -> i32;
-        pub fn rf_par_commit() -> i32;
-        pub fn rf_par_collect(budget_micros: i32) -> i32;
-        pub fn rf_par_mix_read(unit: i32, destination: *mut u8, length_samples: i32) -> i32;
-        pub fn rf_par_unit_mask() -> i32;
-        pub fn rf_par_misses() -> i32;
+        pub fn rf_par_entry(
+            instance: i32,
+            slot: i32,
+            unit: i32,
+            payload_len: i32,
+            payload_ptr: *const u8,
+        ) -> i32;
+        pub fn rf_par_commit(instance: i32) -> i32;
+        pub fn rf_par_collect(instance: i32, budget_micros: i32) -> i32;
+        pub fn rf_par_mix_read(
+            instance: i32,
+            unit: i32,
+            destination: *mut u8,
+            length_samples: i32,
+        ) -> i32;
+        pub fn rf_par_report_read(
+            instance: i32,
+            unit: i32,
+            destination: *mut u8,
+            length: i32,
+        ) -> i32;
+        pub fn rf_par_unit_mask(instance: i32) -> i32;
+        pub fn rf_par_misses(instance: i32) -> i32;
     }
 }
 
@@ -434,6 +454,17 @@ impl PortableModule {
             }
             let shared_capacity = shared_capacity as usize;
             let memory_size = raw.memory_size()?;
+            if report_stride > 0 {
+                byte_range(
+                    report_offset,
+                    max_units
+                        .checked_mul(report_stride as usize)
+                        .context("parallel-render report region overflow")?,
+                    1,
+                    1,
+                    memory_size,
+                )?;
+            }
             byte_range(
                 dispatch_offset,
                 max_units
@@ -518,6 +549,9 @@ impl PortableModule {
             prepared_output_channels: 0,
             maximum_frames: 0,
             scratch: Vec::new(),
+            deferred_midi: Vec::new(),
+            deferred_parameters: Vec::new(),
+            pending_block: None,
             _module: Rc::clone(&self.handle),
         })
     }
@@ -621,6 +655,13 @@ impl RawInstance {
     }
 }
 
+#[derive(Clone, Copy)]
+struct PendingBrowserBlock {
+    frames: u32,
+    active: usize,
+    plan: [ParallelPlanEntry; MAX_PARALLEL_UNITS],
+}
+
 pub struct PortableInstance {
     raw: RawInstance,
     input_offset: i32,
@@ -643,6 +684,9 @@ pub struct PortableInstance {
     /// Staging buffer reused by every real-time block so the audio callback
     /// does not allocate.
     scratch: Vec<u8>,
+    deferred_midi: Vec<MidiEvent>,
+    deferred_parameters: Vec<ParameterEvent>,
+    pending_block: Option<PendingBrowserBlock>,
     /// Keeps the compiled module alive for as long as one of its instances is.
     _module: Rc<ModuleHandle>,
 }
@@ -721,19 +765,25 @@ impl PortableInstance {
         self.prepared_input_channels = input_channels;
         self.prepared_output_channels = output_channels;
         self.maximum_frames = maximum_frames;
-        if let Some(api) = &self.parallel_api {
-            // Fire-and-forget: the page builds workers off the audio thread
-            // and attaches whenever they are ready. Until then — and on any
-            // page that is not cross-origin isolated, ever — every block
-            // simply takes the sequential path below.
+        self.deferred_midi = Vec::with_capacity(self.capacity_midi_events);
+        self.deferred_parameters = Vec::with_capacity(self.capacity_parameter_events);
+        self.pending_block = None;
+        if let Some(api) = &self.parallel_api
+            && input_channels == 0
+        {
+            // The page builds instance-owned workers off the audio thread.
+            // Startup waits for readiness; an instance that renders classic
+            // first stays classic for this entire preparation.
             // SAFETY: plain integers describing the request.
             unsafe {
                 host::rf_par_request(
+                    self.raw.handle.0,
                     self.module_handle(),
                     api.layout.max_units as i32,
                     api.layout.dispatch_stride as i32,
                     api.layout.mix_slot_samples as i32,
                     api.layout.shared_capacity as i32,
+                    api.layout.report_stride as i32,
                     sample_rate as i32,
                     maximum_frames as i32,
                     input_channels as i32,
@@ -1034,6 +1084,64 @@ impl PortableInstance {
             self.capacity_parameter_events,
         )?;
 
+        // Never overwrite an arena still being read by its workers. Events
+        // wait in bounded, preallocated storage; the DSP does not change owners.
+        let workers = if self.parallel_api.is_some() && self.prepared_input_channels == 0 {
+            // SAFETY: the instance handle remains live across the call.
+            unsafe { host::rf_par_ready(self.raw.handle.0) }
+        } else {
+            0
+        };
+        if workers < 0 || !self.deferred_midi.is_empty() || !self.deferred_parameters.is_empty() {
+            if self.deferred_midi.len() + midi.len() > self.capacity_midi_events
+                || self.deferred_parameters.len() + parameters.len()
+                    > self.capacity_parameter_events
+            {
+                bail!("browser workers exceeded the bounded event backlog");
+            }
+            if workers < 0 {
+                self.deferred_midi
+                    .extend(midi.iter().map(|event| MidiEvent { frame: 0, ..*event }));
+                self.deferred_parameters.extend(
+                    parameters
+                        .iter()
+                        .map(|event| ParameterEvent { frame: 0, ..*event }),
+                );
+                output.fill(0.0);
+                return Ok(());
+            }
+            let mut queued_midi = std::mem::take(&mut self.deferred_midi);
+            let mut queued_parameters = std::mem::take(&mut self.deferred_parameters);
+            queued_midi.extend_from_slice(midi);
+            queued_parameters.extend_from_slice(parameters);
+            let result = self.process_ready_block(
+                input,
+                output,
+                frames,
+                &queued_midi,
+                &queued_parameters,
+                workers,
+            );
+            queued_midi.clear();
+            queued_parameters.clear();
+            self.deferred_midi = queued_midi;
+            self.deferred_parameters = queued_parameters;
+            return result;
+        }
+        self.process_ready_block(input, output, frames, midi, parameters, workers)
+    }
+
+    fn process_ready_block(
+        &mut self,
+        input: &[f32],
+        output: &mut [f32],
+        frames: u32,
+        midi: &[MidiEvent],
+        parameters: &[ParameterEvent],
+        workers: i32,
+    ) -> Result<()> {
+        let input_samples = checked_samples(frames, self.prepared_input_channels)?;
+        let output_samples = checked_samples(frames, self.prepared_output_channels)?;
         let memory_size = self.raw.memory_size()?;
         let input_range = memory_range(self.input_offset, input_samples, memory_size)?;
         let output_range = memory_range(self.output_offset, output_samples, memory_size)?;
@@ -1069,31 +1177,10 @@ impl PortableInstance {
             self.raw.write(self.parameter_offset, &self.scratch)?;
         }
 
-        // The extension's guarantee is that the classic `rackforge_process`
-        // export of the very same component is the sequential fallback, so
-        // the parallel path is taken only while a worker pool is actually
-        // standing by. Everything serial about the block happens on this
-        // thread either way.
-        // A plugin that reports is one whose coordinator decides things from
-        // what its units did -- which string is busy, which is quietest --
-        // and the pool has no way home for that yet: the worker arena
-        // carries audio and nothing else. Running it there would leave the
-        // coordinator allocating from a picture nobody is painting, so the
-        // whole block goes through the sequential fallback instead, which is
-        // the same component rendering the same audio on one thread.
-        let carries_reports = self
-            .parallel_api
-            .as_ref()
-            .is_some_and(|api| api.layout.report_stride > 0);
-        if self.parallel_api.is_some() && !carries_reports {
-            // SAFETY: no arguments; reports pool readiness.
-            let workers = unsafe { host::rf_par_ready() };
-            if workers > 0 {
-                return self.process_parallel_block(frames, midi.len(), parameters.len(), output);
-            }
+        if workers > 0 {
+            return self.process_parallel_block(frames, midi.len(), parameters.len(), output);
         }
-
-        // SAFETY: the handle is live for as long as `self`.
+        // SAFETY: the instance handle remains live across the process call.
         let status = unsafe {
             host::rf_call_process(
                 self.raw.handle.0,
@@ -1127,6 +1214,12 @@ impl PortableInstance {
         parameter_events: usize,
         output: &mut [f32],
     ) -> Result<()> {
+        if let Some(pending) = self.pending_block.take() {
+            // Readiness guarantees all workers finished the previous arena.
+            // Close that coordinator block before allocating any new voices;
+            // stale reports must never mark still-sounding strings as free.
+            self.finish_parallel_block(pending.frames, &pending.plan[..pending.active], None)?;
+        }
         let api = self
             .parallel_api
             .as_ref()
@@ -1134,7 +1227,6 @@ impl PortableInstance {
         let layout = api.layout;
         let plan_offset = api.plan_offset;
         let dispatch_offset = api.dispatch_offset;
-        let mix_offset = api.mix_offset;
         let shared_offset = api.shared_offset;
 
         // Serial pre-stage on the coordinator. Events were already staged by
@@ -1190,6 +1282,7 @@ impl PortableInstance {
         // SAFETY: `shared` stays alive across the call, which copies from it.
         let begun = unsafe {
             host::rf_par_begin(
+                self.raw.handle.0,
                 frames as i32,
                 active as i32,
                 shared_bytes as i32,
@@ -1207,6 +1300,7 @@ impl PortableInstance {
             // SAFETY: `payload` stays alive across the call, which copies.
             let staged = unsafe {
                 host::rf_par_entry(
+                    self.raw.handle.0,
                     slot as i32,
                     entry.unit as i32,
                     entry.payload_bytes as i32,
@@ -1218,7 +1312,7 @@ impl PortableInstance {
             }
         }
         // SAFETY: no arguments; wakes the workers.
-        if unsafe { host::rf_par_commit() } != 0 {
+        if unsafe { host::rf_par_commit(self.raw.handle.0) } != 0 {
             bail!("the render pool rejected the commit");
         }
 
@@ -1231,16 +1325,46 @@ impl PortableInstance {
             2_000
         };
         // SAFETY: plain integer budget; spins on the shared buffer.
-        let _done = unsafe { host::rf_par_collect(budget_micros) };
+        let _done = unsafe { host::rf_par_collect(self.raw.handle.0, budget_micros) };
         // SAFETY: no arguments; reads the completion bitmask.
-        let finished_mask = unsafe { host::rf_par_unit_mask() } as u32;
+        let finished_mask = unsafe { host::rf_par_unit_mask(self.raw.handle.0) } as u32;
 
+        let required_mask = plan[..active]
+            .iter()
+            .fold(0u32, |mask, entry| mask | (1 << entry.unit));
+        if layout.report_stride > 0 && finished_mask & required_mask != required_mask {
+            // Do not run end_block with stale reports: it can free voices that
+            // are still sounding in the late worker. Close after its ACK,
+            // before the next begin_block, and keep incoming MIDI queued.
+            self.pending_block = Some(PendingBrowserBlock {
+                frames,
+                active,
+                plan,
+            });
+            output.fill(0.0);
+            return Ok(());
+        }
+        self.finish_parallel_block(frames, &plan[..active], Some(output))
+    }
+
+    fn finish_parallel_block(
+        &mut self,
+        frames: u32,
+        plan: &[ParallelPlanEntry],
+        output: Option<&mut [f32]>,
+    ) -> Result<()> {
+        let api = self.parallel_api.as_ref().expect("parallel API");
+        let layout = api.layout;
+        let mix_offset = api.mix_offset;
+        let report_offset = api.report_offset;
+        // SAFETY: these reads refer to the current, unmodified arena.
+        let finished_mask = unsafe { host::rf_par_unit_mask(self.raw.handle.0) } as u32;
         // The same width a unit actually writes, not the instrument's
         // channels -- see the native host, where reading two channels of a
         // twenty-channel unit silenced every section.
         let unit_width = layout.unit_width(self.prepared_output_channels as usize) as u32;
         let mix_samples = checked_samples(frames, unit_width)?;
-        for entry in &plan[..active] {
+        for entry in plan {
             let slot_offset =
                 mix_offset + (entry.unit as usize * layout.mix_slot_samples * 4) as i32;
             self.stage(mix_samples * 4, |scratch| scratch.fill(0));
@@ -1248,6 +1372,7 @@ impl PortableInstance {
                 // SAFETY: scratch is host memory sized for the copy.
                 let read = unsafe {
                     host::rf_par_mix_read(
+                        self.raw.handle.0,
                         entry.unit as i32,
                         self.scratch.as_mut_ptr(),
                         mix_samples as i32,
@@ -1263,6 +1388,17 @@ impl PortableInstance {
             self.scratch = staged;
         }
 
+        if layout.report_stride > 0 {
+            for entry in plan {
+                if finished_mask & (1 << entry.unit) != 0 {
+                    self.copy_worker_report(
+                        entry.unit as usize,
+                        layout.report_stride,
+                        report_offset,
+                    )?;
+                }
+            }
+        }
         // Serial post-stage: the deterministic combine, in slot order fixed
         // by unit index regardless of which worker finished first.
         // SAFETY: the handle is live for as long as `self`.
@@ -1276,8 +1412,30 @@ impl PortableInstance {
         };
         check_status(checked(status, "parallel_end_block")?, "parallel_end_block")?;
 
-        let rendered = self.raw.read(self.output_offset, mix_samples * 4)?;
-        read_f32(&rendered, 0..mix_samples * 4, output);
+        if let Some(output) = output {
+            let output_bytes = checked_samples(frames, self.prepared_output_channels)? * 4;
+            let rendered = self.raw.read(self.output_offset, output_bytes)?;
+            read_f32(&rendered, 0..output_bytes, output);
+        }
+        Ok(())
+    }
+
+    fn copy_worker_report(&mut self, unit: usize, stride: usize, report_offset: i32) -> Result<()> {
+        self.stage(stride, |bytes| bytes.fill(0));
+        // SAFETY: the staging buffer is host memory sized for the report.
+        let status = unsafe {
+            host::rf_par_report_read(
+                self.raw.handle.0,
+                unit as i32,
+                self.scratch.as_mut_ptr(),
+                stride as i32,
+            )
+        };
+        if status != 0 {
+            bail!("the render pool could not deliver a unit report");
+        }
+        self.raw
+            .write(report_offset + (unit * stride) as i32, &self.scratch)?;
         Ok(())
     }
 

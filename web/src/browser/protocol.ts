@@ -117,6 +117,7 @@ export interface ControllerRestorePlanMessage {
 /** The page attaches a built render pool to the worklet. */
 export interface PoolAttachCommand {
   kind: "pool_attach";
+  instance: number;
   buffer: SharedArrayBuffer;
   workerCount: number;
   epoch: number;
@@ -132,6 +133,7 @@ export type EngineCommand =
   | ControllerSettingMessage
   | ControllerCatalogMessage
   | PoolAttachCommand
+  | { kind: "pool_unavailable"; instance: number; epoch: number }
   | ControllerRestorePlanMessage;
 
 /**
@@ -198,11 +200,13 @@ export interface ControllerOutputMessage {
  */
 export interface PoolRequestEvent {
   kind: "pool_request";
+  instance: number;
   geometry: {
     maxUnits: number;
     dispatchStride: number;
     mixSlotSamples: number;
     sharedCapacity: number;
+    reportStride?: number;
   };
   prepare: {
     sampleRate: number;
@@ -211,6 +215,7 @@ export interface PoolRequestEvent {
     outputChannels: number;
   };
   component: ArrayBuffer;
+  state: ArrayBuffer;
   epoch: number;
 }
 
@@ -221,6 +226,7 @@ export type EngineEvent =
   | StorageMessage
   | RevisionMessage
   | PoolRequestEvent
+  | { kind: "pool_release"; instance: number; epoch: number }
   | ControllerOutputMessage;
 
 /** Constructs the only valid event order for a storage mutation. */

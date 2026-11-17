@@ -27,6 +27,7 @@ interface UnitInstance {
   sharedPtr: number;
   dispatchPtr: number;
   unitChannels: number;
+  reportPtr: number;
   renderUnit: (
     unit: number,
     payloadBytes: number,
@@ -48,6 +49,7 @@ let inputChannels = 0;
 let workerIndex = 0;
 let workerCount = 1;
 let epoch = 0;
+let reportStride = 0;
 let closed = false;
 const failedUnits = new Set<number>();
 
@@ -63,6 +65,8 @@ function buildUnit(
   module: WebAssembly.Module,
   prepare: { sampleRate: number; maximumFrames: number; inputChannels: number; outputChannels: number },
   mixSlotSamples: number,
+  state?: ArrayBuffer,
+  reports = 0,
 ): UnitInstance {
   const instance = new WebAssembly.Instance(module, {});
   const exports = instance.exports as Record<string, unknown>;
@@ -84,6 +88,15 @@ function buildUnit(
   if (status < 0) {
     throw new Error(`unit instance failed to prepare (${status})`);
   }
+  if (state?.byteLength) {
+    const capacity = callable(exports, "rackforge_capacity_transfer_bytes")();
+    if (state.byteLength > capacity) throw new Error("worker state exceeds transfer capacity");
+    const pointer = callable(exports, "rackforge_transfer_ptr")();
+    new Uint8Array(memory.buffer, pointer, state.byteLength).set(new Uint8Array(state));
+    if (callable(exports, "rackforge_load_state")(state.byteLength) < 0) {
+      throw new Error("worker control state could not be restored");
+    }
+  }
   // A unit can return forces for the coordinator rather than final stereo
   // audio. Match the runtime's optional-width contract, including old plugins.
   const widthExport = exports.rackforge_parallel_unit_channels;
@@ -101,6 +114,7 @@ function buildUnit(
     sharedPtr: callable(exports, "rackforge_parallel_shared_ptr")(),
     dispatchPtr: callable(exports, "rackforge_parallel_dispatch_ptr")(),
     unitChannels,
+    reportPtr: reports > 0 ? callable(exports, "rackforge_parallel_report_ptr")() : 0,
     renderUnit: callable(exports, "rackforge_parallel_render_unit") as UnitInstance["renderUnit"],
   };
 }
@@ -160,6 +174,10 @@ function renderBlock(seq: number): void {
       );
       if (Atomics.load(control, HEADER.SEQ) !== seq) return;
       bytes.set(mix, layout.mixOffset + entry.unit * mixSlotBytes);
+      if (reportStride > 0) {
+        bytes.set(new Uint8Array(unit.memory.buffer, unit.reportPtr + entry.unit * reportStride, reportStride),
+          layout.reportOffset + entry.unit * reportStride);
+      }
     }
     // A failed unit still counts as done: the worklet zero-fills its slot and
     // the block completes rather than waiting out the whole budget.
@@ -167,6 +185,9 @@ function renderBlock(seq: number): void {
     if (status >= 0) Atomics.or(control, HEADER.UNIT_MASK, 1 << entry.unit);
     Atomics.add(control, HEADER.DONE, 1);
     Atomics.notify(control, HEADER.DONE);
+  }
+  if (Atomics.load(control, HEADER.SEQ) === seq) {
+    Atomics.or(control, HEADER.ACK_MASK, 1 << workerIndex);
   }
 }
 
@@ -192,16 +213,20 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
     workerIndex = message.workerIndex;
     workerCount = message.workerCount;
     epoch = message.epoch;
+    reportStride = geometry.reportStride ?? 0;
     void inputChannels;
 
     const module = new WebAssembly.Module(new Uint8Array(message.component));
     units = new Array(geometry.maxUnits).fill(null);
     for (let unit = 0; unit < geometry.maxUnits; unit++) {
       if (unitOwner(unit, workerCount) === workerIndex) {
-        units[unit] = buildUnit(module, message.prepare, geometry.mixSlotSamples);
+        units[unit] = buildUnit(module, message.prepare, geometry.mixSlotSamples, message.state, reportStride);
       }
     }
 
+    // Observe SEQ before advertising readiness: the first commit may arrive
+    // between READY and Atomics.wait and must still be rendered.
+    let lastSeq = Atomics.load(control, HEADER.SEQ);
     Atomics.or(control, HEADER.READY_MASK, 1 << workerIndex);
     Atomics.notify(control, HEADER.READY_MASK);
 
@@ -210,7 +235,6 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
     // local binding is what lets the closure keep the non-null narrowing.
     const seqControl = control;
     if (!seqControl) return;
-    let lastSeq = Atomics.load(seqControl, HEADER.SEQ);
     const run = () => {
       for (;;) {
         if (closed) return;
@@ -230,5 +254,6 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
     // A worker that cannot build its instances never sets its ready bit, so
     // the pool simply does not come up and the host stays sequential.
     console.error("rackforge render worker failed:", error);
+    self.postMessage({ kind: "failed", error: String(error) });
   }
 };

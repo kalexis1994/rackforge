@@ -166,6 +166,7 @@ const pluginHost = {
   rf_par_commit: () => -1,
   rf_par_collect: () => -1,
   rf_par_mix_read: () => -1,
+  rf_par_report_read: () => -1,
   rf_par_unit_mask: () => 0,
   rf_par_misses: () => 0,
   rf_call_f64: (instance, index, argument) => guard(NaN, () => call(instance, index, argument)),

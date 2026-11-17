@@ -411,12 +411,10 @@ Worker count remains automatic (`cpus - 1`, capped by the Slot limit) and
 
 ## The browser host
 
-The full-web RackForge includes a Web Worker transport for the extension.
-Automatic audio currently uses the sequential component path: the global
-worker pool does not isolate ownership by plugin instance, and switching to
-fresh workers cannot preserve voices that began on the coordinator. A warm
-service-worker visit used to enable that unsafe transition, silencing Concert
-Grand or another instrument after selection while a cold visit still worked.
+The full-web RackForge runs eligible instruments in persistent, instance-owned
+Web Worker pools on isolated desktop pages. Each live instance has its own
+arena, workers and epoch, even when several instances share a component.
+Selecting another instrument leaves the previous pool and its voices intact.
 
 The transport's mapping from the native design is:
 
@@ -431,9 +429,13 @@ The transport's mapping from the native design is:
 The audio thread cannot block (`Atomics.wait` is forbidden in an
 AudioWorkletGlobalScope) and cannot spawn workers, so the page owns the pool:
 the worklet asks for one (`pool_request`), the page builds workers and the
-buffer and attaches them (`pool_attach`), and until the attach lands — or on
-any page that is not cross-origin isolated, ever — every block takes the
-classic sequential `rackforge_process` path the extension guarantees.
+buffer and attaches them (`pool_attach`). At startup, the worklet captures
+control state after presets and parameters have been restored, initializes the
+workers with it, and waits for readiness before consuming the first audio or
+MIDI block. Unsupported pages, mobile devices and failed initialization use
+classic `rackforge_process`. A runtime-created instance that starts classic
+stays classic for that preparation; late workers never replace sounding voices.
+Reprepare or release retires only that instance's pool.
 
 Two deliberate departures from native:
 
@@ -441,10 +443,14 @@ Two deliberate departures from native:
   inside one worker's wasm instance, so unit N is always rendered by worker
   `N % workers`. Determinism is unaffected: the combine still happens in the
   coordinator's `end_block` in ascending unit order.
-* **A missed deadline costs audio, not coherence.** The worklet spins for
-  three quarters of the block budget; a unit that does not arrive contributes
-  silence for that block and increments a miss counter in the shared header.
-  Its state still advanced inside its worker, so the next block is correct.
+* **Late workers keep ownership of their state.** The worklet uses a bounded
+  spin budget. It never overwrites an arena until every worker acknowledges
+  the previous job. Incoming MIDI and parameter events wait in bounded,
+  preallocated queues while a worker is late. A plugin without reports can
+  contribute silence for missing units. For a reporting plugin, the complete
+  coordinator post-stage is deferred until reports arrive, before the next
+  allocation of voices. Misses can interrupt audio, but cannot silently move
+  voices onto a different DSP instance or treat busy strings as free.
 
 Cross-origin isolation is served three ways: the desktop and Pi gateways set
 `Cross-Origin-Opener-Policy: same-origin` and
@@ -452,7 +458,13 @@ Cross-origin isolation is served three ways: the desktop and Pi gateways set
 dev server mirrors them, and on hosts that cannot set headers (GitHub Pages)
 the service worker stamps them onto the responses it answers — the first
 visit is unisolated and controlled visits after it are isolated. Isolation
-alone does not enable the worker pool.
+enables desktop pools; mobile retains the measured sequential policy.
+
+The browser arena carries each unit's full declared channel width and its
+report bytes. Reports return to the coordinator through `rf_par_report_read`
+before `end_block`, including when a delayed block has to be closed on the
+next callback. Concert Grand therefore uses its four string-section workers,
+twenty-channel force slots and busy/energy reports on the web.
 
 Scope: the browser pool parallelises the units of the active instrument, the
 dominant browser-host case. Cabled-rack parallelism across plugin instances
@@ -628,23 +640,18 @@ it next to the work.
 
 ## What is not covered
 
-**The browser pool refuses an instrument that reports.** A plugin whose
-coordinator decides things from what its units did — which string is busy,
-which is quietest — has no way home for that on the web: the worker arena
-carries audio and nothing else. Such a block takes the sequential fallback,
-which is the same component rendering the same audio on one thread. The
-Concert Grand is exactly that kind of plugin, so on the web it is currently
-single-threaded. Closing this needs a report region in the arena, a copy on
-the worker side and an `rf_par_report_read`.
-
 **Browser audibility is distinct from parallel equivalence.** The worker
 transfer tests exercise twenty-channel slots and failed-unit validity; the
 export-contract test compares both JavaScript bridges with Rust's ordinal
 table. `tools/check-browser-audio.py` runs an isolated headless Chrome profile
 against a built browser demo and verifies actual audio for every bundled
 instrument and effect across cold, warm, repeated-warm and offline starts.
-Its JSON receipt records each plugin version and measured peak. Include
-RF-Soundfonts and its bank in the fixture's storage manifest to test the full
+Its JSON receipt records each plugin version, measured peak and worker block
+counters. It also holds notes across instrument switches without retriggering
+them and verifies pool ownership stays stable. Use `--require-parallel` to
+reject warm-cache sequential fallback for parallel-capable instruments, and
+`--delay-worker-ms 120` to verify recovery with queued MIDI after a delayed
+Concert Grand worker. Include RF-Soundfonts and its bank in the fixture's storage manifest to test the full
 preinstalled set. These are audibility checks, not proof of parallel DSP
 equivalence. The native `tests/parallel_render.rs` additionally compares real
 packaged Concert Grand output across the render paths.

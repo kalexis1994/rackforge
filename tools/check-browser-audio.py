@@ -61,6 +61,8 @@ def main():
     parser.add_argument('--site', type=Path, required=True, help='Built browser demo, including demo/storage.json and extracted plugin packages')
     parser.add_argument('--output', type=Path, required=True, help='JSON validation receipt')
     parser.add_argument('--chrome', help='Chrome or Chromium executable; tests always run headlessly')
+    parser.add_argument('--require-parallel', action='store_true', help='Require warm-cache audio to advance instance-owned worker pools (including Concert Grand reports)')
+    parser.add_argument('--delay-worker-ms', type=int, default=0, help='Inject one delayed Concert Grand worker per warm phase, testing queued MIDI and report recovery')
     args = parser.parse_args()
     site = args.site.resolve()
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -73,12 +75,44 @@ def main():
     origin = f'http://rackforge-cache.test:{server.server_port}'
     plugins = [tomllib.loads(p.read_text()) for p in (site / 'demo/rackforge/plugins').glob('*/rackforge-plugin.toml')]
     results = []
+    switches = []
     logs = []
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(executable_path=chrome, headless=True, args=['--mute-audio', '--autoplay-policy=no-user-gesture-required', '--no-proxy-server', '--host-resolver-rules=MAP rackforge-cache.test 127.0.0.1', f'--unsafely-treat-insecure-origin-as-secure={origin}'])
             context = browser.new_context(viewport={'width': 1500, 'height': 1000})
             context.add_init_script(WORKLET_PROBE)
+            if args.delay_worker_ms:
+                context.add_init_script(r'''
+                    if (crossOriginIsolated) {
+                        const gate = window.testWorkerDelay = new Int32Array(new SharedArrayBuffer(4));
+                        const NativeWorker = Worker;
+                        window.Worker = class extends NativeWorker {
+                            constructor(url, options) {
+                                if (!String(url).includes('render.worker')) { super(url, options); return; }
+                                const code = `import ${JSON.stringify(String(url))};
+                                    let gate;
+                                    const receive = self.onmessage;
+                                    self.onmessage = e => { gate = e.data.testGate; receive(e); };
+                                    const wait = Atomics.wait;
+                                    Atomics.wait = (...args) => {
+                                        const result = wait(...args);
+                                        if (gate) {
+                                            const ms = Atomics.exchange(gate, 0, 0);
+                                            const until = Date.now() + ms;
+                                            while (Date.now() < until) { /* deterministic scheduling delay */ }
+                                        }
+                                        return result;
+                                    };`;
+                                const blob = URL.createObjectURL(new Blob([code], {type:'text/javascript'}));
+                                super(blob, options);
+                            }
+                            postMessage(message, ...args) {
+                                super.postMessage(message.geometry?.reportStride ? {...message, testGate:gate} : message, ...args);
+                            }
+                        };
+                    }
+                ''')
             page = context.new_page()
             page.set_default_timeout(120000)
             page.on('console', lambda m: logs.append({'type': m.type, 'text': m.text}))
@@ -91,6 +125,13 @@ def main():
                 snapshot = request({'op': 'snapshot'})['snapshot']
                 reply = request({'op': 'dispatch', 'envelope': {'schema_version': snapshot['schema_version'], 'client_id': 'test.all-cache', 'command_id': int(time.monotonic() * 1000000), 'command': value}})
                 assert reply['status'] == 'command_applied', reply
+
+            def pools():
+                return page.evaluate('''() => [...(window.__rfRenderPool?.pools ?? [])].map(([instance,p]) => ({
+                    instance, epoch:p.epoch, workers:p.workers.length, geometry:p.geometry,
+                    blocks:Atomics.load(p.control,10), deferred:Atomics.load(p.control,11),
+                    misses:Atomics.load(p.control,8), ready:Atomics.load(p.control,6)
+                }))''')
 
             def audio():
                 for note in (48, 60, 72):
@@ -105,6 +146,38 @@ def main():
                     nonzero += level > 1e-05
                 request({'op': 'release_virtual_midi', 'client_id': 'test.all-cache.keys'})
                 return (peak, nonzero)
+
+            def check_switches(snapshot, phase):
+                instruments = [i for i in snapshot['instances'] if any(m['id'] == i['plugin_id'] and m['kind'] == 'instrument' for m in plugins)]
+                for index, source in enumerate(instruments):
+                    other = instruments[(index + 1) % len(instruments)]
+                    command({'type': 'select_plugin', 'instance_id': source['instance_id']})
+                    for note in (48, 60, 72):
+                        request({'op': 'virtual_midi', 'client_id': 'test.switch.keys', 'message': {'status': 144, 'data1': note, 'data2': 100}})
+                    before_peak = 0
+                    for _ in range(4):
+                        page.wait_for_timeout(40)
+                        meter = request({'op': 'output_meter'})['meter']
+                        before_peak = max(before_peak, meter['left_peak'], meter['right_peak'])
+                    ownership = [(p['instance'], p['epoch']) for p in pools()]
+                    command({'type': 'select_plugin', 'instance_id': other['instance_id']})
+                    page.wait_for_timeout(80)
+                    command({'type': 'select_plugin', 'instance_id': source['instance_id']})
+                    # No retrigger: only the voices that existed before the switch
+                    # can produce this audio. Ignore the first meter window.
+                    page.wait_for_timeout(80)
+                    levels = []
+                    for _ in range(6):
+                        page.wait_for_timeout(40)
+                        meter = request({'op': 'output_meter'})['meter']
+                        levels.append(max(meter['left_peak'], meter['right_peak']))
+                    request({'op': 'release_virtual_midi', 'client_id': 'test.switch.keys'})
+                    after = [(p['instance'], p['epoch']) for p in pools()]
+                    record = {'phase': phase, 'plugin': source['plugin_id'], 'via': other['plugin_id'], 'before_peak': before_peak, 'resumed_peak': max(levels), 'nonzero_windows': sum(x > 1e-5 for x in levels), 'ownership_preserved': ownership == after}
+                    switches.append(record)
+                    print('HELD_VOICE_SWITCH', json.dumps(record), flush=True)
+                    args.output.write_text(json.dumps({'results': results, 'switches': switches, 'logs': logs}, indent=2))
+                    assert record['before_peak'] > 1e-5 and record['nonzero_windows'] >= 3 and record['ownership_preserved'], record
             for phase in ('cold', 'warm', 'warm-repeat', 'offline'):
                 print('PHASE', phase, flush=True)
                 if phase == 'cold':
@@ -123,6 +196,9 @@ def main():
                 ids = {i['plugin_id'] for i in snapshot['instances']}
                 assert {m['id'] for m in plugins} <= ids, {'missing': sorted({m['id'] for m in plugins} - ids), 'logs': logs[-10:]}
                 piano = next((i for i in snapshot['instances'] if i['plugin_id'] == 'org.rackforge.concert-grand'))
+                initial_pools = pools()
+                if args.require_parallel and phase != 'cold':
+                    assert initial_pools and all(p['ready'] == (1 << p['workers']) - 1 for p in initial_pools), {'pools': initial_pools, 'logs': logs[-20:]}
                 command({'type': 'set_play_chain', 'instrument_id': piano['instance_id'], 'effects': []})
                 for plugin in sorted(plugins, key=lambda m: (m['kind'] == 'effect', m['name'])):
                     instance = next((i for i in snapshot['instances'] if i['plugin_id'] == plugin['id']))
@@ -135,13 +211,34 @@ def main():
                         frame.wait_for(state='attached')
                         page.wait_for_function("Boolean(document.querySelector('.plugin-frame-stage iframe')?.classList.contains('loaded'))", polling=100)
                     page.wait_for_timeout(500)
+                    before = pools()
                     peak, nonzero = audio()
-                    record = {'phase': phase, 'plugin': plugin['name'], 'version': plugin['version'], 'isolated': page.evaluate('crossOriginIsolated'), 'peak': peak, 'nonzero_blocks': nonzero, 'kind': plugin['kind']}
+                    after = pools()
+                    advanced = [p for p in after if any(q['instance'] == p['instance'] and q['epoch'] == p['epoch'] and p['blocks'] > q['blocks'] for q in before)]
+                    if args.require_parallel and phase != 'cold' and 'parallel_render_v1' in plugin.get('capabilities', []):
+                        assert advanced, {'plugin': plugin['name'], 'before': before, 'after': after}
+                    if args.require_parallel and phase != 'cold' and (plugin['id'] == 'org.rackforge.concert-grand' or plugin['kind'] == 'effect'):
+                        assert any(p['geometry'].get('reportStride', 0) > 0 for p in advanced), {'plugin': plugin['name'], 'before': before, 'after': after, 'logs': logs[-20:]}
+                    assert [(p['instance'],p['epoch']) for p in after] == [(p['instance'],p['epoch']) for p in initial_pools], 'Selecting an instrument replaced a live worker pool'
+                    record = {'phase': phase, 'plugin': plugin['name'], 'version': plugin['version'], 'isolated': page.evaluate('crossOriginIsolated'), 'peak': peak, 'nonzero_blocks': nonzero, 'kind': plugin['kind'], 'parallel_pools': advanced}
                     results.append(record)
                     print('PLUGIN_AUDIO', json.dumps(record), flush=True)
-                    args.output.write_text(json.dumps({'results': results, 'logs': logs}, indent=2))
+                    args.output.write_text(json.dumps({'results': results, 'switches': switches, 'logs': logs}, indent=2))
                     assert peak > 1e-05 and nonzero > 0, record
                 command({'type': 'set_play_chain', 'instrument_id': piano['instance_id'], 'effects': []})
+                check_switches(snapshot, phase)
+                if args.delay_worker_ms and phase != 'cold':
+                    command({'type': 'select_plugin', 'instance_id': piano['instance_id']})
+                    before = pools()
+                    page.evaluate('ms => Atomics.store(window.testWorkerDelay,0,ms)', args.delay_worker_ms)
+                    peak, nonzero = audio()
+                    after = pools()
+                    assert peak > 1e-5 and nonzero >= 3, {'phase':phase, 'peak':peak, 'nonzero':nonzero}
+                    assert sum(p['deferred'] for p in after) > sum(p['deferred'] for p in before), {'before':before,'after':after}
+                    recovery = {'phase':phase,'delayed_worker_ms':args.delay_worker_ms,'peak':peak,'nonzero_windows':nonzero,'pools':after}
+                    switches.append(recovery)
+                    print('DELAYED_WORKER_RECOVERED', json.dumps(recovery), flush=True)
+                    args.output.write_text(json.dumps({'results':results,'switches':switches,'logs':logs},indent=2))
                 page.wait_for_timeout(600)
             context.close()
             browser.close()

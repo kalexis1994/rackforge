@@ -1282,23 +1282,26 @@ export function PluginFrame({
             setLoadedFrameIdentity(surfaceIdentity);
             setFrameDocumentGeneration((generation) => generation + 1);
             // Plugin surfaces are same-origin, sandboxed documents. Give them
-            // RackForge's low-specificity scrollbar defaults while allowing a
-            // plugin stylesheet to replace the theme deliberately.
+            // Shared interaction rules and low-specificity scrollbar defaults
+            // also apply inside the plugin document.
             try {
               const frameDocument = frameRef.current?.contentDocument;
-              if (
-                frameDocument?.head &&
-                !frameDocument.querySelector("link[data-rackforge-scrollbars]")
-              ) {
-                const link = frameDocument.createElement("link");
-                link.rel = "stylesheet";
-                link.href = hostAssetUrl(
-                  "rackforge-scrollbars.css",
-                  window.document.baseURI,
-                  import.meta.env.BASE_URL,
-                );
-                link.dataset.rackforgeScrollbars = "true";
-                frameDocument.head.append(link);
+              if (frameDocument?.head) {
+                for (const [asset, marker] of [
+                  ["rackforge-scrollbars.css", "data-rackforge-scrollbars"],
+                  ["rackforge-plugin.css", "data-rackforge-plugin-styles"],
+                ] as const) {
+                  if (frameDocument.querySelector(`link[${marker}]`)) continue;
+                  const link = frameDocument.createElement("link");
+                  link.rel = "stylesheet";
+                  link.href = hostAssetUrl(
+                    asset,
+                    window.document.baseURI,
+                    import.meta.env.BASE_URL,
+                  );
+                  link.setAttribute(marker, "true");
+                  frameDocument.head.append(link);
+                }
               }
               // RackForge's plugin kit: the elements its own instruments
               // place in their surfaces (`<rf-program-select>`). One copy,

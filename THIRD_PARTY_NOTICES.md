@@ -27,7 +27,7 @@ software component separate from RackForge. The pinned versions are listed in
 RF-Tines is redistributed by permission of the copyright holder and is not
 covered by RackForge's own license.
 
-The [RF-EPiano release](https://github.com/kalexis1994/rackforge-plugin-rf-epiano/releases/tag/v0.1.6)
+The [RF-EPiano release](https://github.com/kalexis1994/rackforge-plugin-rf-epiano/releases/tag/v0.1.7)
 includes the corresponding source archive with the OpenWurli DSP, RackForge
 adapter, and build instructions.
 

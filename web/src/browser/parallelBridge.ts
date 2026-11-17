@@ -1,240 +1,199 @@
-/**
- * The worklet's side of the browser render pool.
- *
- * Owns the SharedArrayBuffer once the page attaches one, and turns it into the
- * `rf_par_*` imports the Rust host calls. The bridge makes no decisions: what
- * to render, when to dispatch and how long to wait all come from Rust, the
- * same division of labour `pluginHost.ts` keeps for sequential calls.
- *
- * The one liberty it takes is the spin. Atomics.wait is forbidden on the audio
- * thread, so `collect` polls the done counter — with a bounded budget measured
- * in wall-clock time, checked coarsely so the fast path is a plain load. A
- * pool that misses its budget costs the missing units' audio for one block and
- * a telemetry mark, never a wedged audio thread.
- */
+/** Per-instance worker arenas. A preparation chooses its render path once;
+ * a late worker never replaces a sequential instance that already has voices. */
+import { HEADER, poolLayout, writePlanEntry, type PoolGeometry, type PoolLayout, type PoolPrepare, type PoolRequest } from "./renderPool";
 
-import {
-  HEADER,
-  poolLayout,
-  writePlanEntry,
-  type PoolGeometry,
-  type PoolLayout,
-  type PoolPrepare,
-  type PoolRequest,
-} from "./renderPool";
+interface Pool {
+  instance: number;
+  module: number;
+  epoch: number;
+  geometry: PoolGeometry;
+  prepare: PoolPrepare;
+  layout: PoolLayout;
+  mode: "pending" | "parallel" | "sequential";
+  sent: boolean;
+  deadline: number;
+  control: Int32Array | null;
+  bytes: Uint8Array | null;
+  view: DataView | null;
+  workers: number;
+  inFlight: boolean;
+}
 
 export class ParallelBridge {
-  #control: Int32Array | null = null;
-  #bytes: Uint8Array | null = null;
-  #view: DataView | null = null;
-  #layout: PoolLayout | null = null;
-  #geometry: PoolGeometry | null = null;
-  #workerCount = 0;
-  #requestedEpoch = 0;
-  #hostMemory: WebAssembly.Memory | null = null;
-  #requestPool: ((request: PoolRequest) => void) | null = null;
-  /** Bytes of the component the pool was requested for, held by handle. */
-  #componentBytes: (module: number) => Uint8Array | null = () => null;
+  #pools = new Map<number, Pool>();
+  #epoch = 0;
+  #memory: WebAssembly.Memory | null = null;
+  #request: ((request: PoolRequest) => void) | null = null;
+  #component: (module: number) => Uint8Array | null = () => null;
+  #state: (instance: number) => Uint8Array = () => new Uint8Array();
+  #retire: (instance: number, epoch: number) => void = () => {};
 
-  attach(memory: WebAssembly.Memory) {
-    this.#hostMemory = memory;
+  attach(memory: WebAssembly.Memory) { this.#memory = memory; }
+
+  configure(request: (request: PoolRequest) => void, component: (module: number) => Uint8Array | null,
+    state: (instance: number) => Uint8Array, retire: (instance: number, epoch: number) => void) {
+    this.#request = request;
+    this.#component = component;
+    this.#state = state;
+    this.#retire = retire;
   }
 
-  /** Wires the page messenger and the component-byte lookup in. */
-  configure(
-    requestPool: (request: PoolRequest) => void,
-    componentBytes: (module: number) => Uint8Array | null,
-  ) {
-    this.#requestPool = requestPool;
-    this.#componentBytes = componentBytes;
+  release(instance: number) {
+    const pool = this.#pools.get(instance);
+    if (!pool) return;
+    this.#pools.delete(instance);
+    this.#retire(instance, pool.epoch);
   }
 
-  /** Called when the page reports a pool is up. */
-  adopt(buffer: SharedArrayBuffer, workerCount: number, epoch: number) {
-    if (epoch !== this.#requestedEpoch || !this.#geometry) {
-      return; // a stale build for a plugin we already moved past
+  /** Called at the boundary of a host command, after presets/parameters restore. */
+  flushRequests() {
+    for (const pool of this.#pools.values()) {
+      if (pool.sent || pool.mode !== "pending") continue;
+      pool.sent = true;
+      pool.deadline = Date.now() + 10_000;
+      try {
+        const component = this.#component(pool.module);
+        if (!component || !this.#request) throw new Error("worker component is unavailable");
+        this.#request({ kind: "pool_request", instance: pool.instance, epoch: pool.epoch,
+          geometry: pool.geometry, prepare: pool.prepare, component: component.slice().buffer,
+          state: this.#state(pool.instance).slice().buffer });
+      } catch {
+        this.unavailable(pool.instance, pool.epoch);
+      }
     }
-    this.#control = new Int32Array(buffer, 0, HEADER.WORDS);
-    this.#bytes = new Uint8Array(buffer);
-    this.#view = new DataView(buffer);
-    this.#layout = poolLayout(this.#geometry);
-    this.#workerCount = workerCount;
   }
 
-  /** Drops the pool, e.g. when the plugin or the prepare geometry changes. */
-  release() {
-    this.#control = null;
-    this.#bytes = null;
-    this.#view = null;
-    this.#layout = null;
-    this.#geometry = null;
-    this.#workerCount = 0;
+  adopt(instance: number, buffer: SharedArrayBuffer, workers: number, epoch: number) {
+    const pool = this.#pools.get(instance);
+    if (!pool || pool.epoch !== epoch || pool.mode !== "pending") return;
+    if (buffer.byteLength !== pool.layout.totalBytes || !Number.isInteger(workers)
+      || workers < 1 || workers > pool.geometry.maxUnits
+      || Atomics.load(new Int32Array(buffer, 0, HEADER.WORDS), HEADER.EPOCH) !== epoch) {
+      this.unavailable(instance, epoch); return;
+    }
+    pool.control = new Int32Array(buffer, 0, HEADER.WORDS);
+    pool.bytes = new Uint8Array(buffer);
+    pool.view = new DataView(buffer);
+    pool.workers = workers;
+  }
+
+  unavailable(instance: number, epoch: number) {
+    const pool = this.#pools.get(instance);
+    if (!pool || pool.epoch !== epoch || pool.mode !== "pending") return;
+    pool.mode = "sequential";
+    this.#retire(instance, epoch);
+  }
+
+  #settle(pool: Pool): boolean {
+    if (pool.mode !== "pending") return true;
+    const all = (1 << pool.workers) - 1;
+    if (pool.control && pool.workers > 0 && (Atomics.load(pool.control, HEADER.READY_MASK) & all) === all) {
+      pool.mode = "parallel"; return true;
+    }
+    if (pool.sent && Date.now() >= pool.deadline) this.unavailable(pool.instance, pool.epoch);
+    return pool.mode !== "pending";
+  }
+
+  /** Boot barrier: no MIDI/audio block is consumed while workers initialize. */
+  get initialized(): boolean {
+    let ready = true;
+    for (const pool of this.#pools.values()) if (!this.#settle(pool)) ready = false;
+    return ready;
   }
 
   get imports() {
     return {
-      /** Workers that are built and standing by; 0 keeps Rust sequential. */
-      rf_par_ready: (): number => {
-        const control = this.#control;
-        if (!control || this.#workerCount === 0) return 0;
-        const mask = Atomics.load(control, HEADER.READY_MASK);
-        const all = (1 << this.#workerCount) - 1;
-        return (mask & all) === all ? this.#workerCount : 0;
+      rf_par_request: (instance: number, module: number, maxUnits: number, dispatchStride: number,
+        mixSlotSamples: number, sharedCapacity: number, reportStride: number, sampleRate: number,
+        maximumFrames: number, inputChannels: number, outputChannels: number): void => {
+        this.release(instance);
+        const geometry = { maxUnits, dispatchStride, mixSlotSamples, sharedCapacity, reportStride };
+        const prepare = { sampleRate, maximumFrames, inputChannels, outputChannels };
+        this.#pools.set(instance, { instance, module, epoch: ++this.#epoch, geometry, prepare,
+          layout: poolLayout(geometry), mode: "pending", sent: false, deadline: 0,
+          control: null, bytes: null, view: null, workers: 0, inFlight: false });
       },
-
-      /**
-       * Asks the page for a pool. Fire-and-forget and idempotent per epoch:
-       * Rust calls this from `prepare`, the pool arrives whenever it arrives,
-       * and until then every block takes the sequential path.
-       */
-      rf_par_request: (
-        module: number,
-        maxUnits: number,
-        dispatchStride: number,
-        mixSlotSamples: number,
-        sharedCapacity: number,
-        sampleRate: number,
-        maximumFrames: number,
-        inputChannels: number,
-        outputChannels: number,
-      ): void => {
-        const component = this.#componentBytes(module);
-        if (!component || !this.#requestPool) return;
-        const geometry: PoolGeometry = {
-          maxUnits,
-          dispatchStride,
-          mixSlotSamples,
-          sharedCapacity,
-        };
-        const prepare: PoolPrepare = {
-          sampleRate,
-          maximumFrames,
-          inputChannels,
-          outputChannels,
-        };
-        this.release();
-        this.#geometry = geometry;
-        this.#requestedEpoch += 1;
-        // The copy is deliberate: the message crosses threads and the module
-        // bytes belong to the plugin host's lifetime, not the pool's.
-        const payload = component.slice().buffer;
-        this.#requestPool({
-          kind: "pool_request",
-          geometry,
-          prepare,
-          component: payload,
-          epoch: this.#requestedEpoch,
-        });
-      },
-
-      /** Publishes the block header and the shared payload. Not yet visible
-       * to workers: SEQ is bumped by `rf_par_commit`. */
-      rf_par_begin: (
-        frames: number,
-        active: number,
-        sharedLen: number,
-        sharedPtr: number,
-      ): number => {
-        const control = this.#control;
-        const bytes = this.#bytes;
-        const layout = this.#layout;
-        if (!control || !bytes || !layout || !this.#hostMemory) return -1;
-        Atomics.store(control, HEADER.FRAMES, frames);
-        Atomics.store(control, HEADER.ACTIVE, active);
-        Atomics.store(control, HEADER.SHARED_LEN, sharedLen);
-        Atomics.store(control, HEADER.DONE, 0);
-        Atomics.store(control, HEADER.UNIT_MASK, 0);
-        if (sharedLen > 0) {
-          bytes.set(
-            new Uint8Array(this.#hostMemory.buffer, sharedPtr, sharedLen),
-            layout.sharedOffset,
-          );
+      rf_par_ready: (instance: number): number => {
+        const pool = this.#pools.get(instance);
+        if (!pool) return 0;
+        // A runtime-created instance that starts before its workers stays classic
+        // for this preparation. Promoting it later would discard held voices.
+        if (!this.#settle(pool)) this.unavailable(instance, pool.epoch);
+        if (pool.mode !== "parallel" || !pool.control) return 0;
+        const all = (1 << pool.workers) - 1;
+        if (pool.inFlight && (Atomics.load(pool.control, HEADER.ACK_MASK) & all) !== all) {
+          Atomics.add(pool.control, HEADER.DEFERRED, 1); return -1;
         }
+        return pool.workers;
+      },
+      rf_par_begin: (instance: number, frames: number, active: number, sharedLen: number, sharedPtr: number): number => {
+        const pool = this.#pools.get(instance);
+        if (!pool?.control || !pool.bytes || !this.#memory || pool.mode !== "parallel") return -1;
+        const all = (1 << pool.workers) - 1;
+        if (pool.inFlight && (Atomics.load(pool.control, HEADER.ACK_MASK) & all) !== all) return -1;
+        if (frames < 1 || frames > pool.prepare.maximumFrames || active < 0 || active > pool.geometry.maxUnits
+          || sharedLen < 0 || sharedLen > pool.geometry.sharedCapacity) return -1;
+        Atomics.store(pool.control, HEADER.FRAMES, frames);
+        Atomics.store(pool.control, HEADER.ACTIVE, active);
+        Atomics.store(pool.control, HEADER.SHARED_LEN, sharedLen);
+        Atomics.store(pool.control, HEADER.DONE, 0);
+        Atomics.store(pool.control, HEADER.UNIT_MASK, 0);
+        Atomics.store(pool.control, HEADER.ACK_MASK, 0);
+        if (sharedLen > 0) pool.bytes.set(new Uint8Array(this.#memory.buffer, sharedPtr, sharedLen), pool.layout.sharedOffset);
         return 0;
       },
-
-      /** One plan entry and its dispatch payload. */
-      rf_par_entry: (
-        slot: number,
-        unit: number,
-        payloadLen: number,
-        payloadPtr: number,
-      ): number => {
-        const bytes = this.#bytes;
-        const view = this.#view;
-        const layout = this.#layout;
-        const geometry = this.#geometry;
-        if (!bytes || !view || !layout || !geometry || !this.#hostMemory) return -1;
-        writePlanEntry(view, layout, slot, unit, payloadLen);
-        if (payloadLen > 0) {
-          bytes.set(
-            new Uint8Array(this.#hostMemory.buffer, payloadPtr, payloadLen),
-            layout.dispatchOffset + unit * geometry.dispatchStride,
-          );
-        }
+      rf_par_entry: (instance: number, slot: number, unit: number, length: number, pointer: number): number => {
+        const pool = this.#pools.get(instance);
+        if (!pool?.view || !pool.bytes || !this.#memory) return -1;
+        if (slot < 0 || slot >= pool.geometry.maxUnits || unit < 0 || unit >= pool.geometry.maxUnits
+          || length < 0 || length > pool.geometry.dispatchStride) return -1;
+        writePlanEntry(pool.view, pool.layout, slot, unit, length);
+        if (length > 0) pool.bytes.set(new Uint8Array(this.#memory.buffer, pointer, length), pool.layout.dispatchOffset + unit * pool.geometry.dispatchStride);
         return 0;
       },
-
-      /** Makes the block visible and wakes every worker. */
-      rf_par_commit: (): number => {
-        const control = this.#control;
-        if (!control) return -1;
-        Atomics.add(control, HEADER.SEQ, 1);
-        Atomics.notify(control, HEADER.SEQ);
+      rf_par_commit: (instance: number): number => {
+        const pool = this.#pools.get(instance);
+        if (!pool?.control) return -1;
+        pool.inFlight = true;
+        Atomics.add(pool.control, HEADER.BLOCKS, 1);
+        Atomics.add(pool.control, HEADER.SEQ, 1);
+        Atomics.notify(pool.control, HEADER.SEQ);
         return 0;
       },
-
-      /**
-       * Spins until every active unit reported done, or the budget passes.
-       * Returns the done count; Rust zero-fills whatever is missing.
-       */
-      rf_par_collect: (budgetMicros: number): number => {
-        const control = this.#control;
+      rf_par_collect: (instance: number, budgetMicros: number): number => {
+        const control = this.#pools.get(instance)?.control;
         if (!control) return 0;
         const active = Atomics.load(control, HEADER.ACTIVE);
         const deadline = Date.now() + Math.max(1, budgetMicros / 1000);
-        let done = Atomics.load(control, HEADER.DONE);
-        let lap = 0;
+        let done = Atomics.load(control, HEADER.DONE), lap = 0;
         while (done < active) {
-          if ((++lap & 1023) === 0 && Date.now() > deadline) {
-            Atomics.add(control, HEADER.MISSES, 1);
-            break;
-          }
+          if ((++lap & 1023) === 0 && Date.now() > deadline) { Atomics.add(control, HEADER.MISSES, 1); break; }
           done = Atomics.load(control, HEADER.DONE);
         }
         return done;
       },
-
-      /** Copies one unit's rendered audio into host memory. */
-      rf_par_mix_read: (
-        unit: number,
-        destinationPtr: number,
-        lengthSamples: number,
-      ): number => {
-        const bytes = this.#bytes;
-        const layout = this.#layout;
-        const geometry = this.#geometry;
-        if (!bytes || !layout || !geometry || !this.#hostMemory) return -1;
-        const lengthBytes = lengthSamples * 4;
-        const source = bytes.subarray(
-          layout.mixOffset + unit * geometry.mixSlotSamples * 4,
-          layout.mixOffset + unit * geometry.mixSlotSamples * 4 + lengthBytes,
-        );
-        new Uint8Array(this.#hostMemory.buffer, destinationPtr, lengthBytes).set(source);
-        return 0;
-      },
-
-      /** Which units finished for the current block, as a bitmask. */
-      rf_par_unit_mask: (): number => {
-        const control = this.#control;
+      rf_par_mix_read: (instance: number, unit: number, destination: number, samples: number): number =>
+        this.#read(instance, unit, destination, samples * 4, false),
+      rf_par_report_read: (instance: number, unit: number, destination: number, bytes: number): number =>
+        this.#read(instance, unit, destination, bytes, true),
+      rf_par_unit_mask: (instance: number): number => {
+        const control = this.#pools.get(instance)?.control;
         return control ? Atomics.load(control, HEADER.UNIT_MASK) : 0;
       },
-
-      /** Deadline misses since boot, drained by telemetry reads. */
-      rf_par_misses: (): number => {
-        const control = this.#control;
+      rf_par_misses: (instance: number): number => {
+        const control = this.#pools.get(instance)?.control;
         return control ? Atomics.load(control, HEADER.MISSES) : 0;
       },
     };
+  }
+
+  #read(instance: number, unit: number, destination: number, length: number, report: boolean): number {
+    const pool = this.#pools.get(instance);
+    if (!pool?.bytes || !this.#memory || unit < 0 || unit >= pool.geometry.maxUnits) return -1;
+    const stride = report ? (pool.geometry.reportStride ?? 0) : pool.geometry.mixSlotSamples * 4;
+    if (length < 0 || length > stride) return -1;
+    const offset = (report ? pool.layout.reportOffset : pool.layout.mixOffset) + unit * stride;
+    new Uint8Array(this.#memory.buffer, destination, length).set(pool.bytes.subarray(offset, offset + length));
+    return 0;
   }
 }

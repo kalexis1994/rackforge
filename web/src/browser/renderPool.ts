@@ -71,17 +71,10 @@ export function deviceIsMobile(): boolean {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
 
-/**
- * The current bridge owns one global pool, while the host prepares multiple
- * plugin instances. Readiness therefore cannot prove that its workers belong
- * to the instance being rendered. Switching to freshly built workers also
- * loses held voices that began on the sequential instance. Keep automatic
- * audio on the coherent sequential path until those state contracts exist.
- */
-const INSTANCE_SCOPED_WORKER_STATE = false;
-
+/** Isolated desktop pages use persistent, instance-owned pools. Mobile keeps
+ * the measured sequential policy because its worker scheduling misses blocks. */
 export function parallelPoolAllowed(isolated: boolean, mobile: boolean): boolean {
-  return isolated && !mobile && INSTANCE_SCOPED_WORKER_STATE;
+  return isolated && !mobile;
 }
 
 /** Which worker owns a unit. Stable for the life of a pool epoch. */
@@ -99,6 +92,7 @@ export interface PoolGeometry {
   dispatchStride: number;
   mixSlotSamples: number;
   sharedCapacity: number;
+  reportStride?: number;
 }
 
 /** What a worker needs to build its unit instances. */
@@ -146,7 +140,10 @@ export const HEADER = {
   UNIT_MASK: 7,
   /** Deadline misses observed by the worklet, for telemetry. */
   MISSES: 8,
-  WORDS: 9,
+  ACK_MASK: 9,
+  BLOCKS: 10,
+  DEFERRED: 11,
+  WORDS: 12,
 } as const;
 
 export interface PoolLayout {
@@ -155,6 +152,7 @@ export interface PoolLayout {
   sharedOffset: number;
   dispatchOffset: number;
   mixOffset: number;
+  reportOffset: number;
   totalBytes: number;
 }
 
@@ -175,8 +173,9 @@ export function poolLayout(geometry: PoolGeometry): PoolLayout {
     dispatchOffset + geometry.maxUnits * geometry.dispatchStride,
     4,
   );
-  const totalBytes = mixOffset + geometry.maxUnits * geometry.mixSlotSamples * 4;
-  return { headerBytes, planOffset, sharedOffset, dispatchOffset, mixOffset, totalBytes };
+  const reportOffset = mixOffset + geometry.maxUnits * geometry.mixSlotSamples * 4;
+  const totalBytes = reportOffset + geometry.maxUnits * (geometry.reportStride ?? 0);
+  return { headerBytes, planOffset, sharedOffset, dispatchOffset, mixOffset, reportOffset, totalBytes };
 }
 
 /** One plan entry, as the worklet publishes it and a worker reads it. */
@@ -207,11 +206,13 @@ export function writePlanEntry(
 /** The init message a worker receives once, before any block. */
 export interface WorkerInit {
   kind: "init";
+  instance: number;
   buffer: SharedArrayBuffer;
   geometry: PoolGeometry;
   prepare: PoolPrepare;
   /** The wasm-v1 component, as bytes: workers compile their own copies. */
   component: ArrayBuffer;
+  state?: ArrayBuffer;
   workerIndex: number;
   workerCount: number;
   epoch: number;
@@ -226,9 +227,11 @@ export type WorkerMessage = WorkerInit | WorkerClose;
 /** What the worklet sends the page when a parallel plugin wants a pool. */
 export interface PoolRequest {
   kind: "pool_request";
+  instance: number;
   geometry: PoolGeometry;
   prepare: PoolPrepare;
   component: ArrayBuffer;
+  state: ArrayBuffer;
   /** Identifies the request so a stale response is ignored. */
   epoch: number;
 }
@@ -236,6 +239,7 @@ export interface PoolRequest {
 /** What the page sends the worklet once the buffer and workers exist. */
 export interface PoolAttach {
   kind: "pool_attach";
+  instance: number;
   buffer: SharedArrayBuffer;
   workerCount: number;
   epoch: number;

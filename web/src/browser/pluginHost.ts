@@ -94,6 +94,15 @@ export class PluginHost {
     return this.#moduleBytes.get(module) ?? null;
   }
 
+  /** Control state only, captured after host restoration and before audio. */
+  stateBytes(instance: number): Uint8Array {
+    const length = this.#call(instance, 22) as number;
+    const capacity = this.#call(instance, 11) as number;
+    if (length < 0 || length > capacity) throw new Error("could not snapshot worker control state");
+    const pointer = this.#call(instance, 5) as number;
+    return new Uint8Array(this.#instance(instance).memory.buffer, pointer, length).slice();
+  }
+
   get imports() {
     return {
       rf_compile: (pointer: number, length: number) => this.#compile(pointer, length),

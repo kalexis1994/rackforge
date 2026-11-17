@@ -340,6 +340,7 @@ function storeFiles(files: SeedFile[], publishAssets: boolean): Promise<void> {
  */
 let enginePort: MessagePort | null = null;
 let poolWorkers: Worker[] = [];
+const instancePools = new Map<number, { workers: Worker[]; control: Int32Array; epoch: number; geometry: PoolRequestEvent["geometry"] }>();
 
 /**
  * What the pool is doing, for anyone who asks.
@@ -357,7 +358,6 @@ interface RenderPoolReport {
   reason?: string;
 }
 
-let poolControl: Int32Array | null = null;
 let poolReason: string | undefined;
 
 export function renderPoolReport(): RenderPoolReport {
@@ -370,19 +370,22 @@ export function renderPoolReport(): RenderPoolReport {
   return {
     isolated,
     workers: poolWorkers.length,
-    missedBlocks: poolControl ? Atomics.load(poolControl, HEADER.MISSES) : 0,
+    missedBlocks: [...instancePools.values()].reduce((sum, pool) => sum + Atomics.load(pool.control, HEADER.MISSES), 0),
     reason,
   };
 }
 
-function releaseRenderPool() {
-  for (const worker of poolWorkers) worker.terminate();
-  poolWorkers = [];
-  poolControl = null;
+function releaseRenderPool(instance: number, epoch?: number) {
+  const pool = instancePools.get(instance);
+  if (!pool || (epoch !== undefined && pool.epoch !== epoch)) return;
+  for (const worker of pool.workers) worker.terminate();
+  instancePools.delete(instance);
+  poolWorkers = [...instancePools.values()].flatMap((entry) => entry.workers);
 }
 
 function buildRenderPool(request: PoolRequestEvent) {
-  releaseRenderPool();
+  releaseRenderPool(request.instance);
+  const unavailable = () => enginePort?.postMessage({ kind: "pool_unavailable", instance: request.instance, epoch: request.epoch });
   if (!poolSupported()) {
     // Not cross-origin isolated: no shared memory, so the host stays on its
     // sequential path. This is a capability of the deployment rather than an
@@ -393,11 +396,13 @@ function buildRenderPool(request: PoolRequestEvent) {
       "rackforge render pool: the page is not cross-origin isolated, so a"
         + " parallel instrument will render on the audio thread alone",
     );
+    unavailable();
     return;
   }
   if (!parallelPoolAllowed(true, deviceIsMobile())) {
-    poolReason = "parallel rendering is disabled until worker state is isolated per plugin instance";
+    poolReason = "parallel rendering is disabled on mobile to prevent missed audio blocks";
     console.warn(`rackforge render pool: ${poolReason}`);
+    unavailable();
     return;
   }
   poolReason = undefined;
@@ -408,6 +413,7 @@ function buildRenderPool(request: PoolRequestEvent) {
   if (workerCount < 1) {
     poolReason = "this machine has too few cores to spare one for rendering";
     console.warn(`rackforge render pool: ${poolReason}`);
+    unavailable();
     return;
   }
   const layout = poolLayout(request.geometry);
@@ -417,7 +423,9 @@ function buildRenderPool(request: PoolRequestEvent) {
   // never carried its epoch retired every worker on their first iteration —
   // ready bits set, then silence, which is exactly how it failed.
   new Int32Array(buffer, 0, HEADER.WORDS)[HEADER.EPOCH] = request.epoch;
-  poolControl = new Int32Array(buffer, 0, HEADER.WORDS);
+  const poolControl = new Int32Array(buffer, 0, HEADER.WORDS);
+  const workers: Worker[] = [];
+  instancePools.set(request.instance, { workers, control: poolControl, epoch: request.epoch, geometry: request.geometry });
   for (let index = 0; index < workerCount; index++) {
     const worker = new Worker(new URL("./render.worker.ts", import.meta.url), {
       type: "module",
@@ -426,9 +434,18 @@ function buildRenderPool(request: PoolRequestEvent) {
     worker.onerror = (event) => {
       poolReason = `render worker ${index} failed to start: ${event.message}`;
       console.error(`rackforge render worker ${index} failed to start:`, event.message);
+      unavailable();
+    };
+    worker.onmessage = (event: MessageEvent<{ kind: string; error?: string }>) => {
+      if (event.data.kind === "failed") {
+        poolReason = event.data.error ?? "render worker initialization failed";
+        unavailable();
+      }
     };
     const init: WorkerInit = {
       kind: "init",
+      instance: request.instance,
+      state: request.state,
       buffer,
       geometry: request.geometry,
       prepare: request.prepare,
@@ -438,20 +455,23 @@ function buildRenderPool(request: PoolRequestEvent) {
       epoch: request.epoch,
     };
     worker.postMessage(init);
-    poolWorkers.push(worker);
+    workers.push(worker);
   }
+  poolWorkers = [...instancePools.values()].flatMap((entry) => entry.workers);
   // Observability for a thing that is otherwise invisible from devtools: the
   // pool has no DOM, and the worklet cannot be inspected at all.
   (window as unknown as { __rfRenderPool?: unknown }).__rfRenderPool = {
     workers: workerCount,
     epoch: request.epoch,
     geometry: request.geometry,
-    control: new Int32Array(buffer, 0, 16),
+    control: new Int32Array(buffer, 0, HEADER.WORDS),
+    pools: instancePools,
   };
   // The worklet flips to the parallel path only once every worker has set its
   // ready bit, so attaching before they are built is safe.
   enginePort?.postMessage({
     kind: "pool_attach",
+    instance: request.instance,
     buffer,
     workerCount,
     epoch: request.epoch,
@@ -519,6 +539,9 @@ function handleEngineEvent(event: EngineEvent) {
       break;
     case "pool_request":
       buildRenderPool(event);
+      break;
+    case "pool_release":
+      releaseRenderPool(event.instance, event.epoch);
       break;
     case "revision":
       void publishSnapshot();

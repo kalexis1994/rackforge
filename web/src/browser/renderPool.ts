@@ -72,13 +72,16 @@ export function deviceIsMobile(): boolean {
 }
 
 /**
- * A missed parallel unit contributes silence for its whole block. On mobile,
- * worker scheduling can exceed the 128-frame deadline even when the classic
- * single-threaded path still produces audible output. Keep that dependable
- * path on phones until the pool can fall back without dropping held notes.
+ * The current bridge owns one global pool, while the host prepares multiple
+ * plugin instances. Readiness therefore cannot prove that its workers belong
+ * to the instance being rendered. Switching to freshly built workers also
+ * loses held voices that began on the sequential instance. Keep automatic
+ * audio on the coherent sequential path until those state contracts exist.
  */
+const INSTANCE_SCOPED_WORKER_STATE = false;
+
 export function parallelPoolAllowed(isolated: boolean, mobile: boolean): boolean {
-  return isolated && !mobile;
+  return isolated && !mobile && INSTANCE_SCOPED_WORKER_STATE;
 }
 
 /** Which worker owns a unit. Stable for the life of a pool epoch. */

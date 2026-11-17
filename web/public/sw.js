@@ -13,28 +13,18 @@
  *   soon as it exists, and fall back to the cached page when offline;
  * * build assets carry a content hash in their name, so once cached they are
  *   answered from the cache and never revalidated;
- * * packaged plugin Web files and the host's plugin kit go to the network
- *   first, with an offline cache fallback. Their relative script and style
- *   URLs have no build hash, so serving yesterday's copy beside today's
- *   plugin page can leave PLAY waiting for a bridge that never starts;
- * * other same-origin files are answered from the cache and refreshed in the
- *   background.
+ * * public files without a build hash go to the network first, with an
+ *   offline cache fallback. This includes the host Wasm, storage manifest,
+ *   packaged components, plugin pages and their relative scripts. Refreshing
+ *   these behind a running page can mix two deployments in one filesystem.
  */
 
-const CACHE = "rackforge-v2";
+const CACHE = "rackforge-v3";
 
 /**
- * A development server is the one place these rules are exactly wrong.
- *
- * Answering the host component and the packaged plugins from the cache and
- * refreshing them behind the page is what makes a second visit instant; while
- * the thing being served is being rebuilt, it means every reload plays the
- * *previous* build. On a phone there is no cache-bypassing reload to escape
- * with, and the symptom is silent — the instrument simply stays one version
- * behind. So on a local origin everything goes to the network first.
- *
- * The plugin asset cache is exempt and stays cache-only: those files have no
- * server to fall back to, on a dev server least of all.
+ * Development subresources bypass caching so source edits are immediately
+ * visible. Plugin navigations retain their own cache entries, and installed
+ * plugin files still use Cache Storage as their virtual filesystem.
  */
 const DEVELOPMENT =
   ["localhost", "127.0.0.1", "[::1]"].includes(self.location.hostname) ||
@@ -56,8 +46,6 @@ const IMMUTABLE = "/assets/";
 const PLUGIN_ASSETS = "/plugin-assets/";
 const PLUGIN_ASSET_CACHE = "rackforge-plugin-assets";
 const PLUGIN_ASSET_PROTOCOL = 1;
-const PACKAGED_PLUGIN_WEB = "/demo/rackforge/plugins/";
-const PLUGIN_KIT = "/rackforge-plugin-kit/";
 
 // A page must distinguish a current RackForge worker from an older controller
 // that happens to exist. Treating any controller as capable let a freshly
@@ -96,7 +84,9 @@ self.addEventListener("activate", (event) => {
       .then((names) =>
         Promise.all(
           names
-            .filter((name) => name !== CACHE && name !== PLUGIN_ASSET_CACHE)
+            // Only generated site caches are obsolete. Installed plugin files
+            // and the user's IndexedDB library are independent of deployments.
+            .filter((name) => /^rackforge-v\d+$/.test(name) && name !== CACHE)
             .map((name) => caches.delete(name)),
         ),
       )
@@ -143,13 +133,8 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(pluginAsset(request).then(isolated));
     return;
   }
-  if (!DEVELOPMENT && (
-    (url.pathname.includes(PACKAGED_PLUGIN_WEB) && url.pathname.includes("/web/")) ||
-    url.pathname.includes(PLUGIN_KIT)
-  )) {
-    // A packaged plugin's iframe is a navigation too. It must not replace
-    // the app shell stored at "./", and its unversioned scripts must not be
-    // paired with a newer HTML page from a deployment.
+  if (url.pathname.includes("/demo/rackforge/plugins/")) {
+    // A packaged plugin iframe is a navigation, but is never the app shell.
     event.respondWith(networkFirstAsset(request).then(isolated));
     return;
   }
@@ -164,20 +149,27 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(fetch(request).then(isolated));
     return;
   }
-  if (url.pathname.includes(IMMUTABLE)) {
+  if (url.pathname.includes(IMMUTABLE)
+    && request.cache !== "reload" && request.cache !== "no-store") {
     event.respondWith(cacheFirst(request).then(isolated));
     return;
   }
-  event.respondWith(staleWhileRevalidate(request).then(isolated));
+  event.respondWith(networkFirstAsset(request).then(isolated));
 });
+
+function freshNetwork(request) {
+  // fetch(request) alone can still return a fresh-by-age HTTP cache entry
+  // from the previous deployment, even though Cache Storage was bypassed.
+  return fetch(request, { cache: request.cache === "no-store" ? "no-store" : "no-cache" });
+}
 
 async function networkFirst(request) {
   const cache = await caches.open(CACHE);
   try {
-    const response = await fetch(request);
+    const response = await freshNetwork(request);
     // Navigations are all answered by the same page: store it under the scope
     // root so any route works offline, not only the one that was visited.
-    cache.put("./", response.clone());
+    if (response.ok) await cache.put("./", response.clone());
     return response;
   } catch (error) {
     const cached = (await cache.match(request)) ?? (await cache.match("./"));
@@ -189,7 +181,7 @@ async function networkFirst(request) {
 async function networkFirstAsset(request) {
   const cache = await caches.open(CACHE);
   try {
-    const response = await fetch(request);
+    const response = await freshNetwork(request);
     if (response.ok) await cache.put(request, response.clone());
     return response;
   } catch (error) {
@@ -255,21 +247,6 @@ async function cacheFirst(request) {
   const cached = await cache.match(request);
   if (cached) return cached;
   const response = await fetch(request);
-  if (response.ok) cache.put(request, response.clone());
+  if (response.ok) await cache.put(request, response.clone());
   return response;
-}
-
-async function staleWhileRevalidate(request) {
-  const cache = await caches.open(CACHE);
-  const cached = await cache.match(request);
-  const network = fetch(request)
-    .then((response) => {
-      if (response.ok) cache.put(request, response.clone());
-      return response;
-    })
-    .catch((error) => {
-      if (cached) return cached;
-      throw error;
-    });
-  return cached ?? network;
 }

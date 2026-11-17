@@ -26,6 +26,7 @@ interface UnitInstance {
   outputPtr: number;
   sharedPtr: number;
   dispatchPtr: number;
+  unitChannels: number;
   renderUnit: (
     unit: number,
     payloadBytes: number,
@@ -61,6 +62,7 @@ function callable(exports: Record<string, unknown>, name: string): (...a: number
 function buildUnit(
   module: WebAssembly.Module,
   prepare: { sampleRate: number; maximumFrames: number; inputChannels: number; outputChannels: number },
+  mixSlotSamples: number,
 ): UnitInstance {
   const instance = new WebAssembly.Instance(module, {});
   const exports = instance.exports as Record<string, unknown>;
@@ -82,6 +84,15 @@ function buildUnit(
   if (status < 0) {
     throw new Error(`unit instance failed to prepare (${status})`);
   }
+  // A unit can return forces for the coordinator rather than final stereo
+  // audio. Match the runtime's optional-width contract, including old plugins.
+  const widthExport = exports.rackforge_parallel_unit_channels;
+  const declaredWidth = typeof widthExport === "function" ? widthExport() as number : 0;
+  const unitChannels = declaredWidth > 0 ? declaredWidth : prepare.outputChannels;
+  if (!Number.isSafeInteger(unitChannels) || unitChannels < 1
+    || prepare.maximumFrames * unitChannels > mixSlotSamples) {
+    throw new Error("unit output width exceeds its declared mix slot");
+  }
   return {
     exports,
     memory,
@@ -89,6 +100,7 @@ function buildUnit(
     outputPtr: callable(exports, "rackforge_output_ptr")(),
     sharedPtr: callable(exports, "rackforge_parallel_shared_ptr")(),
     dispatchPtr: callable(exports, "rackforge_parallel_dispatch_ptr")(),
+    unitChannels,
     renderUnit: callable(exports, "rackforge_parallel_render_unit") as UnitInstance["renderUnit"],
   };
 }
@@ -140,7 +152,7 @@ function renderBlock(seq: number): void {
       console.warn(`rf-worker ${workerIndex}: render_unit(${entry.unit}) status ${status}`);
     }
     if (status >= 0) {
-      const samples = frames * outputChannels;
+      const samples = frames * unit.unitChannels;
       const mix = new Uint8Array(
         unit.memory.buffer,
         unit.outputPtr,
@@ -152,7 +164,7 @@ function renderBlock(seq: number): void {
     // A failed unit still counts as done: the worklet zero-fills its slot and
     // the block completes rather than waiting out the whole budget.
     if (Atomics.load(control, HEADER.SEQ) !== seq) return;
-    Atomics.or(control, HEADER.UNIT_MASK, 1 << entry.unit);
+    if (status >= 0) Atomics.or(control, HEADER.UNIT_MASK, 1 << entry.unit);
     Atomics.add(control, HEADER.DONE, 1);
     Atomics.notify(control, HEADER.DONE);
   }
@@ -186,7 +198,7 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
     units = new Array(geometry.maxUnits).fill(null);
     for (let unit = 0; unit < geometry.maxUnits; unit++) {
       if (unitOwner(unit, workerCount) === workerIndex) {
-        units[unit] = buildUnit(module, message.prepare);
+        units[unit] = buildUnit(module, message.prepare, geometry.mixSlotSamples);
       }
     }
 

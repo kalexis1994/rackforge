@@ -57,6 +57,9 @@ const EXPORTS = [
   "rackforge_parallel_render_unit",
   "rackforge_parallel_end_block",
   "rackforge_latency_frames",
+  "rackforge_parallel_unit_channels",
+  "rackforge_parallel_report_stride",
+  "rackforge_parallel_report_ptr",
 ] as const;
 
 interface PluginInstance {

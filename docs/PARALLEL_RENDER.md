@@ -411,8 +411,14 @@ Worker count remains automatic (`cpus - 1`, capped by the Slot limit) and
 
 ## The browser host
 
-The full-web RackForge runs the same extension on Web Workers. The mapping
-from the native design, piece for piece:
+The full-web RackForge includes a Web Worker transport for the extension.
+Automatic audio currently uses the sequential component path: the global
+worker pool does not isolate ownership by plugin instance, and switching to
+fresh workers cannot preserve voices that began on the coordinator. A warm
+service-worker visit used to enable that unsafe transition, silencing Concert
+Grand or another instrument after selection while a cold visit still worked.
+
+The transport's mapping from the native design is:
 
 | native                            | browser                                  |
 | --------------------------------- | ---------------------------------------- |
@@ -445,7 +451,8 @@ Cross-origin isolation is served three ways: the desktop and Pi gateways set
 `Cross-Origin-Embedder-Policy: require-corp` on every SPA response, the Vite
 dev server mirrors them, and on hosts that cannot set headers (GitHub Pages)
 the service worker stamps them onto the responses it answers — the first
-visit runs sequential, every controlled visit after is isolated.
+visit is unisolated and controlled visits after it are isolated. Isolation
+alone does not enable the worker pool.
 
 Scope: the browser pool parallelises the units of the active instrument, the
 dominant browser-host case. Cabled-rack parallelism across plugin instances
@@ -630,16 +637,17 @@ Concert Grand is exactly that kind of plugin, so on the web it is currently
 single-threaded. Closing this needs a report region in the arena, a copy on
 the worker side and an `rf_par_report_read`.
 
-**Nothing exercises the browser transport the way the native one is now
-exercised.** `tests/parallel_render.rs` holds the native path to its
-sequential fallback with a fixture whose units are deliberately wider than
-its instrument, and holds the packaged Concert Grand to the same standard
-through the real `ParallelUnits` and `RenderPool`. `browser.rs` is
-`#[cfg(target_arch = "wasm32")]` and calls into the embedder, so nothing in
-this workspace can run it at all. The one rule it used to get wrong on its
-own now lives on `ParallelLayout::unit_width`, which every host asks and
-which has a test that compiles on every target — but that is a rule with a
-guard, not a transport with a guard.
+**Browser audibility is distinct from parallel equivalence.** The worker
+transfer tests exercise twenty-channel slots and failed-unit validity; the
+export-contract test compares both JavaScript bridges with Rust's ordinal
+table. `tools/check-browser-audio.py` runs an isolated headless Chrome profile
+against a built browser demo and verifies actual audio for every bundled
+instrument and effect across cold, warm, repeated-warm and offline starts.
+Its JSON receipt records each plugin version and measured peak. Include
+RF-Soundfonts and its bank in the fixture's storage manifest to test the full
+preinstalled set. These are audibility checks, not proof of parallel DSP
+equivalence. The native `tests/parallel_render.rs` additionally compares real
+packaged Concert Grand output across the render paths.
 
 **`live.rs` is invisible to a host build on Windows.** It is behind
 `#[cfg(target_os = "linux")]`, so cargo reports success for a crate whose

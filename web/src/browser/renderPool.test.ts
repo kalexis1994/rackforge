@@ -60,11 +60,11 @@ describe("worker policy", () => {
     expect(deviceIsMobile()).toBe(true);
   });
 
-  it("keeps mobile browsers on the audible sequential fallback", () => {
+  it("keeps every browser sequential until workers preserve per-instance state", () => {
     expect(parallelPoolAllowed(false, false)).toBe(false);
     expect(parallelPoolAllowed(false, true)).toBe(false);
     expect(parallelPoolAllowed(true, true)).toBe(false);
-    expect(parallelPoolAllowed(true, false)).toBe(true);
+    expect(parallelPoolAllowed(true, false)).toBe(false);
   });
 
   it("reserves cores for the audio and main threads and caps at four", () => {

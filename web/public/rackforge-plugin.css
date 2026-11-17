@@ -1,0 +1,19 @@
+/* Shared interaction defaults for PLAY and CONFIG iframe documents. */
+html,
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Editable values must also work inside themes that disable selection on
+   every panel descendant. Native range controls keep the panel behavior. */
+input:not([type="range"]),
+textarea,
+[contenteditable=""],
+[contenteditable="true"],
+[contenteditable="plaintext-only"] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default;
+}

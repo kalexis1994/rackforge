@@ -263,7 +263,7 @@ function installPluginAssetRecovery() {
 
 async function loadStorage(): Promise<SeedFile[]> {
   const manifest = (await (
-    await fetch(assetUrl(versionedBrowserAsset(STORAGE_MANIFEST)))
+    await fetch(assetUrl(versionedBrowserAsset(STORAGE_MANIFEST)), { cache: "no-store" })
   ).json()) as StorageManifest;
   const [packaged, stored] = await Promise.all([
     Promise.all(
@@ -396,7 +396,7 @@ function buildRenderPool(request: PoolRequestEvent) {
     return;
   }
   if (!parallelPoolAllowed(true, deviceIsMobile())) {
-    poolReason = "parallel rendering is disabled on mobile to prevent silent missed blocks";
+    poolReason = "parallel rendering is disabled until worker state is isolated per plugin instance";
     console.warn(`rackforge render pool: ${poolReason}`);
     return;
   }

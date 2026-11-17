@@ -30,7 +30,10 @@ export function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null>
   if (!("serviceWorker" in navigator)) return Promise.resolve(null);
   if (!registration) {
     registration = navigator.serviceWorker
-      .register(assetUrl("sw.js"), { scope: import.meta.env.BASE_URL })
+      .register(assetUrl("sw.js"), {
+        scope: import.meta.env.BASE_URL,
+        updateViaCache: "none",
+      })
       .catch((error: unknown) => {
         // A transient registration error must not disable installed UIs for
         // the rest of the visit. A later catalog request may retry.

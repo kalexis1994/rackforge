@@ -154,12 +154,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-Tines.rfplugin",
         "plugin_id": "org.rackforge.rftines",
-        "version": "0.2.11",
+        "version": "0.2.12",
         "url": (
             "https://github.com/kalexis1994/RF-Tines/"
-            "releases/download/v0.2.11/RF-Tines.rfplugin"
+            "releases/download/v0.2.12/RF-Tines.rfplugin"
         ),
-        "sha256": "d7c51d892b82bd61d3579154f4bd9a25b4bac70a699c35ddb142059fb8211e71",
+        "sha256": "c29c44a992b062f696d40b81951ac3e5087971208a1716c1c42db971ce5373bd",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",
@@ -185,12 +185,12 @@ OFFICIAL_PLUGINS = (
     {
         "filename": "RF-EPiano.rfplugin",
         "plugin_id": "org.rackforge.rf-epiano",
-        "version": "0.1.6",
+        "version": "0.1.7",
         "url": (
             "https://github.com/kalexis1994/rackforge-plugin-rf-epiano/"
-            "releases/download/v0.1.6/RF-EPiano.rfplugin"
+            "releases/download/v0.1.7/RF-EPiano.rfplugin"
         ),
-        "sha256": "ff68d191c6053ea47c8a5a79405f59c372a9ba5f96cf1cc89abc49ad07b8fdab",
+        "sha256": "42416245025ae41307bf06350cb6c38a4467fce445b74de6ce9f7a52b6cef70d",
         "required": (
             "rackforge-plugin.toml",
             "component.wasm",

@@ -17,6 +17,7 @@ members = [
     "crates/rackforge-midi-api",
     "crates/rackforge-platform-api",
     "crates/rackforge-platform-host",
+    "crates/rackforge-updater",
     "crates/rackforge-performance-api",
     "crates/rackforge-plugin-api",
     "crates/rackforge-plugin-runtime",

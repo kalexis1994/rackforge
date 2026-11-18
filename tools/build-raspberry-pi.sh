@@ -86,6 +86,7 @@ cargo build --locked --release \
   -p rackforge-web \
   -p rackforge-store \
   -p rackforge-platform-host \
+  -p rackforge-updater \
   -p rackforge-controller-host \
   -p rackforge-controller-arturia-keylab-essential-mk3
 
@@ -106,6 +107,7 @@ for binary in \
   rackforge-web \
   rackforge-store \
   rackforge-platform-host \
+  rackforge-updater \
   rackforge-controller-host \
   rackforge-arturia-keylab-essential-mk3-driver
 do
@@ -151,6 +153,7 @@ done
 cp -a "$repository/hardware/controllers" "$release/hardware/controllers"
 cp "$repository/THIRD_PARTY_NOTICES.md" "$release/THIRD_PARTY_NOTICES.md"
 
+version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
 revision="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || printf 'unknown')}"
 default_plugin=none
 if [[ -f "$release/bundled-plugins/RF-Concert-Grand.rfplugin" ]]; then
@@ -177,8 +180,8 @@ for archive_path in sorted(directory.glob("*.rfplugin")):
 print(",".join(carried) if carried else "none")
 PY
 )"
-printf 'revision=%s\narchitecture=linux-aarch64\nedition=%s\ndefault_plugin=%s\nofficial_plugin=%s\n' \
-  "$revision" "$edition" "$default_plugin" "$official_plugin" >"$release/build-info.txt"
+printf 'version=%s\nrevision=%s\narchitecture=linux-aarch64\nedition=%s\ndefault_plugin=%s\nofficial_plugin=%s\n' \
+  "$version" "$revision" "$edition" "$default_plugin" "$official_plugin" >"$release/build-info.txt"
 
 cat >"$release/INSTALL.md" <<'EOF'
 # RackForge for Raspberry Pi ARM64

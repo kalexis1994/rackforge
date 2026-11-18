@@ -19,7 +19,7 @@ source_root="${RACKFORGE_SOURCE:-$(cd "$script_dir/../.." && pwd)}"
 service_user="$RACKFORGE_USER_RESOLVED"
 
 for binary in \
-  rackforge-core rackforge-web rackforge-store rackforge-platform-host rackforge-controller-host
+  rackforge-core rackforge-web rackforge-store rackforge-platform-host rackforge-updater rackforge-controller-host
 do
   test -x "$source_root/target/release/$binary"
 done
@@ -31,11 +31,12 @@ sudo groupadd --system --force rackforge
 sudo groupadd --system --force audio
 sudo usermod -a -G audio,rackforge "$service_user"
 
+install -d "$root/state/updates"
 install -d \
   "$root/bin" "$root/config" "$root/data" "$root/state" "$root/logs" \
   "$root/plugin-store" "$root/plugins" "$root/controllers"
 for binary in \
-  rackforge-core rackforge-web rackforge-store rackforge-platform-host rackforge-controller-host
+  rackforge-core rackforge-web rackforge-store rackforge-platform-host rackforge-updater rackforge-controller-host
 do
   install -m 0755 "$source_root/target/release/$binary" "$root/bin/$binary.new"
   mv "$root/bin/$binary.new" "$root/bin/$binary"
@@ -127,7 +128,7 @@ fi
 install -d "$root/controllers"
 "$root/bin/rackforge-controller-host" install-catalog --root "$root/controllers"
 
-for unit in rackforge-platform-host rackforge-controller-host rackforge-web rackforge-audio
+for unit in rackforge-updater rackforge-platform-host rackforge-controller-host rackforge-web rackforge-audio
 do
   rackforge_render_systemd_unit \
     "$script_dir/systemd/$unit.service" "/etc/systemd/system/$unit.service"
@@ -137,10 +138,10 @@ rackforge_render_systemd_unit \
 
 sudo systemctl daemon-reload
 sudo systemctl enable \
-  rackforge-platform-host.service rackforge-controller-host.service \
+  rackforge-updater.service rackforge-platform-host.service rackforge-controller-host.service \
   rackforge-web.service rackforge-audio.service rackforge-audio.path
 sudo systemctl restart \
-  rackforge-platform-host.service rackforge-controller-host.service \
+  rackforge-updater.service rackforge-platform-host.service rackforge-controller-host.service \
   rackforge-web.service rackforge-audio.path
 if [[ -f "$root/config/audio.toml" ]]; then
   sudo systemctl restart rackforge-audio.service

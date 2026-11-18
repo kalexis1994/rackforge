@@ -17,6 +17,7 @@ if [[ -n "$optimize" && "$optimize" != --optimize ]]; then
   exit 2
 fi
 
+test -x "$source_root/target/release/rackforge-updater"
 test -x "$source_root/target/release/rackforge-platform-host"
 test -x "$source_root/target/release/rackforge-controller-host"
 test -x "$source_root/target/release/rackforge-core"
@@ -31,7 +32,11 @@ test -f "$systemd_root/rackforge-audio.path"
 sudo groupadd --system --force rackforge
 sudo usermod -a -G rackforge "$service_user"
 
+install -d "$root/state/updates"
 install -d "$root/bin" "$root/config" "$root/data" "$root/state" "$root/logs"
+install -m 0755 "$source_root/target/release/rackforge-updater" "$root/bin/rackforge-updater.new"
+mv "$root/bin/rackforge-updater.new" "$root/bin/rackforge-updater"
+
 install -m 0755 \
   "$source_root/target/release/rackforge-platform-host" \
   "$root/bin/rackforge-platform-host.new"
@@ -63,6 +68,8 @@ if [[ ! -f "$root/config/audio.toml.example" ]]; then
 fi
 
 rackforge_render_systemd_unit \
+  "$systemd_root/rackforge-updater.service" "/etc/systemd/system/rackforge-updater.service"
+rackforge_render_systemd_unit \
   "$systemd_root/rackforge-platform-host.service" \
   /etc/systemd/system/rackforge-platform-host.service
 rackforge_render_systemd_unit \
@@ -79,12 +86,14 @@ rackforge_render_systemd_unit \
   /etc/systemd/system/rackforge-audio.path
 sudo systemctl daemon-reload
 sudo systemctl enable \
+  rackforge-updater.service \
   rackforge-platform-host.service \
   rackforge-controller-host.service \
   rackforge-web.service \
   rackforge-audio.service \
   rackforge-audio.path
 sudo systemctl restart \
+  rackforge-updater.service \
   rackforge-platform-host.service \
   rackforge-controller-host.service \
   rackforge-web.service \

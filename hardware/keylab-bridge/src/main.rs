@@ -83,6 +83,52 @@ const WEB_CONTROL_SOCKET_NAME: &str = "web-control.sock";
 const PLATFORM_CONTROL_SOCKET: &str = "/run/rackforge/platform-control.sock";
 static NEXT_CONTROL_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
 
+#[derive(Debug)]
+struct UpdateTask {
+    receiver: Receiver<Result<rackforge_platform_api::updates::UpdateState, String>>,
+}
+
+fn start_update_task(
+    task: &mut Option<UpdateTask>,
+    request: rackforge_platform_api::updates::UpdateRequest,
+) {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    *task = Some(UpdateTask { receiver });
+    thread::spawn(move || {
+        #[cfg(target_os = "linux")]
+        let result = rackforge_platform_api::updates::exchange(
+            std::path::Path::new(rackforge_platform_api::updates::UPDATE_SOCKET),
+            &request,
+        );
+        #[cfg(not(target_os = "linux"))]
+        let result = {
+            let _ = request;
+            Ok(rackforge_platform_api::updates::UpdateState::unsupported(
+                rackforge_platform_api::updates::HOST_VERSION,
+                std::env::consts::OS,
+            ))
+        };
+        let _ = sender.send(result);
+    });
+}
+
+fn poll_update_task(task: &mut Option<UpdateTask>, menu: &mut menu::Menu) -> bool {
+    let Some(running) = task else {
+        return false;
+    };
+    let result = match running.receiver.try_recv() {
+        Ok(result) => result,
+        Err(mpsc::TryRecvError::Empty) => return false,
+        Err(mpsc::TryRecvError::Disconnected) => Err("Update service request failed".into()),
+    };
+    *task = None;
+    match result {
+        Ok(state) => menu.sync_software_update(state),
+        Err(message) => menu.fail_software_update(message),
+    }
+    true
+}
+
 #[cfg(target_os = "linux")]
 #[derive(Debug)]
 enum WifiTaskSuccess {
@@ -1609,6 +1655,8 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         let mut button_gestures = ButtonGestureTracker::default();
         let mut transient_header = TransientHeader::default();
         let mut wifi_task: Option<WifiTask> = None;
+        let mut update_task: Option<UpdateTask> = None;
+        let mut next_update_poll = Instant::now();
         let mut audio_task: Option<AudioTask> = None;
         let mut next_spinner_frame = Instant::now();
         let mut next_settings_check = Instant::now();
@@ -1820,7 +1868,12 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                             }
                         }
                     }
-                    match apply_pending_menu_command(&mut menu, &mut wifi_task, &mut audio_task) {
+                    match apply_pending_menu_command(
+                        &mut menu,
+                        &mut wifi_task,
+                        &mut audio_task,
+                        &mut update_task,
+                    ) {
                         Ok(true) => {
                             messages = render_menu_messages(&menu)?;
                             if let Err(error) = send_menu_with_header_override(
@@ -1856,7 +1909,12 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
                         break 'surface;
                     }
                 }
-                match apply_pending_menu_command(&mut menu, &mut wifi_task, &mut audio_task) {
+                match apply_pending_menu_command(
+                    &mut menu,
+                    &mut wifi_task,
+                    &mut audio_task,
+                    &mut update_task,
+                ) {
                     Ok(true) => {
                         messages = render_menu_messages(&menu)?;
                         if let Err(error) = send_menu_with_header_override(
@@ -1877,7 +1935,21 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
             }
 
             let now = Instant::now();
-            if poll_wifi_task(&mut wifi_task, &mut menu) {
+            if menu.software_update_visible() && update_task.is_none() && now >= next_update_poll {
+                next_update_poll = now + Duration::from_secs(1);
+                start_update_task(
+                    &mut update_task,
+                    rackforge_platform_api::updates::UpdateRequest::Status,
+                );
+            }
+            if poll_update_task(&mut update_task, &mut menu) {
+                messages = render_menu_messages(&menu)?;
+                send_menu_with_header_override(
+                    &mut session,
+                    &messages,
+                    transient_header.visible_message(now),
+                )?;
+            } else if poll_wifi_task(&mut wifi_task, &mut menu) {
                 messages = render_menu_messages(&menu)?;
                 if let Err(error) = send_menu_with_header_override(
                     &mut session,
@@ -2687,6 +2759,7 @@ fn apply_pending_menu_command(
     menu: &mut menu::Menu,
     wifi_task: &mut Option<WifiTask>,
     audio_task: &mut Option<AudioTask>,
+    update_task: &mut Option<UpdateTask>,
 ) -> Result<bool, String> {
     #[cfg(not(target_os = "linux"))]
     let _ = (&mut *wifi_task, &mut *audio_task);
@@ -2694,6 +2767,13 @@ fn apply_pending_menu_command(
         return Ok(false);
     };
     match command {
+        menu::MenuCommand::CheckSoftwareUpdates => {
+            start_update_task(
+                update_task,
+                rackforge_platform_api::updates::UpdateRequest::Check,
+            );
+            Ok(true)
+        }
         menu::MenuCommand::SetActiveMode { mode } => {
             dispatch_session_command(SessionCommand::SetActiveMode {
                 mode: match mode {

@@ -1,0 +1,11 @@
+.software-update-status,
+.software-host-build,
+.software-release-notes {
+  overflow-wrap: anywhere;
+}
+
+.software-release-notes {
+  white-space: pre-wrap;
+  max-height: 16rem;
+  overflow: auto;
+}

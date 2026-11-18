@@ -4183,6 +4183,7 @@ dependencies = [
  "rackforge-controller-api",
  "rackforge-midi-api",
  "rackforge-performance-api",
+ "rackforge-platform-api",
  "rackforge-plugin-api",
  "rackforge-program-api",
  "rackforge-session-api",
@@ -4206,6 +4207,23 @@ dependencies = [
  "windows 0.62.2",
  "windows-collections 0.3.2",
  "windows-core 0.62.2",
+]
+
+[[package]]
+name = "rackforge-updater"
+version = "0.1.39"
+dependencies = [
+ "anyhow",
+ "base64",
+ "ed25519-dalek",
+ "getrandom 0.3.4",
+ "rackforge-platform-api",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "ureq",
+ "url",
 ]
 
 [[package]]
@@ -4242,6 +4260,7 @@ dependencies = [
  "mime_guess",
  "rackforge-control-api",
  "rackforge-controller-package",
+ "rackforge-platform-api",
  "rackforge-plugin-api",
  "rackforge-repository",
  "rackforge-resource-api",

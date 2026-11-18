@@ -97,7 +97,7 @@ fn start_update_task(
     thread::spawn(move || {
         #[cfg(target_os = "linux")]
         let result = rackforge_platform_api::updates::exchange(
-            std::path::Path::new(rackforge_platform_api::updates::UPDATE_SOCKET),
+            &rackforge_platform_api::updates::update_socket(),
             &request,
         );
         #[cfg(not(target_os = "linux"))]
@@ -1516,6 +1516,9 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
     }
 
     let mut menu = menu::Menu::default();
+    let update_return = env::var_os("RACKFORGE_ROOT")
+        .map(PathBuf::from)
+        .map(|root| root.join("state/little-update-return"));
     if let Err(error) = refresh_live_catalog(&mut menu) {
         eprintln!("Catálogo LIVE todavía no disponible: {error}");
     }
@@ -1612,7 +1615,14 @@ fn run_serve(selector: Option<&str>, execute: bool) -> Result<(), Box<dyn Error>
         if shown_for_usb.as_ref() != Some(&usb_generation) {
             match refresh_live_catalog(&mut menu) {
                 Ok(()) => {
-                    menu.show_active_mode();
+                    if update_return.as_ref().is_some_and(|path| path.exists()) {
+                        menu.resume_software_update();
+                        if let Some(path) = &update_return {
+                            let _ = std::fs::remove_file(path);
+                        }
+                    } else {
+                        menu.show_active_mode();
+                    }
                     shown_for_usb = Some(usb_generation.clone());
                 }
                 Err(error) => eprintln!("LITTLE abre sin la sesión todavía: {error}"),
@@ -2771,6 +2781,24 @@ fn apply_pending_menu_command(
             start_update_task(
                 update_task,
                 rackforge_platform_api::updates::UpdateRequest::Check,
+            );
+            Ok(true)
+        }
+        menu::MenuCommand::InstallSoftwareUpdate { version } => {
+            if let Some(root) = env::var_os("RACKFORGE_ROOT") {
+                std::fs::write(PathBuf::from(root).join("state/little-update-return"), b"1")
+                    .map_err(|e| e.to_string())?;
+            }
+            start_update_task(
+                update_task,
+                rackforge_platform_api::updates::UpdateRequest::Install { version },
+            );
+            Ok(true)
+        }
+        menu::MenuCommand::RecoverSoftwareUpdate => {
+            start_update_task(
+                update_task,
+                rackforge_platform_api::updates::UpdateRequest::Recover,
             );
             Ok(true)
         }

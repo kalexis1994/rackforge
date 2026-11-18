@@ -12,6 +12,7 @@ esac
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/scripts/lib/install-env.sh"
 source "$script_dir/scripts/lib/render-audio-seed.sh"
+source "$script_dir/scripts/lib/install-update-agent.sh"
 rackforge_resolve_install_environment
 
 root="$RACKFORGE_ROOT_RESOLVED"
@@ -137,6 +138,7 @@ rackforge_render_systemd_unit \
   "$script_dir/systemd/rackforge-audio.path" "/etc/systemd/system/rackforge-audio.path"
 
 sudo systemctl daemon-reload
+rackforge_install_update_agent "$source_root" "$script_dir/systemd"
 sudo systemctl enable \
   rackforge-updater.service rackforge-platform-host.service rackforge-controller-host.service \
   rackforge-web.service rackforge-audio.service rackforge-audio.path

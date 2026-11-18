@@ -25,4 +25,15 @@ describe("signed software update feedback", () => {
     expect(updateDescription({ ...state, phase: "not_published" })).toContain("No signed RackForge update");
     expect(updateDescription({ ...state, phase: "not_published" })).not.toContain("up to date");
   });
+  it("keeps installation and recovery busy until services have been checked", () => {
+    for (const phase of ["installing", "recovering"] as const) expect(updateBusy({ ...state, phase })).toBe(true);
+    expect(updateDescription({ ...state, phase: "installing" })).toContain("Audio will stop");
+    expect(updateDescription({ ...state, phase: "recovering" })).toContain("previous installation");
+    expect(updateBusy({ ...state, phase: "installed" })).toBe(false);
+  });
+  it("distinguishes successful activation, rollback and a failed recovery", () => {
+    expect(updateDescription({ ...state, phase: "installed" })).toContain("installed and checked");
+    expect(updateDescription({ ...state, phase: "rolled_back" })).toContain("previous RackForge");
+    expect(updateDescription({ ...state, phase: "recovery_failed", message: "Audio hardware unavailable" })).toBe("Audio hardware unavailable");
+  });
 });

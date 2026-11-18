@@ -2,7 +2,14 @@
 use serde::{Deserialize, Serialize};
 
 pub const UPDATE_SOCKET: &str = "/run/rackforge-updater/control.sock";
+pub const INSTALL_SOCKET: &str = "/run/rackforge-installer/control.sock";
 pub const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub fn update_socket() -> std::path::PathBuf {
+    std::env::var_os("RACKFORGE_UPDATE_SOCKET")
+        .map(Into::into)
+        .unwrap_or_else(|| UPDATE_SOCKET.into())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -13,6 +20,11 @@ pub enum UpdatePhase {
     Available,
     Downloading,
     Ready,
+    Installing,
+    Recovering,
+    Installed,
+    RolledBack,
+    RecoveryFailed,
     Failed,
     NotPublished,
     Unsupported,
@@ -38,6 +50,8 @@ pub struct UpdateState {
     pub downloaded_bytes: u64,
     /// Checked metadata and archives can be prepared before activation is supported.
     pub can_stage: bool,
+    #[serde(default)]
+    pub can_install: bool,
 }
 
 impl UpdateState {
@@ -51,10 +65,17 @@ impl UpdateState {
             message: Some("Software updates are unavailable on this host.".into()),
             downloaded_bytes: 0,
             can_stage: false,
+            can_install: false,
         }
     }
     pub fn busy(&self) -> bool {
-        matches!(self.phase, UpdatePhase::Checking | UpdatePhase::Downloading)
+        matches!(
+            self.phase,
+            UpdatePhase::Checking
+                | UpdatePhase::Downloading
+                | UpdatePhase::Installing
+                | UpdatePhase::Recovering
+        )
     }
 }
 
@@ -67,6 +88,23 @@ pub enum UpdateRequest {
     Stage {
         version: String,
     },
+    Install {
+        version: String,
+    },
+    Recover,
+    /// Offline CLI preparation; the cached metadata and archive are reverified.
+    UseStaged {
+        version: String,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ActivationStatus {
+    pub phase: UpdatePhase,
+    pub current_version: String,
+    pub build: String,
+    pub target_version: Option<String>,
+    pub message: Option<String>,
 }
 
 #[cfg(unix)]

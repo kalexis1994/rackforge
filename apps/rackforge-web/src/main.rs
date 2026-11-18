@@ -586,6 +586,14 @@ async fn main() -> Result<()> {
         .route("/api/v1/host/software", get(software_information))
         .route("/api/v1/host/updates/check", post(check_software_updates))
         .route("/api/v1/host/updates/stage", post(stage_software_update))
+        .route(
+            "/api/v1/host/updates/install",
+            post(install_software_update),
+        )
+        .route(
+            "/api/v1/host/updates/recover",
+            post(recover_software_update),
+        )
         .route("/api/v1/auth/status", get(auth_status))
         .route("/api/v1/auth/unlock", post(unlock_browser))
         .route("/api/v1/auth/pin", post(set_pin))
@@ -1116,6 +1124,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({
         "status": "ok",
         "core_connected": state.control_socket.exists(),
+        "version": env!("CARGO_PKG_VERSION"),
         "schema_version": 1,
         "revision": env!("RACKFORGE_REVISION"),
         "ui_revision": ui_revision,
@@ -1129,7 +1138,7 @@ async fn updater_exchange(
         #[cfg(unix)]
         {
             rackforge_platform_api::updates::exchange(
-                Path::new(rackforge_platform_api::updates::UPDATE_SOCKET),
+                &rackforge_platform_api::updates::update_socket(),
                 &request,
             )
         }
@@ -1211,6 +1220,36 @@ async fn stage_software_update(
         rackforge_platform_api::updates::UpdateRequest::Stage {
             version: request.version,
         },
+    )
+    .await
+}
+
+async fn install_software_update(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<StageSoftwareUpdate>,
+) -> Response {
+    if semver::Version::parse(&request.version).is_err() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    update_operation(
+        headers,
+        state,
+        rackforge_platform_api::updates::UpdateRequest::Install {
+            version: request.version,
+        },
+    )
+    .await
+}
+
+async fn recover_software_update(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    update_operation(
+        headers,
+        state,
+        rackforge_platform_api::updates::UpdateRequest::Recover,
     )
     .await
 }

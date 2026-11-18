@@ -33,10 +33,21 @@ fn main() -> Result<()> {
         .collect::<Vec<_>>()
         .as_slice()
     {
+        ["public-key"] => {
+            println!("{}", rackforge_updater::PUBLIC_KEY.trim());
+            Ok(())
+        }
         ["serve", root, socket] => serve(PathBuf::from(root), Path::new(socket)),
+        #[cfg(unix)]
+        ["supervise", config] => rackforge_updater::installer::supervise(Path::new(config)),
+        #[cfg(unix)]
+        ["installer-worker", config] => rackforge_updater::installer::worker(Path::new(config)),
         ["status"] => client_request("status", None),
         ["check"] => client_request("check", None),
         ["stage", version] => client_request("stage", Some(version)),
+        ["install", version] => client_request("install", Some(version)),
+        ["recover"] => client_request("recover", None),
+        ["offer-staged", version] => client_request("offer-staged", Some(version)),
         ["keygen", secret, public] => {
             let mut bytes = [0u8; 32];
             getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -83,7 +94,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         _ => bail!(
-            "usage: rackforge-updater status|check|stage VERSION | serve ROOT SOCKET | keygen SECRET PUBLIC | sign MANIFEST SECRET SIGNATURE | verify MANIFEST SIGNATURE ARCHIVE PLATFORM"
+            "usage: rackforge-updater status|check|stage VERSION|install VERSION|offer-staged VERSION|recover|public-key | serve ROOT SOCKET | supervise CONFIG | keygen SECRET PUBLIC | sign MANIFEST SECRET SIGNATURE | verify MANIFEST SIGNATURE ARCHIVE PLATFORM"
         ),
     }
 }
@@ -96,10 +107,17 @@ fn client_request(operation: &str, version: Option<&str>) -> Result<()> {
             "stage" => UpdateRequest::Stage {
                 version: version.context("Missing release version")?.into(),
             },
+            "install" => UpdateRequest::Install {
+                version: version.context("Missing release version")?.into(),
+            },
+            "recover" => UpdateRequest::Recover,
+            "offer-staged" => UpdateRequest::UseStaged {
+                version: version.context("Missing release version")?.into(),
+            },
             _ => UpdateRequest::Status,
         };
         let state = rackforge_platform_api::updates::exchange(
-            Path::new(rackforge_platform_api::updates::UPDATE_SOCKET),
+            &rackforge_platform_api::updates::update_socket(),
             &request,
         )
         .map_err(|message| anyhow::anyhow!(message))?;
@@ -183,21 +201,115 @@ fn serve(_root: PathBuf, _socket: &Path) -> Result<()> {
 #[cfg(unix)]
 fn dispatch(shared: Arc<Mutex<Inner>>, root: PathBuf, request: UpdateRequest) -> UpdateState {
     let mut inner = shared.lock().unwrap();
+    let installer_socket = std::env::var_os("RACKFORGE_INSTALL_SOCKET")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| rackforge_platform_api::updates::INSTALL_SOCKET.into());
+    if let Ok(status) =
+        rackforge_updater::installer::exchange(&installer_socket, &UpdateRequest::Status)
+    {
+        inner.state.can_install = true;
+        inner.state.current_version = status.current_version;
+        inner.state.build = status.build;
+        if matches!(
+            status.phase,
+            UpdatePhase::Installing | UpdatePhase::Recovering | UpdatePhase::RecoveryFailed
+        ) || matches!(
+            inner.state.phase,
+            UpdatePhase::Idle | UpdatePhase::Installing | UpdatePhase::Recovering
+        ) {
+            inner.state.phase = status.phase;
+            inner.state.message = status.message;
+        }
+    } else {
+        inner.state.can_install = false;
+    }
+    if matches!(request, UpdateRequest::Recover) && !inner.state.busy() {
+        match rackforge_updater::installer::exchange(&installer_socket, &request) {
+            Ok(status) => {
+                inner.state.phase = status.phase;
+                inner.state.message = status.message;
+            }
+            Err(error) => {
+                inner.state.phase = UpdatePhase::Failed;
+                inner.state.message = Some(format!("{error:#}"));
+            }
+        }
+        return inner.state.clone();
+    }
     if matches!(request, UpdateRequest::Status) || inner.state.busy() {
         return inner.state.clone();
     }
+    if let UpdateRequest::UseStaged { version } = &request {
+        let result = (|| -> Result<VerifiedRelease> {
+            let parsed = semver::Version::parse(version)?;
+            anyhow::ensure!(
+                parsed.pre.is_empty() && parsed.build.is_empty(),
+                "Use a stable release version"
+            );
+            let stage = root.join("state/updates").join(version);
+            let bytes = fs::read(stage.join("updates.json"))?;
+            let signature = fs::read_to_string(stage.join("updates.json.sig"))?;
+            let manifest = rackforge_updater::verify_manifest(
+                &bytes,
+                &signature,
+                rackforge_updater::PUBLIC_KEY,
+            )?;
+            anyhow::ensure!(manifest.version == *version, "Cached version mismatch");
+            let offer = rackforge_updater::release_offer(
+                &manifest,
+                &inner.state.current_version,
+                &inner.state.platform,
+            )?
+            .context("The cached release is not newer")?;
+            rackforge_updater::verify_archive(
+                &stage.join(rackforge_updater::asset_name(&inner.state.platform)?),
+                &manifest.targets[&inner.state.platform],
+            )?;
+            inner.state.available = Some(offer);
+            Ok(VerifiedRelease {
+                manifest,
+                bytes,
+                signature,
+            })
+        })();
+        match result {
+            Ok(release) => {
+                inner.found = Some(release);
+                inner.state.phase = UpdatePhase::Ready;
+                inner.state.message = Some("The offline signed update is ready to install".into());
+            }
+            Err(error) => {
+                inner.state.phase = UpdatePhase::Failed;
+                inner.state.message = Some(format!("{error:#}"));
+            }
+        }
+        return inner.state.clone();
+    }
     let stage = match &request {
-        UpdateRequest::Stage { version } => inner.found.clone().filter(|r| {
-            r.manifest.version == *version
-                && inner
-                    .state
-                    .available
-                    .as_ref()
-                    .is_some_and(|offer| offer.version == *version)
-        }),
+        UpdateRequest::Stage { version } | UpdateRequest::Install { version } => {
+            inner.found.clone().filter(|r| {
+                r.manifest.version == *version
+                    && inner
+                        .state
+                        .available
+                        .as_ref()
+                        .is_some_and(|offer| offer.version == *version)
+            })
+        }
         _ => None,
     };
-    if matches!(request, UpdateRequest::Stage { .. }) && stage.is_none() {
+    let install = matches!(request, UpdateRequest::Install { .. });
+    if install && !inner.state.can_install {
+        let mut state = inner.state.clone();
+        state.phase = UpdatePhase::Failed;
+        state.message = Some("The installation agent is not available".into());
+        return state;
+    }
+    if matches!(
+        request,
+        UpdateRequest::Stage { .. } | UpdateRequest::Install { .. }
+    ) && stage.is_none()
+    {
         let mut state = inner.state.clone();
         state.phase = UpdatePhase::Failed;
         state.message = Some("Check for this release before downloading it".into());
@@ -236,8 +348,20 @@ fn dispatch(shared: Arc<Mutex<Inner>>, root: PathBuf, request: UpdateRequest) ->
                     |bytes| shared.lock().unwrap().state.downloaded_bytes = bytes,
                 )?;
                 let mut inner = shared.lock().unwrap();
-                inner.state.phase = UpdatePhase::Ready;
-                inner.state.message = Some("The signed package is verified and ready. Activation is not yet supported from the interface.".into());
+                if install {
+                    let status = rackforge_updater::installer::exchange(
+                        &installer_socket,
+                        &UpdateRequest::Install {
+                            version: release.manifest.version,
+                        },
+                    )?;
+                    inner.state.phase = status.phase;
+                    inner.state.message = status.message;
+                } else {
+                    inner.state.phase = UpdatePhase::Ready;
+                    inner.state.message =
+                        Some("The signed package is verified and ready to install.".into());
+                }
             } else {
                 let state = shared.lock().unwrap().state.clone();
                 let (manifest, offer, bytes, signature) =

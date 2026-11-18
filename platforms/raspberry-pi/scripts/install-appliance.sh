@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "$script_dir/lib/install-env.sh"
 source "$script_dir/lib/render-audio-seed.sh"
+source "$script_dir/lib/install-update-agent.sh"
 rackforge_resolve_install_environment
 
 root="$RACKFORGE_ROOT_RESOLVED"
@@ -85,6 +86,7 @@ rackforge_render_systemd_unit \
   "$systemd_root/rackforge-audio.path" \
   /etc/systemd/system/rackforge-audio.path
 sudo systemctl daemon-reload
+rackforge_install_update_agent "$source_root" "$systemd_root"
 sudo systemctl enable \
   rackforge-updater.service \
   rackforge-platform-host.service \

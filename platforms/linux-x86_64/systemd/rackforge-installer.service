@@ -1,0 +1,30 @@
+[Unit]
+Description=RackForge recoverable runtime installation agent
+After=local-fs.target
+Before=rackforge-audio.service rackforge-audio.path rackforge-platform-host.service rackforge-controller-host.service rackforge-web.service rackforge-updater.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=root
+Group=rackforge
+ExecStart=/usr/libexec/rackforge-update-agent supervise /etc/rackforge-updater/agent.json
+RuntimeDirectory=rackforge-installer
+RuntimeDirectoryMode=2770
+Restart=always
+RestartSec=3
+TimeoutStartSec=120
+KillMode=control-group
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@RACKFORGE_ROOT@
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

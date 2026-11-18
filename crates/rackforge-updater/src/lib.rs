@@ -1,4 +1,7 @@
-//! Signed release metadata. No downloaded code is executed by this service.
+//! Signed release metadata and managed runtime activation.
+pub mod activation;
+#[cfg(unix)]
+pub mod installer;
 use anyhow::{Context, Result, bail, ensure};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature, VerifyingKey};
@@ -14,7 +17,11 @@ use std::time::Duration;
 
 pub const PRODUCT: &str = "org.rackforge.host";
 pub const REPOSITORY: &str = "https://github.com/kalexis1994/rackforge";
+#[cfg(not(feature = "test-support"))]
 pub const PUBLIC_KEY: &str = include_str!("../../../config/update-public-key.txt");
+// RFC 8032 test vector 1. No test key or loopback feed is trusted in release binaries.
+#[cfg(feature = "test-support")]
+pub const PUBLIC_KEY: &str = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
 pub const MAX_METADATA: u64 = 128 * 1024;
 pub const MAX_ARCHIVE: u64 = 2 * 1024 * 1024 * 1024;
 
@@ -120,6 +127,7 @@ pub fn initial_state() -> UpdateState {
         message: None,
         downloaded_bytes: 0,
         can_stage: target() != "unsupported" && !PUBLIC_KEY.trim().is_empty(),
+        can_install: false,
     }
 }
 
@@ -127,13 +135,13 @@ fn agent(timeout_seconds: u64) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(timeout_seconds)))
         .timeout_connect(Some(Duration::from_secs(15)))
-        .https_only(true)
+        .https_only(!cfg!(feature = "test-support"))
         .build()
         .into()
 }
 
 fn fetch_small(url: &str, limit: u64) -> Result<Vec<u8>> {
-    let mut response = agent(30).get(url).header("User-Agent", "RackForge-Updater").header("Cache-Control", "no-cache").call()
+    let mut response = agent(30).get(transport_url(url)?).header("User-Agent", "RackForge-Updater").header("Cache-Control", "no-cache").call()
         .context("Could not retrieve signed update metadata. Check the connection and whether a signed release has been published.")?;
     let mut bytes = Vec::new();
     response
@@ -146,6 +154,26 @@ fn fetch_small(url: &str, limit: u64) -> Result<Vec<u8>> {
         "Update metadata exceeds its size limit"
     );
     Ok(bytes)
+}
+
+fn transport_url(url: &str) -> Result<String> {
+    #[cfg(feature = "test-support")]
+    if let Ok(origin) = std::env::var("RACKFORGE_UPDATE_TEST_FEED") {
+        let address: std::net::SocketAddr = origin
+            .strip_prefix("http://")
+            .context("Test feeds require an explicit loopback address")?
+            .parse()?;
+        ensure!(
+            address.ip().is_loopback(),
+            "Test feeds must stay on loopback"
+        );
+        return Ok(format!(
+            "{origin}{}",
+            url.strip_prefix(REPOSITORY)
+                .context("Unexpected test feed path")?
+        ));
+    }
+    Ok(url.into())
 }
 
 pub fn check_release(
@@ -253,7 +281,7 @@ pub fn stage_release(
     let mut file = options.open(&partial)?;
     let result = (|| -> Result<()> {
         let mut response = agent(300)
-            .get(&asset.url)
+            .get(transport_url(&asset.url)?)
             .header("User-Agent", "RackForge-Updater")
             .call()?;
         let mut reader = response.body_mut().as_reader();

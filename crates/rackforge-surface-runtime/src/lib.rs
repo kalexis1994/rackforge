@@ -452,6 +452,10 @@ pub enum ProgramExitDecision {
 #[derive(Clone, Debug, PartialEq)]
 pub enum MenuCommand {
     CheckSoftwareUpdates,
+    InstallSoftwareUpdate {
+        version: String,
+    },
+    RecoverSoftwareUpdate,
     SetActiveMode {
         mode: ActiveMode,
     },
@@ -676,6 +680,7 @@ fn standard_footer(pressed: Option<usize>) -> [FooterButton; 4] {
 enum Page {
     SystemAbout,
     SystemUpdate,
+    SystemUpdateConfirm,
     Home,
     Live,
     LiveRacks,
@@ -901,6 +906,7 @@ pub struct Menu {
     plugin_spinner: Spinner,
     system_index: usize,
     about_index: usize,
+    update_confirm_index: usize,
     software: UpdateState,
     system_web_index: usize,
     web_settings: WebSystemSettings,
@@ -1155,6 +1161,7 @@ impl Default for Menu {
             plugin_spinner: Spinner::ascii("plugin-loader", "LOADING PLUGIN", "PLEASE WAIT"),
             system_index: 0,
             about_index: 0,
+            update_confirm_index: 0,
             software: UpdateState::unsupported(env!("CARGO_PKG_VERSION"), std::env::consts::OS),
             midi_inputs: Vec::new(),
             shared_velocity_curve: VelocityCurve::default(),
@@ -1616,7 +1623,14 @@ impl Menu {
     }
 
     pub fn software_update_visible(&self) -> bool {
-        matches!(self.page, Page::SystemAbout | Page::SystemUpdate)
+        matches!(
+            self.page,
+            Page::SystemAbout | Page::SystemUpdate | Page::SystemUpdateConfirm
+        )
+    }
+
+    pub fn resume_software_update(&mut self) {
+        self.page = Page::SystemUpdate;
     }
 
     pub fn sync_wifi_settings(&mut self, settings: WifiSystemSettings) {
@@ -3993,6 +4007,7 @@ impl Menu {
                     Page::AudioBusy | Page::AudioResult => Page::Audio,
                     Page::SystemAbout => Page::System,
                     Page::SystemUpdate => Page::SystemAbout,
+                    Page::SystemUpdateConfirm => Page::SystemUpdate,
                     Page::SystemWeb => Page::System,
                     Page::SystemWifi => Page::System,
                     Page::SystemWifiNetworks | Page::SystemWifiBusy | Page::SystemWifiResult => {
@@ -4291,9 +4306,39 @@ impl Menu {
                     }
                     Page::SystemAbout => Page::SystemAbout,
                     Page::SystemUpdate => {
-                        if !self.software.busy() {
-                            self.software.phase = UpdatePhase::Checking;
-                            self.pending_command = Some(MenuCommand::CheckSoftwareUpdates);
+                        if matches!(
+                            self.software.phase,
+                            UpdatePhase::Available | UpdatePhase::Ready
+                        ) && self.software.can_install
+                        {
+                            self.update_confirm_index = 0;
+                            Page::SystemUpdateConfirm
+                        } else if self.software.phase == UpdatePhase::RecoveryFailed {
+                            self.software.phase = UpdatePhase::Recovering;
+                            self.pending_command = Some(MenuCommand::RecoverSoftwareUpdate);
+                            Page::SystemUpdate
+                        } else {
+                            if !self.software.busy() {
+                                self.software.phase = UpdatePhase::Checking;
+                                self.pending_command = Some(MenuCommand::CheckSoftwareUpdates);
+                            }
+                            Page::SystemUpdate
+                        }
+                    }
+                    Page::SystemUpdateConfirm => {
+                        if self.update_confirm_index == 1
+                            && !self.software.busy()
+                            && self.software.can_install
+                            && matches!(
+                                self.software.phase,
+                                UpdatePhase::Available | UpdatePhase::Ready
+                            )
+                            && let Some(offer) = &self.software.available
+                        {
+                            self.pending_command = Some(MenuCommand::InstallSoftwareUpdate {
+                                version: offer.version.clone(),
+                            });
+                            self.software.phase = UpdatePhase::Downloading;
                         }
                         Page::SystemUpdate
                     }
@@ -4681,6 +4726,15 @@ impl Menu {
                             .as_ref()
                             .map_or("", |offer| offer.version.as_str()),
                     ),
+                    UpdatePhase::Installing => ("INSTALLING", "AUDIO RESTARTING"),
+                    UpdatePhase::Recovering => ("RESTORING BACKUP", "PLEASE WAIT"),
+                    UpdatePhase::Installed => {
+                        ("UPDATE INSTALLED", self.software.current_version.as_str())
+                    }
+                    UpdatePhase::RolledBack => {
+                        ("UPDATE RESTORED", self.software.current_version.as_str())
+                    }
+                    UpdatePhase::RecoveryFailed => ("RECOVERY FAILED", "PRESS TO RETRY"),
                     UpdatePhase::Downloading => ("DOWNLOADING", "PLEASE WAIT"),
                     UpdatePhase::Failed => ("CHECK FAILED", "PRESS TO RETRY"),
                     UpdatePhase::NotPublished => ("NO SIGNED RELEASE", "CHECK AGAIN LATER"),
@@ -4689,6 +4743,15 @@ impl Menu {
                 };
                 Screen::with_header("UPDATES", title, detail)
             }
+            Page::SystemUpdateConfirm => Screen::with_header(
+                "RESTART AUDIO?",
+                "INSTALL UPDATE",
+                if self.update_confirm_index == 1 {
+                    "YES - INSTALL"
+                } else {
+                    "NO - CANCEL"
+                },
+            ),
             Page::Audio => self.render_audio(),
             Page::AudioOutput | Page::AudioRate | Page::AudioBuffer => self.render_audio_value(),
             Page::AudioBusy => {
@@ -6300,6 +6363,7 @@ impl Menu {
                 (&mut self.system_index, len)
             }
             Page::SystemAbout => (&mut self.about_index, 4),
+            Page::SystemUpdateConfirm => (&mut self.update_confirm_index, 2),
             Page::SystemWeb => (&mut self.system_web_index, SYSTEM_WEB_ITEMS.len()),
             Page::Audio => (&mut self.audio_index, AUDIO_ITEMS.len()),
             // The number page turns its value rather than a cursor, and does
@@ -11592,6 +11656,131 @@ mod tests {
         state.message = Some("Signature verification failed".into());
         menu.sync_software_update(state);
         assert_eq!(menu.render(), before);
+    }
+
+    fn offered_update_menu() -> Menu {
+        let mut menu = plugin_menu();
+        let mut state = UpdateState::unsupported("0.1.39", "linux-aarch64-services");
+        state.can_install = true;
+        state.phase = UpdatePhase::Available;
+        state.available = Some(rackforge_platform_api::updates::ReleaseOffer {
+            version: "0.1.40".into(),
+            notes: String::new(),
+            download_bytes: 42,
+        });
+        menu.sync_software_update(state);
+        menu.resume_software_update();
+        menu
+    }
+    #[test]
+    fn installing_from_little_requires_explicit_confirmation_and_defaults_to_cancel() {
+        let mut menu = offered_update_menu();
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.render().header,
+            Header::Visible("RESTART AUDIO?".into())
+        );
+        assert_eq!(menu.render().line_2.trim(), "NO - CANCEL");
+        assert!(menu.take_command().is_none());
+        menu.apply(Action::Select);
+        assert!(menu.take_command().is_none());
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        assert_eq!(
+            menu.take_command(),
+            Some(MenuCommand::InstallSoftwareUpdate {
+                version: "0.1.40".into()
+            })
+        );
+        menu.apply(Action::Select);
+        assert!(menu.take_command().is_none());
+    }
+    #[test]
+    fn little_can_show_the_result_after_its_driver_restarts() {
+        for (phase, title) in [
+            (UpdatePhase::Installed, "UPDATE INSTALLED"),
+            (UpdatePhase::RolledBack, "UPDATE RESTORED"),
+            (UpdatePhase::Recovering, "RESTORING BACKUP"),
+        ] {
+            let mut menu = plugin_menu();
+            menu.resume_software_update();
+            let mut state = UpdateState::unsupported("0.1.39", "linux-aarch64-services");
+            state.phase = phase;
+            menu.sync_software_update(state);
+            assert_eq!(menu.render().line_1.trim(), title);
+        }
+    }
+    #[test]
+    fn stale_confirmation_cannot_install_after_another_client_starts_updating() {
+        let mut menu = offered_update_menu();
+        menu.apply(Action::Select);
+        menu.apply(Action::Next);
+        let mut state = UpdateState::unsupported("0.1.39", "linux-aarch64-services");
+        state.phase = UpdatePhase::Installing;
+        menu.sync_software_update(state);
+        menu.apply(Action::Select);
+        assert!(menu.take_command().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "requires an isolated managed host and signed test feed"]
+    fn little_update_agent_end_to_end() {
+        use rackforge_platform_api::updates::{UpdateRequest, exchange, update_socket};
+        use std::time::{Duration, Instant};
+        let mut menu = plugin_menu();
+        menu.page = Page::SystemAbout;
+        menu.about_index = 3;
+        menu.sync_software_update(exchange(&update_socket(), &UpdateRequest::Status).unwrap());
+        menu.apply(Action::Select);
+        assert_eq!(menu.take_command(), Some(MenuCommand::CheckSoftwareUpdates));
+        exchange(&update_socket(), &UpdateRequest::Check).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(180);
+        loop {
+            let state = exchange(&update_socket(), &UpdateRequest::Status).unwrap();
+            let ready = state.phase == UpdatePhase::Available;
+            menu.sync_software_update(state);
+            if ready {
+                break;
+            }
+            assert!(Instant::now() < deadline, "No signed offer arrived");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        menu.apply(Action::Select);
+        assert!(menu.take_command().is_none());
+        menu.apply(Action::Next);
+        menu.apply(Action::Select);
+        let Some(MenuCommand::InstallSoftwareUpdate { version }) = menu.take_command() else {
+            panic!("No install command");
+        };
+        exchange(&update_socket(), &UpdateRequest::Install { version }).unwrap();
+        loop {
+            if let Ok(state) = exchange(&update_socket(), &UpdateRequest::Status)
+                && matches!(
+                    state.phase,
+                    UpdatePhase::Installed
+                        | UpdatePhase::RolledBack
+                        | UpdatePhase::RecoveryFailed
+                        | UpdatePhase::Failed
+                )
+            {
+                let expected =
+                    std::env::var("RACKFORGE_EXPECT_UPDATE_PHASE").unwrap_or("installed".into());
+                assert_eq!(serde_json::to_value(&state.phase).unwrap(), expected);
+                // A new driver instance returns to the operation's result.
+                let mut restarted = plugin_menu();
+                restarted.resume_software_update();
+                restarted.sync_software_update(state);
+                println!("LITTLE_UPDATE_FLOW_OK {}", restarted.render().line_1.trim());
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Installation never reached a result"
+            );
+            std::thread::sleep(Duration::from_millis(300));
+        }
     }
 
     #[test]

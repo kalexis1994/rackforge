@@ -9,3 +9,4 @@
   max-height: 16rem;
   overflow: auto;
 }
+.software-update-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }

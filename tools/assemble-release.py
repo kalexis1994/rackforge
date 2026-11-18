@@ -129,7 +129,7 @@ def run_commit(run_id: str) -> str:
         capture_output=True,
         text=True,
         cwd=REPO,
-    ).stdout.strip()[:7]
+    ).stdout.strip()
 
 
 def notes_header(pins: tuple, tag: str, commit: str) -> str:
@@ -171,7 +171,9 @@ def main() -> None:
     os.makedirs(downloads)
     os.makedirs(assets)
 
-    subprocess.run(["gh", "run", "download", run_id, "-D", downloads], check=True, cwd=REPO)
+    # The same run also uploads diagnostic update-test receipts. Only signed
+    # distribution candidates belong in release assembly.
+    subprocess.run(["gh", "run", "download", run_id, "--pattern", "RackForge-*", "-D", downloads], check=True, cwd=REPO)
 
     notices = os.path.join(REPO, "THIRD_PARTY_NOTICES.md")
     expected = {
@@ -228,14 +230,14 @@ def main() -> None:
         check_pins_against_artifact(pins, assets)
         composed = os.path.join(work, f"release-notes-{tag}.md")
         with open(composed, "w", encoding="utf-8", newline="\n") as file:
-            file.write(notes_header(pins, tag, run_commit(run_id)))
+            file.write(notes_header(pins, tag, run_commit(run_id)[:7]))
             file.write("\n" + open(notes, encoding="utf-8").read().lstrip("\n"))
         notes = composed
         print("notes written to", notes)
 
     if publish:
         files = [os.path.join(assets, n) for n in sorted(os.listdir(assets))]
-        subprocess.run(["gh", "release", "create", tag, "--target", "main", "--title", f"RackForge {tag} Preview", "--notes-file", notes, *files], check=True, cwd=REPO)
+        subprocess.run(["gh", "release", "create", tag, "--target", run_commit(run_id), "--title", f"RackForge {tag} Preview", "--notes-file", notes, *files], check=True, cwd=REPO)
         print("published", tag)
     else:
         print("assets ready in", assets, "(no --publish)")

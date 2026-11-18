@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 # Called after the managed units have been rendered. The worker changes files
 # as the host owner; its root supervisor only controls those fixed units.
+rackforge_lock_installation() {
+  install -d "$RACKFORGE_ROOT_RESOLVED"
+  # install-release.sh passes this very open file description to its child.
+  if [[ "$(readlink "/proc/$$/fd/9" 2>/dev/null || true)" != "$(realpath -m "$RACKFORGE_ROOT_RESOLVED/.install.lock")" ]]; then
+    exec 9>"$RACKFORGE_ROOT_RESOLVED/.install.lock"
+  fi
+  flock -n 9 || { printf 'Another RackForge installation or recovery is running.\n' >&2; return 1; }
+  python3 - "$RACKFORGE_ROOT_RESOLVED/state/updates/activation.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+if path.exists() and json.loads(path.read_text())["status"]["phase"] not in ("idle", "installed", "rolled_back"):
+    raise SystemExit("Recover the interrupted automatic update before installing another release.")
+PY
+}
+
 rackforge_install_update_agent() {
   local source_root="$1" systemd_root="$2" temporary
   sudo install -d -m 0755 /usr/libexec /etc/rackforge-updater

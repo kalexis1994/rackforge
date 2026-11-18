@@ -283,6 +283,7 @@ pub fn worker(path: &Path) -> Result<()> {
         .as_ref()
         .filter(|j| !activation::terminal(&j.status.phase))
     {
+        let _lock = activation::installation_lock(&config)?;
         activation::restore_files(&config, journal)?;
     }
     let initial = activation::status(&config)?;

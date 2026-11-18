@@ -32,6 +32,7 @@ test -f "$systemd_root/rackforge-audio.path"
 
 sudo groupadd --system --force rackforge
 sudo usermod -a -G rackforge "$service_user"
+rackforge_lock_installation
 
 install -d "$root/state/updates"
 install -d "$root/bin" "$root/config" "$root/data" "$root/state" "$root/logs"

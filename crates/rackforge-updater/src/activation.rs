@@ -97,6 +97,20 @@ pub trait Services {
     fn health(&self, version: &str, revision: &str, units: &[String], strict: bool) -> Result<()>;
 }
 
+pub fn installation_lock(config: &AgentConfig) -> Result<fs::File> {
+    // The same flock used by the command-line Raspberry Pi installer.
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(config.root.join(".install.lock"))?;
+    file.try_lock().map_err(|error| {
+        anyhow::anyhow!("Another installation or recovery owns the installation lock: {error}")
+    })?;
+    Ok(file)
+}
+
 pub fn durable_json(path: &Path, value: &impl Serialize) -> Result<()> {
     fs::create_dir_all(path.parent().context("No state directory")?)?;
     let next = path.with_extension("json.new");
@@ -527,6 +541,7 @@ pub fn activate(
     services: &impl Services,
     progress: impl Fn(ActivationStatus),
 ) -> Result<()> {
+    let _lock = installation_lock(config)?;
     let previous_transaction = read_journal(config)?;
     if let Some(previous) = &previous_transaction {
         ensure!(
@@ -572,7 +587,7 @@ pub fn activate(
         },
         previous_version,
         previous_build,
-        units: services.snapshot()?,
+        units: Vec::new(),
         existed: BTreeSet::new(),
     };
     let work = transaction_dir(config, &journal);
@@ -584,6 +599,7 @@ pub fn activate(
             + size_tree(&config.root.join("controllers"))?,
     )?;
     let archive = work.join("verified.tar.gz");
+    crate::verify_archive(&stage.join(crate::asset_name(crate::target())?), asset)?;
     copy_tree(&stage.join(crate::asset_name(crate::target())?), &archive)?;
     crate::verify_archive(&archive, asset)?;
     unpack(&archive, &work.join("unpacked"))?;
@@ -598,6 +614,7 @@ pub fn activate(
         &candidate.join("build-info.txt"),
     )?;
     // From this durable point, any interruption must restore the previous runtime.
+    journal.units = services.snapshot()?;
     durable_json(&config.journal(), &journal)?;
     progress(journal.status.clone());
     let result = (|| -> Result<()> {
@@ -633,7 +650,7 @@ pub fn activate(
             "Update failed: {error:#}. Restoring the previous installation."
         ));
         durable_json(&config.journal(), &journal)?;
-        return recover(config, services, progress);
+        return recover_locked(config, services, progress);
     }
     journal.status.phase = UpdatePhase::Installed;
     journal.status.current_version = version.into();
@@ -687,6 +704,14 @@ pub fn restore_files(config: &AgentConfig, journal: &Journal) -> Result<()> {
     Ok(())
 }
 pub fn recover(
+    config: &AgentConfig,
+    services: &impl Services,
+    progress: impl Fn(ActivationStatus),
+) -> Result<()> {
+    let _lock = installation_lock(config)?;
+    recover_locked(config, services, progress)
+}
+fn recover_locked(
     config: &AgentConfig,
     services: &impl Services,
     progress: impl Fn(ActivationStatus),
@@ -881,6 +906,14 @@ mod tests {
         journal.units.push("sshd.service".into());
         durable_json(&fixture.config.journal(), &journal).unwrap();
         assert!(read_journal(&fixture.config).is_err());
+    }
+    #[test]
+    fn activation_and_manual_installation_share_one_exclusive_lock() {
+        let fixture = Fixture::new();
+        let held = installation_lock(&fixture.config).unwrap();
+        assert!(installation_lock(&fixture.config).is_err());
+        drop(held);
+        assert!(installation_lock(&fixture.config).is_ok());
     }
     #[test]
     fn signed_tar_still_cannot_create_symbolic_or_hard_links() {

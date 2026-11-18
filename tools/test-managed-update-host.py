@@ -122,6 +122,7 @@ def prepare(args):
     run("sudo", "-n", "install", "-d", "-m", "0755", config_target.parent)
     run("sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "0644", config, config_target)
     executable = Path("/usr/libexec") / f"{root.name}-agent"
+    run("sudo", "-n", "install", "-d", "-m", "0755", executable.parent)
     run("sudo", "-n", "install", "-o", "root", "-g", "root", "-m", "0755", test_agent, str(executable) + ".new")
     run("sudo", "-n", "mv", str(executable) + ".new", executable)
     prefix = root.name

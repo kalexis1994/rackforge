@@ -31,6 +31,7 @@ sudo -v
 sudo groupadd --system --force rackforge
 sudo groupadd --system --force audio
 sudo usermod -a -G audio,rackforge "$service_user"
+rackforge_lock_installation
 
 install -d "$root/state/updates"
 install -d \

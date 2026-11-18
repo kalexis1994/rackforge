@@ -17,6 +17,10 @@ TimeoutStartSec=120
 KillMode=control-group
 UMask=0027
 NoNewPrivileges=true
+# Keep only the capabilities needed to launch the ordinary-user worker.
+# setpriv clears these from every capability set before executing that worker.
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_SETPCAP
+AmbientCapabilities=CAP_SETUID CAP_SETGID CAP_SETPCAP
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only

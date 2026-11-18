@@ -127,24 +127,17 @@ def prepare(args):
     run("sudo", "-n", "mv", str(executable) + ".new", executable)
     prefix = root.name
     installer_name = f"{prefix}-installer.service"
-    unit = f"""[Unit]
-Description=Isolated RackForge update test agent
-Before={' '.join(f'{prefix}-{suffix}' for suffix in SUFFIXES)}
-[Service]
-Type=notify
-NotifyAccess=main
-Group=rackforge
-ExecStart={executable} supervise {config_target}
-RuntimeDirectory={prefix}
-RuntimeDirectoryMode=2775
-Restart=always
-RestartSec=1
-TimeoutStartSec=120
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths={root}
-"""
+    platform = "raspberry-pi" if fields["architecture"] == "linux-aarch64" else "linux-x86_64"
+    # Exercise the actual production sandbox, including its privilege drop.
+    # Only fixture paths, service names and group-search permission differ.
+    unit = (payload / f"platforms/{platform}/systemd/rackforge-installer.service").read_text()
+    unit = unit.replace("@RACKFORGE_ROOT@", str(root))
+    unit = unit.replace("/usr/libexec/rackforge-update-agent", str(executable))
+    unit = unit.replace("/etc/rackforge-updater/agent.json", str(config_target))
+    unit = unit.replace("RuntimeDirectory=rackforge-installer", f"RuntimeDirectory={prefix}")
+    unit = unit.replace("RuntimeDirectoryMode=2770", "RuntimeDirectoryMode=2775")
+    for suffix in SUFFIXES:
+        unit = unit.replace(f"rackforge-{suffix}", f"{prefix}-{suffix}")
     if args.scenario == "crash-web":
         unit += "Environment=RACKFORGE_UPDATE_FAILPOINT=web\n"
     units = {installer_name: unit}

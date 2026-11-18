@@ -25,6 +25,9 @@ in `/etc/rackforge-updater/agent.json`; a child running as the installation's
 ordinary user verifies, extracts and replaces files. No package installer or
 downloaded executable ever runs as root. The agent and its protocol are a
 stable bootstrap component, installed by the Linux/Pi service installer.
+The supervisor retains only UID/GID transition capabilities. Before launching
+the worker it clears all inheritable, ambient and bounding capabilities; the
+worker verifies that every capability set is empty before touching runtime files.
 
 The stable feed is the `updates.json` asset of the latest public RackForge
 release. Its detached Ed25519 signature is fetched from the version-specific

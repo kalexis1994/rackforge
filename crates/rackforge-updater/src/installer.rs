@@ -85,6 +85,11 @@ pub fn supervise(path: &Path) -> Result<()> {
     let server = listener(&config.runtime.join("services.sock"))?;
     server.set_nonblocking(true)?;
     let mut child = Command::new("/usr/bin/setpriv")
+        .args([
+            "--bounding-set=-all",
+            "--inh-caps=-all",
+            "--ambient-caps=-all",
+        ])
         .arg("--reuid")
         .arg(&config.user)
         .arg("--regid")
@@ -274,6 +279,17 @@ pub fn worker(path: &Path) -> Result<()> {
         fs::metadata("/proc/self")?.uid() != 0,
         "Installer filesystem operations must never run as root"
     );
+    let process_status = fs::read_to_string("/proc/self/status")?;
+    for capability in ["CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"] {
+        let bits = process_status
+            .lines()
+            .find_map(|line| line.strip_prefix(&format!("{capability}:")))
+            .context("Missing worker capability information")?;
+        ensure!(
+            u64::from_str_radix(bits.trim(), 16)? == 0,
+            "Installer worker retained Linux capabilities"
+        );
+    }
     let services = SystemServices {
         config: config.clone(),
     };

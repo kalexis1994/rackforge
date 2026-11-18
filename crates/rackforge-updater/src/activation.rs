@@ -469,6 +469,10 @@ fn prepare_mutable(config: &AgentConfig, payload: &Path, candidate: &Path) -> Re
             .arg(candidate.join("controllers")),
         Duration::from_secs(60),
     )?;
+    preserve_controller_enablement(
+        &config.root.join("controllers/active"),
+        &candidate.join("controllers/active"),
+    )?;
     let audio = config.root.join("config/audio.toml");
     let mut audio_text = fs::read_to_string(&audio).ok();
     let old_package = audio_text
@@ -531,6 +535,28 @@ fn prepare_mutable(config: &AgentConfig, payload: &Path, candidate: &Path) -> Re
     if let Some(text) = audio_text {
         fs::create_dir_all(candidate.join("config"))?;
         fs::write(candidate.join("config/audio.toml"), text)?;
+    }
+    Ok(())
+}
+
+fn preserve_controller_enablement(previous: &Path, candidate: &Path) -> Result<()> {
+    if !previous.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(previous)? {
+        let entry = entry?;
+        if entry.path().extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let old: serde_json::Value = serde_json::from_slice(&fs::read(entry.path())?)?;
+        let path = candidate.join(entry.file_name());
+        if let Some(enabled) = old.get("enabled").and_then(serde_json::Value::as_bool)
+            && path.is_file()
+        {
+            let mut updated: serde_json::Value = serde_json::from_slice(&fs::read(&path)?)?;
+            updated["enabled"] = enabled.into();
+            fs::write(path, serde_json::to_vec_pretty(&updated)?)?;
+        }
     }
     Ok(())
 }
@@ -914,6 +940,26 @@ mod tests {
         assert!(installation_lock(&fixture.config).is_err());
         drop(held);
         assert!(installation_lock(&fixture.config).is_ok());
+    }
+    #[test]
+    fn updating_a_controller_does_not_reenable_it_or_discard_its_new_version() {
+        let fixture = Fixture::new();
+        let old = fixture.config.root.join("old");
+        let new = fixture.config.root.join("new");
+        file(
+            &old.join("keyboard.json"),
+            br#"{"version":"1.0.0","enabled":false}"#,
+        );
+        file(
+            &new.join("keyboard.json"),
+            br#"{"version":"1.1.0","enabled":true,"trust":"official"}"#,
+        );
+        preserve_controller_enablement(&old, &new).unwrap();
+        let record: serde_json::Value =
+            serde_json::from_slice(&fs::read(new.join("keyboard.json")).unwrap()).unwrap();
+        assert_eq!(record["enabled"], false);
+        assert_eq!(record["version"], "1.1.0");
+        assert_eq!(record["trust"], "official");
     }
     #[test]
     fn signed_tar_still_cannot_create_symbolic_or_hard_links() {

@@ -23,8 +23,20 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+import tempfile
+from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def release_work_directory(tag: str, temporary_root: str) -> str:
+    if not re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", tag):
+        raise ValueError("Release tags must be stable semantic versions such as v0.1.40")
+    base = Path(temporary_root).resolve()
+    work = (base / f"rf-release-{tag}").resolve()
+    if work.parent != base or work.name != f"rf-release-{tag}":
+        raise ValueError("Release staging escaped its temporary directory")
+    return str(work)
 
 
 def zip_dir(source: str, target: str, extra: dict[str, str]) -> None:
@@ -117,7 +129,7 @@ def run_commit(run_id: str) -> str:
         capture_output=True,
         text=True,
         cwd=REPO,
-    ).stdout.strip()[:7]
+    ).stdout.strip()
 
 
 def notes_header(pins: tuple, tag: str, commit: str) -> str:
@@ -147,14 +159,21 @@ def main() -> None:
     run_id, tag, notes = sys.argv[1], sys.argv[2], sys.argv[3]
     publish = "--publish" in sys.argv
     generate_header = "--notes-header" in sys.argv
-    work = os.path.join(os.environ["TEMP"], f"rf-release-{tag}")
+    update_key = os.environ.get("RACKFORGE_UPDATE_SIGNING_KEY")
+    if publish and (not update_key or not os.path.isfile(update_key)):
+        raise SystemExit("Publishing requires RACKFORGE_UPDATE_SIGNING_KEY pointing to the private host-update key outside the checkout.")
+    work = release_work_directory(tag, os.environ.get("TEMP", tempfile.gettempdir()))
+    if update_key and (Path(update_key).resolve().is_relative_to(Path(REPO).resolve()) or Path(update_key).resolve().is_relative_to(Path(work))):
+        raise SystemExit("The private update key must be outside the checkout and release staging directory.")
     downloads = os.path.join(work, "artifacts")
     assets = os.path.join(work, "assets")
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(downloads)
     os.makedirs(assets)
 
-    subprocess.run(["gh", "run", "download", run_id, "-D", downloads], check=True, cwd=REPO)
+    # The same run also uploads diagnostic update-test receipts. Only signed
+    # distribution candidates belong in release assembly.
+    subprocess.run(["gh", "run", "download", run_id, "--pattern", "RackForge-*", "-D", downloads], check=True, cwd=REPO)
 
     notices = os.path.join(REPO, "THIRD_PARTY_NOTICES.md")
     expected = {
@@ -189,6 +208,13 @@ def main() -> None:
         raise SystemExit("missing release artifacts: " + ", ".join(sorted(expected - seen)))
 
     shutil.copy2(notices, os.path.join(assets, "THIRD_PARTY_NOTICES.md"))
+    if update_key:
+        signer_path = os.path.join(REPO, "tools", "sign-host-update.py")
+        spec = importlib.util.spec_from_file_location("rackforge_sign_host_update", signer_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.sign(Path(assets), tag, Path(notes).read_text(encoding="utf-8"), Path(update_key).resolve(),
+                    ["cargo", "run", "--locked", "--quiet", "-p", "rackforge-updater", "--"])
     with open(os.path.join(assets, "SHA256SUMS.txt"), "w", newline="\n") as sums:
         for name in sorted(os.listdir(assets)):
             if name in ("SHA256SUMS.txt", "THIRD_PARTY_NOTICES.md"):
@@ -204,14 +230,14 @@ def main() -> None:
         check_pins_against_artifact(pins, assets)
         composed = os.path.join(work, f"release-notes-{tag}.md")
         with open(composed, "w", encoding="utf-8", newline="\n") as file:
-            file.write(notes_header(pins, tag, run_commit(run_id)))
+            file.write(notes_header(pins, tag, run_commit(run_id)[:7]))
             file.write("\n" + open(notes, encoding="utf-8").read().lstrip("\n"))
         notes = composed
         print("notes written to", notes)
 
     if publish:
         files = [os.path.join(assets, n) for n in sorted(os.listdir(assets))]
-        subprocess.run(["gh", "release", "create", tag, "--target", "main", "--title", f"RackForge {tag} Preview", "--notes-file", notes, *files], check=True, cwd=REPO)
+        subprocess.run(["gh", "release", "create", tag, "--target", run_commit(run_id), "--title", f"RackForge {tag} Preview", "--notes-file", notes, *files], check=True, cwd=REPO)
         print("published", tag)
     else:
         print("assets ready in", assets, "(no --publish)")

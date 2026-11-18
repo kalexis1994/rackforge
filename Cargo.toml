@@ -17,6 +17,7 @@ members = [
     "crates/rackforge-midi-api",
     "crates/rackforge-platform-api",
     "crates/rackforge-platform-host",
+    "crates/rackforge-updater",
     "crates/rackforge-performance-api",
     "crates/rackforge-plugin-api",
     "crates/rackforge-plugin-runtime",
@@ -48,7 +49,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.1.39"
+version = "0.1.40"
 edition = "2024"
 license = "GPL-2.0-or-later"
 

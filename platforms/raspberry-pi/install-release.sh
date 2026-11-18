@@ -107,6 +107,12 @@ sudo -n true 2>/dev/null || sudo -v || fail "administrator access is required to
 install -d "$root"
 exec 9>"$root/.install.lock"
 flock -n 9 || fail "another RackForge installation is already running"
+python3 - "$root/state/updates/activation.json" <<'PY'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+if path.exists() and json.loads(path.read_text())["status"]["phase"] not in ("idle", "installed", "rolled_back"):
+    raise SystemExit("Recover the interrupted automatic update before installing another release.")
+PY
 
 if [[ "$version" == latest ]]; then
   release_base="https://github.com/$repository/releases/latest/download"

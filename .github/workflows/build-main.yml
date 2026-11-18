@@ -131,6 +131,7 @@ jobs:
             -p rackforge-host-capabilities \
             -p rackforge-midi-api \
             -p rackforge-platform-api \
+            -p rackforge-updater \
             -p rackforge-plugin-api \
             -p rackforge-plugin-runtime \
             -p rackforge-program-api \
@@ -349,6 +350,22 @@ jobs:
             --edition standard \
             --archive dist/linux-x86_64/standard/RackForge-Linux-x86_64.tar.gz \
             --expect-official
+
+      - name: Exercise signed updates and recovery through Web and LITTLE
+        shell: bash
+        run: |
+          bash tools/test-managed-updates.sh \
+            dist/linux-x86_64/standard/RackForge-Linux-x86_64.tar.gz \
+            "${{ runner.temp }}/managed-update-receipts"
+
+      - name: Upload managed update test receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Managed-update-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/managed-update-receipts
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload Linux x86-64 Standard bundle
         if: github.event_name != 'pull_request'

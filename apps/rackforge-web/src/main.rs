@@ -583,6 +583,17 @@ async fn main() -> Result<()> {
     );
     let app = Router::new()
         .route("/api/v1/health", get(health))
+        .route("/api/v1/host/software", get(software_information))
+        .route("/api/v1/host/updates/check", post(check_software_updates))
+        .route("/api/v1/host/updates/stage", post(stage_software_update))
+        .route(
+            "/api/v1/host/updates/install",
+            post(install_software_update),
+        )
+        .route(
+            "/api/v1/host/updates/recover",
+            post(recover_software_update),
+        )
         .route("/api/v1/auth/status", get(auth_status))
         .route("/api/v1/auth/unlock", post(unlock_browser))
         .route("/api/v1/auth/pin", post(set_pin))
@@ -1113,10 +1124,134 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(json!({
         "status": "ok",
         "core_connected": state.control_socket.exists(),
+        "version": env!("CARGO_PKG_VERSION"),
         "schema_version": 1,
         "revision": env!("RACKFORGE_REVISION"),
         "ui_revision": ui_revision,
     }))
+}
+
+async fn updater_exchange(
+    request: rackforge_platform_api::updates::UpdateRequest,
+) -> Result<rackforge_platform_api::updates::UpdateState, String> {
+    tokio::task::spawn_blocking(move || {
+        #[cfg(unix)]
+        {
+            rackforge_platform_api::updates::exchange(
+                &rackforge_platform_api::updates::update_socket(),
+                &request,
+            )
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = request;
+            Err("The managed update service requires Linux".into())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+async fn software_information(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<rackforge_platform_api::updates::UpdateState>, StatusCode> {
+    require_authorized(&state, &headers)?;
+    let information = updater_exchange(rackforge_platform_api::updates::UpdateRequest::Status)
+        .await
+        .unwrap_or_else(|_| {
+            let mut information = rackforge_platform_api::updates::UpdateState::unsupported(
+                env!("CARGO_PKG_VERSION"),
+                std::env::consts::OS,
+            );
+            information.build = env!("RACKFORGE_REVISION").into();
+            information.message = Some("The software update service is not available.".into());
+            information
+        });
+    Ok(Json(information))
+}
+
+async fn update_operation(
+    headers: HeaderMap,
+    state: Arc<AppState>,
+    request: rackforge_platform_api::updates::UpdateRequest,
+) -> Response {
+    if let Err(status) = require_authorized(&state, &headers) {
+        return status.into_response();
+    }
+    if !valid_same_origin(&headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    match updater_exchange(request).await {
+        Ok(state) => Json(state).into_response(),
+        Err(message) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"status":"error", "message":format!("Software update service unavailable: {message}")}))).into_response(),
+    }
+}
+
+async fn check_software_updates(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    update_operation(
+        headers,
+        state,
+        rackforge_platform_api::updates::UpdateRequest::Check,
+    )
+    .await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StageSoftwareUpdate {
+    version: String,
+}
+
+async fn stage_software_update(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<StageSoftwareUpdate>,
+) -> Response {
+    if semver::Version::parse(&request.version).is_err() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    update_operation(
+        headers,
+        state,
+        rackforge_platform_api::updates::UpdateRequest::Stage {
+            version: request.version,
+        },
+    )
+    .await
+}
+
+async fn install_software_update(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<StageSoftwareUpdate>,
+) -> Response {
+    if semver::Version::parse(&request.version).is_err() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    update_operation(
+        headers,
+        state,
+        rackforge_platform_api::updates::UpdateRequest::Install {
+            version: request.version,
+        },
+    )
+    .await
+}
+
+async fn recover_software_update(
+    headers: HeaderMap,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    update_operation(
+        headers,
+        state,
+        rackforge_platform_api::updates::UpdateRequest::Recover,
+    )
+    .await
 }
 
 async fn auth_status(headers: HeaderMap, State(state): State<Arc<AppState>>) -> Json<Value> {

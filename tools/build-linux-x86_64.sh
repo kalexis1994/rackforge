@@ -50,6 +50,7 @@ cargo build --locked --release \
   -p rackforge-web \
   -p rackforge-store \
   -p rackforge-platform-host \
+  -p rackforge-updater \
   -p rackforge-controller-host \
   -p rackforge-controller-arturia-keylab-essential-mk3
 
@@ -69,6 +70,7 @@ for binary in \
   rackforge-web \
   rackforge-store \
   rackforge-platform-host \
+  rackforge-updater \
   rackforge-controller-host \
   rackforge-arturia-keylab-essential-mk3-driver
 do
@@ -102,8 +104,9 @@ if [[ "$edition" == standard ]]; then
   shopt -u nullglob
 fi
 
+version="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')"
 revision="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || printf 'unknown')}"
-printf 'revision=%s\narchitecture=linux-x86-64\nedition=%s\n' "$revision" "$edition" \
+printf 'version=%s\nrevision=%s\narchitecture=linux-x86-64\nedition=%s\n' "$version" "$revision" "$edition" \
   >"$release/build-info.txt"
 
 cat >"$release/INSTALL.md" <<'EOF'

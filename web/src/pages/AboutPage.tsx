@@ -1,7 +1,10 @@
 import { Play, Plug } from "lucide-react";
+import { useCallback, useState } from "react";
 import { BrandMark } from "../components/BrandMark";
+import { SoftwareUpdatesCard } from "../components/SoftwareUpdatesCard";
 import { PageHeading } from "../components/PageHeading";
-import { IS_BROWSER_HOST } from "../host";
+import { IS_BROWSER_HOST, isNativeHost } from "../host";
+import type { SoftwareUpdateState } from "../softwareUpdates";
 import {
   ANDROID_PATH,
   LINUX_PATH,
@@ -56,6 +59,12 @@ const INCLUDED_PLUGINS: Array<{ name: string; kind: "instrument" | "effect"; abo
    where it is. */
 
 export function AboutPage() {
+  const [hostIdentity, setHostIdentity] = useState<{version: string; build: string} | null>(null);
+  const rememberHost = useCallback((state: SoftwareUpdateState) => {
+    setHostIdentity((current) => current?.version === state.current_version && current.build === state.build
+      ? current : { version: state.current_version, build: state.build });
+  }, []);
+  const versionLabel = !IS_BROWSER_HOST && !isNativeHost() && !hostIdentity ? "Interface version" : "Version";
   return (
     <>
       <PageHeading
@@ -63,6 +72,7 @@ export function AboutPage() {
         detail="A portable instrument host built around one shared interface and native real-time runtimes."
       />
       <section className="settings-grid">
+        <SoftwareUpdatesCard onInformation={rememberHost} />
         {/* Where the project lives: its source, releases and issues. It
             used to name the runtime protocol, which says nothing to a
             player. */}
@@ -71,8 +81,8 @@ export function AboutPage() {
           {/* Which RackForge this is: the release's version, and the build
               for whoever reports a problem. */}
           <p className="about-version">
-            Version {__RACKFORGE_VERSION__}
-            <span> · build {__UI_REVISION__}</span>
+            {versionLabel} {hostIdentity?.version ?? __RACKFORGE_VERSION__}
+            <span> · build {hostIdentity?.build || __UI_REVISION__}</span>
           </p>
           {/* What RackForge is, in a few lines, for whoever meets it here
               first -- the same promise the README opens with. */}

@@ -253,19 +253,21 @@ function useFirstRun({
   sessionKnown,
   activeInstanceId,
   navigate,
+  enabled,
 }: {
   catalogStatus: "idle" | "loading" | "ready" | "error";
   plugins: PluginWebDescriptor[];
   sessionKnown: boolean;
   activeInstanceId: string | undefined;
   navigate: ReturnType<typeof useNavigate>;
+  enabled: boolean;
 }) {
   const [completed, setCompleted] = useState(readFirstRunCompleted);
   const [activationFailure, setActivationFailure] = useState<FirstRunFailure | null>(null);
   const [timedOut, setTimedOut] = useState(false);
   const started = useRef(false);
   const hostStarting = hostIsStarting(plugins);
-  const active = shouldRunFirstRun({
+  const active = enabled && shouldRunFirstRun({
     completed,
     sessionKnown,
     hasActiveInstance: Boolean(activeInstanceId),
@@ -395,6 +397,7 @@ function RackForgeApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const firstRun = useFirstRun({
+    enabled: location.pathname !== "/about",
     catalogStatus: pluginCatalog.status,
     plugins: pluginCatalog.plugins,
     sessionKnown: Boolean(snapshot),
@@ -776,7 +779,8 @@ function RackForgeApp() {
       {installPluginOpen ? (
         <InstallPluginDialog onClose={() => setInstallPluginOpen(false)} />
       ) : null}
-      {bootCurtainEnabled ? (
+      {/* Software recovery must remain accessible even when Core cannot start. */}
+      {bootCurtainEnabled && location.pathname !== "/about" ? (
         <BootCurtain
           connection={connection}
           sessionKnown={Boolean(snapshot)}

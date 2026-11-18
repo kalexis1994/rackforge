@@ -4,6 +4,8 @@ use std::fmt;
 use thiserror::Error;
 use zeroize::Zeroize;
 
+pub mod updates;
+
 pub const PLATFORM_SCHEMA_VERSION: u32 = 1;
 pub const PLATFORM_CONTROL_SCHEMA_VERSION: u32 = 1;
 pub const PLATFORM_CONTROL_SOCKET_NAME: &str = "platform-control.sock";

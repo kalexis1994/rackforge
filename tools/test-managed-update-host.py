@@ -139,7 +139,7 @@ def prepare(args):
     for suffix in SUFFIXES:
         unit = unit.replace(f"rackforge-{suffix}", f"{prefix}-{suffix}")
     if args.scenario == "crash-web":
-        unit += "Environment=RACKFORGE_UPDATE_FAILPOINT=web\n"
+        unit = unit.replace("[Service]\n", "[Service]\nEnvironment=RACKFORGE_UPDATE_FAILPOINT=web\n")
     units = {installer_name: unit}
     for suffix in SUFFIXES:
         name = f"{prefix}-{suffix}"

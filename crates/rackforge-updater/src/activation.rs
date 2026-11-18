@@ -350,9 +350,18 @@ fn validate_payload(payload: &Path, version: &str) -> Result<String> {
         "Package update key mismatch"
     );
     for binary in BINARIES {
+        let mut header = [0u8; 20];
+        fs::File::open(payload.join("target/release").join(binary))?.read_exact(&mut header)?;
+        let machine = u16::from_le_bytes([header[18], header[19]]);
         ensure!(
-            payload.join("target/release").join(binary).is_file(),
-            "Package missing {binary}"
+            &header[..6] == b"\x7fELF\x02\x01"
+                && machine
+                    == if crate::target() == "linux-aarch64-services" {
+                        183
+                    } else {
+                        62
+                    },
+            "Package binary {binary} has the wrong native architecture"
         );
     }
     ensure!(

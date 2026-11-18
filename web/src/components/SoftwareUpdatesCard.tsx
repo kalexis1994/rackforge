@@ -9,6 +9,7 @@ import "./SoftwareUpdatesCard.css";
 export function SoftwareUpdatesCard({ onInformation }: { onInformation?: (state: SoftwareUpdateState) => void }) {
   const [state, setState] = useState<SoftwareUpdateState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [operationError, setOperationError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const inFlight = useRef(false);
@@ -54,23 +55,23 @@ export function SoftwareUpdatesCard({ onInformation }: { onInformation?: (state:
     return () => window.clearInterval(timer);
   }, [supported, refresh]);
   async function check() {
-    setChecking(true); setError(null);
+    setChecking(true); setError(null); setOperationError(null);
     try {
       setState(await hostJson<SoftwareUpdateState>("/api/v1/host/updates/check", { method: "POST" }));
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not check for updates.");
+      setOperationError(error instanceof Error ? error.message : "Could not check for updates.");
     } finally { setChecking(false); }
   }
   async function install(recover = false) {
     if (!state || (!recover && !state.available)) return;
-    setChecking(true); setConfirming(false); setError(null);
+    setChecking(true); setConfirming(false); setError(null); setOperationError(null);
     try {
       const next = await hostJson<SoftwareUpdateState>(`/api/v1/host/updates/${recover ? "recover" : "install"}`, {
-        method: "POST", ...(recover ? {} : { body: JSON.stringify({ version: state.available!.version }) }),
+        method: "POST", headers: { "Content-Type": "application/json" }, ...(recover ? {} : { body: JSON.stringify({ version: state.available!.version }) }),
       });
       setState(next);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not start the installation.");
+      setOperationError(error instanceof Error ? error.message : "Could not start the installation.");
     } finally { setChecking(false); }
   }
   if (!supported || (!state && !error)) return null;
@@ -80,7 +81,7 @@ export function SoftwareUpdatesCard({ onInformation }: { onInformation?: (state:
       <h2 id="software-updates-title">Software updates</h2>
       {state && <p>Installed host: <strong>RackForge {state.current_version}</strong><br />
         <small className="software-host-build">{state.platform} · build {state.build || "unknown"}</small></p>}
-      <p className="software-update-status" role="status" aria-live="polite">{state && ["installing", "recovering"].includes(state.phase) ? updateDescription(state) : error ?? (state ? updateDescription(state) : "Software information unavailable.")}</p>
+      <p className="software-update-status" role="status" aria-live="polite">{state && ["installing", "recovering", "installed", "rolled_back", "recovery_failed"].includes(state.phase) ? updateDescription(state) : operationError ?? error ?? (state ? updateDescription(state) : "Software information unavailable.")}</p>
       {state?.available?.notes && <p className="software-release-notes">{state.available.notes}</p>}
     </div>
     <div className="software-update-actions">

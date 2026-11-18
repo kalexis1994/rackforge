@@ -63,9 +63,11 @@ def stop(root):
 def prepare(args):
     root = validate(args.root)
     if root.exists():
+        assert (root / ".rackforge-update-test").read_text() == "rackforge-managed-update-test\n", "Existing root is not this tool's fixture"
         stop(root)
         root.rename(root.with_name(f"{root.name}-completed-{time.time_ns()}"))
     root.mkdir(parents=True)
+    (root / ".rackforge-update-test").write_text("rackforge-managed-update-test\n")
     payload = args.payload.resolve()
     test_agent = args.test_agent.resolve()
     source = root / "fixture/rackforge"
@@ -83,8 +85,10 @@ def prepare(args):
     (root / "data/user-preset-sentinel.json").write_text('{"keep":"my settings"}\n')
     (root / "config/private-settings.json").write_text('{"keep":"my pin and device settings"}\n')
     if args.scenario == "bad-web":
-        (source / "target/release/rackforge-web").write_text("#!/bin/sh\nexit 77\n")
-        (source / "target/release/rackforge-web").chmod(0o755)
+        # Keep a valid native ELF header, but an invalid entry point, so this
+        # exercises failed startup and recovery rather than preflight rejection.
+        with (source / "target/release/rackforge-web").open("r+b") as file:
+            file.seek(24); file.write(bytes(8))
     assets = root / f"feed/releases/download/v{version}"
     assets.mkdir(parents=True)
     archive_name = "RackForge-RaspberryPi-arm64.tar.gz" if fields["architecture"] == "linux-aarch64" else "RackForge-Linux-x86_64.tar.gz"
@@ -131,7 +135,7 @@ NotifyAccess=main
 Group=rackforge
 ExecStart={executable} supervise {config_target}
 RuntimeDirectory={prefix}
-RuntimeDirectoryMode=2770
+RuntimeDirectoryMode=2775
 Restart=always
 RestartSec=1
 TimeoutStartSec=120
@@ -192,7 +196,7 @@ def check(root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["prepare", "check", "stop", "serve-feed"])
+    parser.add_argument("operation", choices=["prepare", "check", "stop", "cleanup", "serve-feed"])
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--payload", type=Path)
     parser.add_argument("--test-agent", type=Path)
@@ -207,6 +211,15 @@ def main():
         check(root)
     elif args.operation == "stop":
         stop(root)
+    elif args.operation == "cleanup":
+        assert (root / ".rackforge-update-test").read_text() == "rackforge-managed-update-test\n", "Refusing to clean an unmarked directory"
+        stop(root)
+        units = [str(Path("/etc/systemd/system") / f"{root.name}-{suffix}") for suffix in SUFFIXES + ["installer.service"]]
+        run("sudo", "-n", "rm", "-f", "--", *units,
+            str(Path("/etc/rackforge-updater-tests") / f"{root.name}.json"),
+            str(Path("/usr/libexec") / f"{root.name}-agent"))
+        run("sudo", "-n", "systemctl", "daemon-reload")
+        shutil.rmtree(root)
     else:
         class Handler(SimpleHTTPRequestHandler):
             def __init__(self, *a, **kw):

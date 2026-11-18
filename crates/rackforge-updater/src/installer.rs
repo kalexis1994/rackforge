@@ -205,14 +205,18 @@ impl Services for SystemServices {
                     "Some managed services are not active"
                 );
                 if units.contains(&format!("{}-web.service", self.config.service_prefix)) {
+                    let port = fs::read_to_string(self.config.root.join("config/rackforge.toml"))
+                        .ok()
+                        .and_then(|text| toml::from_str::<toml::Value>(&text).ok())
+                        .and_then(|doc| doc.get("web")?.get("port")?.as_integer())
+                        .and_then(|port| u16::try_from(port).ok())
+                        .filter(|port| *port != 0)
+                        .unwrap_or(self.config.web_port);
                     let mut response = ureq::Agent::config_builder()
                         .timeout_global(Some(Duration::from_secs(2)))
                         .build()
                         .new_agent()
-                        .get(format!(
-                            "http://127.0.0.1:{}/api/v1/health",
-                            self.config.web_port
-                        ))
+                        .get(format!("http://127.0.0.1:{}/api/v1/health", port))
                         .call()?;
                     let mut bytes = Vec::new();
                     response
